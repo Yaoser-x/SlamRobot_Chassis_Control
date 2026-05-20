@@ -1,0 +1,30 @@
+# CMake build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Keil / embedded IDE generated outputs
+Debug/
+Release/
+Objects/
+Listings/
+*.uvguix.*
+*.uvoptx
+*.uvprojx.bak
+*.map
+*.hex
+*.bin
+*.elf
+*.axf
+*.lst
+
+# Editor / OS noise
+.vscode/
+.vs/
+.idea/
+*.swp
+*.tmp
+Thumbs.db
+desktop.ini
