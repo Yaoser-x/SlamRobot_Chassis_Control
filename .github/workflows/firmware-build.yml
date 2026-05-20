@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install toolchain
         run: |
@@ -29,7 +29,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
-            gcc-arm-none-eabi
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
 
       - name: Configure ${{ matrix.preset }}
         run: cmake --preset ${{ matrix.preset }}
@@ -38,7 +39,7 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }}
 
       - name: Upload ${{ matrix.preset }} artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.preset }}
           if-no-files-found: error

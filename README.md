@@ -19,7 +19,7 @@ STM32F407XX_FLASH.ld   Flash 链接脚本
 
 - CMake 3.22 或更高版本
 - Ninja
-- GNU Arm Embedded Toolchain，命令需可通过 `arm-none-eabi-gcc` 访问
+- GNU Arm Embedded Toolchain，命令需可通过 `arm-none-eabi-gcc` 访问，并包含 newlib / nano specs 支持
 
 本地已验证环境示例：
 
