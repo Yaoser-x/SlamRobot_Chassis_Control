@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "chassis_tasks.h"
 
 /* USER CODE END Includes */
 
@@ -35,6 +36,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define FREERTOS_FATAL_ASSERT          1UL
+#define FREERTOS_FATAL_STACK_OVERFLOW  2UL
+#define FREERTOS_FATAL_MALLOC_FAILED   3UL
+#define FREERTOS_FATAL_TASK_CREATE     4UL
 
 /* USER CODE END PD */
 
@@ -45,6 +50,30 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+volatile uint32_t freertos_fatal_reason;
+volatile uint32_t freertos_fatal_line;
+volatile const char *freertos_fatal_file;
+
+osThreadId_t usart1DebugTaskHandle;
+const osThreadAttr_t usart1DebugTask_attributes = {
+  .name = "debugTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
+
+osThreadId_t ps2TaskHandle;
+const osThreadAttr_t ps2Task_attributes = {
+  .name = "ps2Task",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t ledTaskHandle;
+const osThreadAttr_t ledTask_attributes = {
+  .name = "ledTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
 
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
@@ -94,11 +123,12 @@ osThreadId_t espTaskHandle;
 const osThreadAttr_t espTask_attributes = {
   .name = "espTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+static void FreeRtos_FatalStop(uint32_t reason, const char *file, uint32_t line);
 
 /* USER CODE END FunctionPrototypes */
 
@@ -117,11 +147,26 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName);
 void vApplicationMallocFailedHook(void);
 
 /* USER CODE BEGIN 4 */
+static void FreeRtos_FatalStop(uint32_t reason, const char *file, uint32_t line)
+{
+  freertos_fatal_reason = reason;
+  freertos_fatal_file = file;
+  freertos_fatal_line = line;
+  DRV_SLEEP_ALL_GPIO_Port->BSRR = ((uint32_t)DRV_SLEEP_ALL_Pin << 16U);
+  __disable_irq();
+  for (;;)
+  {
+    __NOP();
+  }
+}
+
 void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
 {
    /* Run time stack overflow checking is performed if
    configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
    called if a stack overflow is detected. */
+  (void)xTask;
+  FreeRtos_FatalStop(FREERTOS_FATAL_STACK_OVERFLOW, (const char *)pcTaskName, 0U);
 }
 /* USER CODE END 4 */
 
@@ -138,8 +183,16 @@ void vApplicationMallocFailedHook(void)
    FreeRTOSConfig.h, and the xPortGetFreeHeapSize() API function can be used
    to query the size of free heap space that remains (although it does not
    provide information on how the remaining heap might be fragmented). */
+  FreeRtos_FatalStop(FREERTOS_FATAL_MALLOC_FAILED, 0, 0U);
 }
 /* USER CODE END 5 */
+
+/* USER CODE BEGIN 6 */
+void vApplicationAssertHook(const char *file, unsigned long line)
+{
+  FreeRtos_FatalStop(FREERTOS_FATAL_ASSERT, file, (uint32_t)line);
+}
+/* USER CODE END 6 */
 
 /**
   * @brief  FreeRTOS initialization
@@ -148,6 +201,7 @@ void vApplicationMallocFailedHook(void)
   */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
+  ChassisTasks_InitHardware();
 
   /* USER CODE END Init */
 
@@ -190,11 +244,26 @@ void MX_FREERTOS_Init(void) {
   espTaskHandle = osThreadNew(StartTask07, NULL, &espTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  usart1DebugTaskHandle = osThreadNew(Task_Usart1DebugConsole, NULL, &usart1DebugTask_attributes);
+  ps2TaskHandle = osThreadNew(Task_Ps2, NULL, &ps2Task_attributes);
+  ledTaskHandle = osThreadNew(Task_Led, NULL, &ledTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
+  if (defaultTaskHandle == NULL ||
+      safetyTaskHandle == NULL ||
+      motorTaskHandle == NULL ||
+      rpiCommTaskHandle == NULL ||
+      imuTaskHandle == NULL ||
+      lineTaskHandle == NULL ||
+      espTaskHandle == NULL ||
+      usart1DebugTaskHandle == NULL ||
+      ps2TaskHandle == NULL ||
+      ledTaskHandle == NULL)
+  {
+    FreeRtos_FatalStop(FREERTOS_FATAL_TASK_CREATE, __FILE__, __LINE__);
+  }
   /* USER CODE END RTOS_EVENTS */
 
 }
@@ -227,11 +296,7 @@ void StartDefaultTask(void *argument)
 void StartTask02(void *argument)
 {
   /* USER CODE BEGIN StartTask02 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  Task_Safety(argument);
   /* USER CODE END StartTask02 */
 }
 
@@ -245,11 +310,7 @@ void StartTask02(void *argument)
 void StartTask03(void *argument)
 {
   /* USER CODE BEGIN StartTask03 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  Task_MotorControl(argument);
   /* USER CODE END StartTask03 */
 }
 
@@ -263,11 +324,7 @@ void StartTask03(void *argument)
 void StartTask04(void *argument)
 {
   /* USER CODE BEGIN StartTask04 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  Task_RpiComm(argument);
   /* USER CODE END StartTask04 */
 }
 
@@ -281,11 +338,7 @@ void StartTask04(void *argument)
 void StartTask05(void *argument)
 {
   /* USER CODE BEGIN StartTask05 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  Task_Imu(argument);
   /* USER CODE END StartTask05 */
 }
 
@@ -299,11 +352,7 @@ void StartTask05(void *argument)
 void StartTask06(void *argument)
 {
   /* USER CODE BEGIN StartTask06 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  Task_Line(argument);
   /* USER CODE END StartTask06 */
 }
 
@@ -317,11 +366,7 @@ void StartTask06(void *argument)
 void StartTask07(void *argument)
 {
   /* USER CODE BEGIN StartTask07 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  Task_Esp12f(argument);
   /* USER CODE END StartTask07 */
 }
 
@@ -329,4 +374,3 @@ void StartTask07(void *argument)
 /* USER CODE BEGIN Application */
 
 /* USER CODE END Application */
-

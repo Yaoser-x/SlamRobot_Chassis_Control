@@ -53,7 +53,7 @@ void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, PS2_CLK_Pin|PS2_CS_Pin|PS2_DI_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOE, PS2_DI_Pin|PS2_CS_Pin|PS2_CLK_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, TEST_LED_Pin|DRV_SLEEP_ALL_Pin, GPIO_PIN_RESET);
@@ -62,17 +62,11 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, ESP_EN_Pin|ESP_RST_Pin|IMU_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LINE_SET_GPIO_Port, LINE_SET_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(ESP_IO0_GPIO_Port, ESP_IO0_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : PS2_CLK_Pin PS2_CS_Pin PS2_DI_Pin TEST_LED_Pin
+  /*Configure GPIO pins : PS2_DI_Pin PS2_CS_Pin PS2_CLK_Pin TEST_LED_Pin
                            DRV_SLEEP_ALL_Pin */
-  GPIO_InitStruct.Pin = PS2_CLK_Pin|PS2_CS_Pin|PS2_DI_Pin|TEST_LED_Pin
+  GPIO_InitStruct.Pin = PS2_DI_Pin|PS2_CS_Pin|PS2_CLK_Pin|TEST_LED_Pin
                           |DRV_SLEEP_ALL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -104,19 +98,12 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LINE_SET_Pin */
-  GPIO_InitStruct.Pin = LINE_SET_Pin;
+  /*Configure GPIO pin : ESP_IO0_Pin */
+  GPIO_InitStruct.Pin = ESP_IO0_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LINE_SET_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : LINE_EN_Pin ESP_IO0_Pin */
-  GPIO_InitStruct.Pin = LINE_EN_Pin|ESP_IO0_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+  HAL_GPIO_Init(ESP_IO0_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : IMU_INT1_Pin */
   GPIO_InitStruct.Pin = IMU_INT1_Pin;

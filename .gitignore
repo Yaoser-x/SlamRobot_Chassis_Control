@@ -1,15 +1,19 @@
 # CMake build outputs
 build/
+build-*/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
 compile_commands.json
+Testing/
+CTestTestfile.cmake
+install_manifest.txt
 
 # Keil / embedded IDE generated outputs
-Debug/
-Release/
-Objects/
-Listings/
+/Debug/
+/Release/
+/Objects/
+/Listings/
 *.uvguix.*
 *.uvoptx
 *.uvprojx.bak
@@ -19,12 +23,28 @@ Listings/
 *.elf
 *.axf
 *.lst
+*.dis
+*.su
+*.o
+*.obj
+*.d
+*.dep
+
+# STM32 / debug tooling local state
+.settings/
+.metadata/
+*.launch
+*.stldr
+*.ioc.bak
 
 # Editor / OS noise
 .vscode/
 .vs/
 .idea/
 *.swp
+*.swo
 *.tmp
+*.log
+*.bak
 Thumbs.db
 desktop.ini

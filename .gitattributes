@@ -1,0 +1,20 @@
+# Keep generated STM32/HAL sources stable on Windows checkouts.
+* text=auto eol=lf
+
+# Windows command scripts should stay CRLF when added later.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets and firmware blobs.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.elf binary
+*.bin binary
+*.hex binary
+*.axf binary

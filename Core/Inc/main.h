@@ -57,14 +57,14 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define PS2_CLK_Pin GPIO_PIN_2
-#define PS2_CLK_GPIO_Port GPIOE
-#define PS2_CS_Pin GPIO_PIN_3
-#define PS2_CS_GPIO_Port GPIOE
-#define PS2_DO_Pin GPIO_PIN_4
-#define PS2_DO_GPIO_Port GPIOE
-#define PS2_DI_Pin GPIO_PIN_5
+#define PS2_DI_Pin GPIO_PIN_2
 #define PS2_DI_GPIO_Port GPIOE
+#define PS2_DO_Pin GPIO_PIN_3
+#define PS2_DO_GPIO_Port GPIOE
+#define PS2_CS_Pin GPIO_PIN_4
+#define PS2_CS_GPIO_Port GPIOE
+#define PS2_CLK_Pin GPIO_PIN_5
+#define PS2_CLK_GPIO_Port GPIOE
 #define TEST_LED_Pin GPIO_PIN_6
 #define TEST_LED_GPIO_Port GPIOE
 #define M1_CURRENT_Pin GPIO_PIN_0
@@ -135,10 +135,6 @@ void Error_Handler(void);
 #define LINE_TX_GPIO_Port GPIOC
 #define LINE_RX_Pin GPIO_PIN_11
 #define LINE_RX_GPIO_Port GPIOC
-#define LINE_SET_Pin GPIO_PIN_12
-#define LINE_SET_GPIO_Port GPIOC
-#define LINE_EN_Pin GPIO_PIN_2
-#define LINE_EN_GPIO_Port GPIOD
 #define ESP_TX_Pin GPIO_PIN_5
 #define ESP_TX_GPIO_Port GPIOD
 #define ESP_RX_Pin GPIO_PIN_6
