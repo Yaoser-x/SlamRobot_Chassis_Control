@@ -64,6 +64,14 @@ extern "C" {
 #define CHASSIS_PS2_PERIOD_MS               20U
 #define CHASSIS_ESP12F_PERIOD_MS            5U
 #define CHASSIS_LINE_PERIOD_MS              5U
+
+/* 巡线跟踪控制参数 */
+#define LINE_DEFAULT_ENABLED                0U
+#define LINE_SPEED_MPS                      0.15f
+#define LINE_KP                             2.5f
+#define LINE_ANGULAR_MAX_RPS                2.0f
+#define LINE_SENSOR_TIMEOUT_MS              50U
+#define LINE_DETECT_THRESHOLD_COUNT         1U
 #define UPPER_UART_TASK_PERIOD_MS           5U
 #define UPPER_UART_STATUS_PERIOD_MS         50U
 #define ESP12F_STATUS_PERIOD_MS             100U
@@ -92,6 +100,7 @@ extern "C" {
 #define PS2_MACRO_R1_MASK                   0x08U
 #define PS2_MACRO_L2_MASK                   0x01U
 #define PS2_MACRO_R2_MASK                   0x02U
+#define PS2_LINE_TOGGLE_MASK                0x10U
 
 #define CHASSIS_SPEED_RAMP_MPS2             1.0f
 #define CHASSIS_ANGULAR_RAMP_RPS2           10.0f

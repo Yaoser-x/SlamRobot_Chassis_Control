@@ -10,6 +10,7 @@
 #include "esp12f_comm.h"
 #include "esp12f_flash_bridge.h"
 #include "imu_bmi270.h"
+#include "line_control.h"
 #include "line_uart.h"
 #include "motor_driver.h"
 #include "ps2_control.h"
@@ -32,9 +33,11 @@
 
 static char rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t rx_len;
-static uint8_t stream_enabled;
+static uint8_t stream_mode;
 static uint8_t debug_velocity_enabled;
 static chassis_cmd_t debug_velocity_cmd;
+static uint8_t log_filter_count;
+static uint8_t log_filter_order[8];
 static uint8_t rx_byte;
 static volatile uint8_t rx_ring[DEBUG_CONSOLE_RX_RING_SIZE];
 static volatile uint16_t rx_head;
@@ -83,20 +86,208 @@ static uint8_t DebugConsole_MotorTestAllowed(void)
           ControlManager_IsFaultStop() == 0U) ? 1U : 0U;
 }
 
+/* ────────── 日志字段分组 ────────── */
+
+typedef enum
+{
+  LOG_FLD_MOTOR = 0,
+  LOG_FLD_ADC,
+  LOG_FLD_IMU,
+  LOG_FLD_ERRORS,
+  LOG_FLD_SOURCE,
+  LOG_FLD_PS2,
+  LOG_FLD_LINE,
+  LOG_FLD_ESP,
+  LOG_FLD_COUNT
+} log_field_id_t;
+
+static const char *const log_field_names[LOG_FLD_COUNT] = {
+  "motor", "adc", "imu", "errors", "source", "ps2", "line", "esp"
+};
+
+static const char *const log_field_headers[LOG_FLD_COUNT] = {
+  "m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm",
+  "vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma",
+  "imu_online,imu_chip,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg",
+  "errors",
+  "source",
+  "ps2_ok,ps2_fail",
+  "line_bytes,line_frames",
+  "esp_rx,esp_tx"
+};
+
+static void DebugConsole_PrintFilteredHeader(void)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  size_t pos = 0U;
+  uint8_t i;
+
+  pos += (size_t)snprintf(tx + pos, sizeof(tx) - pos, "t_ms");
+  for (i = 0U; i < log_filter_count; ++i)
+  {
+    pos += (size_t)snprintf(tx + pos, sizeof(tx) - pos, ",%s", log_field_headers[log_filter_order[i]]);
+  }
+  pos += (size_t)snprintf(tx + pos, sizeof(tx) - pos, "\r\n");
+  DebugConsole_Write(tx);
+}
+
+static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t field)
+{
+  adc_monitor_state_t adc;
+  encoder_state_t enc;
+  chassis_control_state_t cs;
+  system_monitor_state_t mon;
+  imu_bmi270_state_t imu;
+  ps2_control_state_t ps2;
+  line_uart_state_t line;
+  esp12f_comm_state_t esp;
+
+  /* 惰性获取：仅需要的字段才获取状态快照 */
+  switch (field)
+  {
+    case LOG_FLD_MOTOR:
+      EncoderDriver_GetState(&enc);
+      ChassisControl_GetState(&cs);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%ld,%ld,%ld,%ld,%d,%d,%d,%d",
+        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M1]),
+        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M2]),
+        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M3]),
+        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M4]),
+        cs.motor_output_permille[MOTOR_ID_M1],
+        cs.motor_output_permille[MOTOR_ID_M2],
+        cs.motor_output_permille[MOTOR_ID_M3],
+        cs.motor_output_permille[MOTOR_ID_M4]);
+      break;
+
+    case LOG_FLD_ADC:
+      AdcMonitor_GetState(&adc);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%ld,%ld,%ld,%ld,%ld",
+        (long)DebugConsole_Milli(adc.battery_voltage),
+        (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M1]),
+        (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M2]),
+        (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M3]),
+        (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M4]));
+      break;
+
+    case LOG_FLD_IMU:
+      ImuBmi270_GetState(&imu);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%u,%u,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld",
+        imu.online, imu.chip_id,
+        (long)DebugConsole_Milli(imu.accel_g[0]),
+        (long)DebugConsole_Milli(imu.accel_g[1]),
+        (long)DebugConsole_Milli(imu.accel_g[2]),
+        (long)DebugConsole_Milli(imu.gyro_corrected_dps[0]),
+        (long)DebugConsole_Milli(imu.gyro_corrected_dps[1]),
+        (long)DebugConsole_Milli(imu.gyro_corrected_dps[2]),
+        (long)DebugConsole_Milli(imu.gyro_filtered_dps[0]),
+        (long)DebugConsole_Milli(imu.gyro_filtered_dps[1]),
+        (long)DebugConsole_Milli(imu.gyro_filtered_dps[2]),
+        (long)DebugConsole_Milli(imu.roll_deg),
+        (long)DebugConsole_Milli(imu.pitch_deg),
+        (long)DebugConsole_Milli(imu.yaw_deg));
+      break;
+
+    case LOG_FLD_ERRORS:
+      SystemMonitor_GetState(&mon);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%lu", (unsigned long)mon.error_flags);
+      break;
+
+    case LOG_FLD_SOURCE:
+      SystemMonitor_GetState(&mon);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%u", mon.control_mode);
+      break;
+
+    case LOG_FLD_PS2:
+      Ps2Control_GetState(&ps2);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%lu,%lu", (unsigned long)ps2.rx_ok_count, (unsigned long)ps2.rx_fail_count);
+      break;
+
+    case LOG_FLD_LINE:
+      LineUart_GetState(&line);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%lu,%lu", (unsigned long)line.rx_bytes, (unsigned long)line.rx_frames);
+      break;
+
+    case LOG_FLD_ESP:
+      Esp12fComm_GetState(&esp);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%lu,%lu", (unsigned long)esp.rx_frames, (unsigned long)esp.tx_frames);
+      break;
+
+    default:
+      break;
+  }
+  return pos;
+}
+
+static void DebugConsole_PrintFilteredLogFrame(uint32_t now_ms)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  size_t pos = 0U;
+  uint8_t i;
+
+  pos += (size_t)snprintf(tx + pos, sizeof(tx) - pos, "%lu", (unsigned long)now_ms);
+  for (i = 0U; i < log_filter_count; ++i)
+  {
+    tx[pos++] = ',';
+    pos = DebugConsole_WriteFieldData(tx, pos, (log_field_id_t)log_filter_order[i]);
+  }
+  pos += (size_t)snprintf(tx + pos, sizeof(tx) - pos, "\r\n");
+  DebugConsole_Write(tx);
+}
+
+static void DebugConsole_PrintLineStatus(void)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  line_sensor_data_t sensor;
+  line_control_state_t lc_state;
+  line_uart_state_t line_state;
+
+  LineUart_GetSensorData(&sensor);
+  LineControl_GetState(&lc_state);
+  LineUart_GetState(&line_state);
+
+  (void)snprintf(tx, sizeof(tx),
+    "LINE enabled=%u active=%u pos=%.2f err=%.2f lx=%.3f az=%.3f det=%u\r\n"
+    "LINE st=%u%u%u%u%u%u%u%u an=%u,%u,%u,%u,%u,%u,%u,%u\r\n"
+    "LINE rx_bytes=%lu frames=%lu proto_err=%lu ovf=%lu\r\n",
+    lc_state.globally_enabled, lc_state.tracking_active,
+    (double)lc_state.line_position, (double)lc_state.error,
+    (double)lc_state.linear_x, (double)lc_state.angular_z,
+    lc_state.detected_count,
+    sensor.state[0], sensor.state[1], sensor.state[2], sensor.state[3],
+    sensor.state[4], sensor.state[5], sensor.state[6], sensor.state[7],
+    sensor.analog[0], sensor.analog[1], sensor.analog[2], sensor.analog[3],
+    sensor.analog[4], sensor.analog[5], sensor.analog[6], sensor.analog[7],
+    (unsigned long)line_state.rx_bytes, (unsigned long)line_state.rx_frames,
+    (unsigned long)line_state.rx_protocol_errors, (unsigned long)line_state.overflow_count);
+  DebugConsole_Write(tx);
+}
+
 static void DebugConsole_PrintHelp(void)
 {
   DebugConsole_Write(
     "\r\nF407 V2 debug console\r\n"
-    "help/status/header/log 0|1\r\n"
-    "rtos             heap and task stack status\r\n"
-    "motor L R        side open-loop permille\r\n"
-    "left P/right P   side open-loop shortcut\r\n"
-    "m1 F R ... m4 F R raw IN1/IN2 permille\r\n"
-    "raw LF LR RF RR  left/right pair raw inputs\r\n"
-    "vel V [W]        closed-loop mm/s, optional mrad/s\r\n"
-    "stop             clear tests and commands\r\n"
-    "estop 0|1        clear/set emergency stop\r\n"
-    "clearfault       clear latched overcurrent/driver faults\r\n"
+    "help/status/header\r\n"
+    "log 0                  stop streaming\r\n"
+    "log 1 [fld...]         start CSV stream, optional field filter\r\n"
+    "                       fields: motor adc imu errors source ps2 line esp\r\n"
+    "rtos                   heap and task stack status\r\n"
+    "motor L R              side open-loop permille\r\n"
+    "left P/right P         side open-loop shortcut\r\n"
+    "m1 F R ... m4 F R      raw IN1/IN2 permille\r\n"
+    "raw LF LR RF RR         left/right pair raw inputs\r\n"
+    "vel V [W]              closed-loop mm/s, optional mrad/s\r\n"
+    "stop                   clear tests and commands\r\n"
+    "estop 0|1              clear/set emergency stop\r\n"
+    "clearfault             clear latched overcurrent/driver faults\r\n"
+    "line/line on/off       line sensor raw data / toggle control\r\n"
     "imutest/imudiag/imuinit/imucal [n]/imucalclear/imu 0|1\r\n"
     "espreset/espboot 0|1\r\n"
     "espflash on|off|status bridge USART1 to ESP12F\r\n"
@@ -405,16 +596,78 @@ static void DebugConsole_HandleLine(char *line)
   {
     DebugConsole_PrintHeader();
   }
-  else if (sscanf(line, "log %d", &value) == 1)
+  else if (strncmp(line, "log ", 4) == 0)
   {
-    stream_enabled = (value != 0) ? 1U : 0U;
-    if (stream_enabled != 0U)
+    char *token = strtok(line + 4, " \t");
+
+    if (token == 0)
     {
-      DebugConsole_PrintHeader();
+      DebugConsole_Write("usage: log 0 | log 1 [field...]\r\n");
     }
     else
     {
-      DebugConsole_Write("log off\r\n");
+      int log_on = atoi(token);
+
+      if (log_on == 0)
+      {
+        stream_mode = 0U;
+        log_filter_count = 0U;
+        DebugConsole_Write("log off\r\n");
+      }
+      else
+      {
+        token = strtok(0, " \t");
+        if (token == 0)
+        {
+          /* log 1（无过滤）：全字段，兼容旧行为 */
+          stream_mode = 1U;
+          log_filter_count = 0U;
+          DebugConsole_PrintHeader();
+        }
+        else
+        {
+          /* log 1 field1 field2 ...：仅输出指定字段 */
+          uint8_t count = 0U;
+          uint8_t order[8];
+          uint8_t ok = 1U;
+
+          while (token != 0 && count < 8U)
+          {
+            uint8_t j;
+            int8_t found = -1;
+            for (j = 0U; j < LOG_FLD_COUNT; ++j)
+            {
+              if (strcmp(token, log_field_names[j]) == 0)
+              {
+                found = (int8_t)j;
+                break;
+              }
+            }
+            if (found < 0)
+            {
+              ok = 0U;
+              break;
+            }
+            order[count++] = (uint8_t)found;
+            token = strtok(0, " \t");
+          }
+
+          if (ok == 0U || count == 0U)
+          {
+            DebugConsole_Write("unknown field, valid: motor adc imu errors source ps2 line esp\r\n");
+          }
+          else
+          {
+            stream_mode = 2U;
+            log_filter_count = count;
+            for (uint8_t k = 0U; k < count; ++k)
+            {
+              log_filter_order[k] = order[k];
+            }
+            DebugConsole_PrintFilteredHeader();
+          }
+        }
+      }
     }
   }
   else if (sscanf(line, "motor %d %d", &left, &right) == 2)
@@ -592,7 +845,7 @@ static void DebugConsole_HandleLine(char *line)
   }
   else if (strcmp(line, "espflash on") == 0)
   {
-    stream_enabled = 0U;
+    stream_mode = 0U;
     debug_velocity_enabled = 0U;
     DebugConsole_Write("esp12f flash bridge on: close this terminal and use esptool/Arduino at 115200\r\n");
     Esp12fFlashBridge_Enable();
@@ -605,6 +858,20 @@ static void DebugConsole_HandleLine(char *line)
   else if (strcmp(line, "espflash status") == 0)
   {
     DebugConsole_PrintEspFlashStatus();
+  }
+  else if (strcmp(line, "line") == 0)
+  {
+    DebugConsole_PrintLineStatus();
+  }
+  else if (strcmp(line, "line on") == 0)
+  {
+    LineControl_Enable(1U);
+    DebugConsole_Write("line tracking enabled\r\n");
+  }
+  else if (strcmp(line, "line off") == 0)
+  {
+    LineControl_Enable(0U);
+    DebugConsole_Write("line tracking disabled\r\n");
   }
   else
   {
@@ -645,7 +912,7 @@ static void DebugConsole_PollRx(void)
 void Usart1DebugConsole_Init(void)
 {
   rx_len = 0U;
-  stream_enabled = 0U;
+  stream_mode = 0U;
   debug_velocity_enabled = 0U;
   debug_velocity_cmd = (chassis_cmd_t){0};
   rx_head = 0U;
@@ -709,10 +976,17 @@ void Task_Usart1DebugConsole(void *argument)
       }
     }
 
-    if ((stream_enabled != 0U) && ((now_ms - last_log_ms) >= DEBUG_CONSOLE_LOG_PERIOD_MS))
+    if ((stream_mode != 0U) && ((now_ms - last_log_ms) >= DEBUG_CONSOLE_LOG_PERIOD_MS))
     {
       last_log_ms = now_ms;
-      DebugConsole_PrintLogFrame(now_ms);
+      if (stream_mode == 2U)
+      {
+        DebugConsole_PrintFilteredLogFrame(now_ms);
+      }
+      else
+      {
+        DebugConsole_PrintLogFrame(now_ms);
+      }
     }
 
     osDelay(DEBUG_CONSOLE_TASK_PERIOD_MS);

@@ -25,6 +25,7 @@ typedef struct
   float angular_z;
   uint32_t rx_ok_count;
   uint32_t rx_fail_count;
+  uint8_t  line_tracking_enabled;
 } ps2_control_state_t;
 
 void Ps2Control_Init(void);

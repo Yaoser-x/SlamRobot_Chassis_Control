@@ -1,55 +1,176 @@
 #include "line_uart.h"
 
+#include "chassis_config.h"
+#include "cmsis_os2.h"
 #include "usart.h"
 
 #define LINE_UART_RX_BUFFER_SIZE 128U
 
-static uint8_t line_rx_dma_buffer[LINE_UART_RX_BUFFER_SIZE];
+/* DMA 循环缓冲 */
+static uint8_t  line_rx_dma_buffer[LINE_UART_RX_BUFFER_SIZE];
 static uint16_t line_rx_read_pos;
-static line_uart_state_t line_state;
-static uint8_t frame_buf[sizeof(line_state.last_frame)];
-static uint16_t frame_len;
 
-void LineUart_Init(void)
+/* 监控/调试状态 */
+static line_uart_state_t line_state;
+
+/* 协议帧解析器 */
+typedef enum
 {
-  line_rx_read_pos = 0U;
-  frame_len = 0U;
-  line_state = (line_uart_state_t){0};
-  (void)HAL_UART_Receive_DMA(&huart4, line_rx_dma_buffer, LINE_UART_RX_BUFFER_SIZE);
+  LINE_RX_WAIT_HEAD0 = 0,
+  LINE_RX_WAIT_HEAD1,
+  LINE_RX_WAIT_CMD,
+  LINE_RX_WAIT_DATA_LEN,
+  LINE_RX_WAIT_DATA,
+  LINE_RX_WAIT_CHECKSUM
+} line_rx_state_t;
+
+static line_rx_state_t   line_rx_state;
+static uint8_t           line_frame_buf[LINE_SENSOR_FRAME_LEN];
+static uint8_t           line_frame_index;
+static uint8_t           line_data_len;
+static uint8_t           line_data_idx;
+
+/* 最近一次成功解析的传感器数据 */
+static line_sensor_data_t line_sensor_data;
+
+/* ---------- 校验和 ---------- */
+
+static uint8_t LineUart_ComputeChecksum(const uint8_t *buf, uint8_t data_len)
+{
+  uint16_t sum = 0U;
+  uint8_t  end = (uint8_t)(2U + 1U + data_len + 1U); /* cmd + len + data + 1 = data_len + 4 */
+
+  for (uint8_t i = 2U; i < end; ++i)
+  {
+    sum += buf[i];
+  }
+  return (uint8_t)(~sum);
 }
+
+/* ---------- 帧解析 ---------- */
 
 static void LineUart_ProcessByte(uint8_t byte)
 {
   line_state.rx_bytes++;
-  if (byte == '\n' || byte == '\r')
-  {
-    if (frame_len > 0U)
-    {
-      uint16_t copy_len = frame_len;
-      if (copy_len > sizeof(line_state.last_frame))
-      {
-        copy_len = sizeof(line_state.last_frame);
-      }
-      for (uint16_t i = 0U; i < copy_len; ++i)
-      {
-        line_state.last_frame[i] = frame_buf[i];
-      }
-      line_state.last_frame_len = copy_len;
-      line_state.rx_frames++;
-      frame_len = 0U;
-    }
-    return;
-  }
 
-  if (frame_len < sizeof(frame_buf))
+  switch (line_rx_state)
   {
-    frame_buf[frame_len++] = byte;
+    case LINE_RX_WAIT_HEAD0:
+      if (byte == LINE_SENSOR_HEADER_0)
+      {
+        line_frame_buf[0] = byte;
+        line_frame_index = 1U;
+        line_rx_state = LINE_RX_WAIT_HEAD1;
+      }
+      break;
+
+    case LINE_RX_WAIT_HEAD1:
+      if (byte == LINE_SENSOR_HEADER_1)
+      {
+        line_frame_buf[1] = byte;
+        line_frame_index = 2U;
+        line_rx_state = LINE_RX_WAIT_CMD;
+      }
+      else if (byte != LINE_SENSOR_HEADER_0)
+      {
+        line_rx_state = LINE_RX_WAIT_HEAD0;
+      }
+      /* else: byte == 0x55, stay in WAIT_HEAD1 (re-sync on overlapping header) */
+      break;
+
+    case LINE_RX_WAIT_CMD:
+      line_frame_buf[2] = byte;
+      line_frame_index = 3U;
+      line_rx_state = LINE_RX_WAIT_DATA_LEN;
+      break;
+
+    case LINE_RX_WAIT_DATA_LEN:
+      line_frame_buf[3] = byte;
+      line_data_len = byte;
+      if (line_data_len > (LINE_SENSOR_FRAME_LEN - 5U))
+      {
+        /* 长度字段非法，丢弃并重新同步 */
+        line_state.rx_protocol_errors++;
+        line_rx_state = LINE_RX_WAIT_HEAD0;
+      }
+      else
+      {
+        line_data_idx = 0U;
+        line_frame_index = 4U;
+        line_rx_state = (line_data_len > 0U) ? LINE_RX_WAIT_DATA : LINE_RX_WAIT_CHECKSUM;
+      }
+      break;
+
+    case LINE_RX_WAIT_DATA:
+      line_frame_buf[line_frame_index++] = byte;
+      line_data_idx++;
+      if (line_data_idx >= line_data_len)
+      {
+        line_rx_state = LINE_RX_WAIT_CHECKSUM;
+      }
+      break;
+
+    case LINE_RX_WAIT_CHECKSUM:
+    {
+      uint8_t received_checksum = byte;
+      uint8_t expected = LineUart_ComputeChecksum(line_frame_buf, line_data_len);
+
+      if (received_checksum == expected)
+      {
+        uint8_t cmd = line_frame_buf[2];
+
+        if (cmd == LINE_SENSOR_CMD_ANALOG && line_data_len >= 16U)
+        {
+          /* 提取 8 通道数据 */
+          for (uint8_t ch = 0U; ch < LINE_SENSOR_CHANNELS; ++ch)
+          {
+            uint8_t base = (uint8_t)(4U + ch * 2U);
+            uint16_t raw = (uint16_t)line_frame_buf[base] | ((uint16_t)line_frame_buf[base + 1U] << 8);
+
+            line_sensor_data.analog[ch] = raw;
+            line_sensor_data.state[ch] = (raw < LINE_ANALOG_THRESHOLD) ? 1U : 0U;
+          }
+          line_sensor_data.timestamp_ms = osKernelGetTickCount();
+          line_sensor_data.valid = 1U;
+        }
+
+        line_state.rx_frames++;
+        line_state.last_frame_len = (uint16_t)(4U + line_data_len + 1U);
+        if (line_state.last_frame_len > sizeof(line_state.last_frame))
+        {
+          line_state.last_frame_len = (uint16_t)sizeof(line_state.last_frame);
+        }
+        for (uint16_t i = 0U; i < line_state.last_frame_len; ++i)
+        {
+          line_state.last_frame[i] = line_frame_buf[i];
+        }
+      }
+      else
+      {
+        line_state.rx_protocol_errors++;
+      }
+      line_rx_state = LINE_RX_WAIT_HEAD0;
+      break;
+    }
+
+    default:
+      line_rx_state = LINE_RX_WAIT_HEAD0;
+      break;
   }
-  else
-  {
-    line_state.overflow_count++;
-    frame_len = 0U;
-  }
+}
+
+/* ---------- 公开 API ---------- */
+
+void LineUart_Init(void)
+{
+  line_rx_read_pos = 0U;
+  line_rx_state = LINE_RX_WAIT_HEAD0;
+  line_frame_index = 0U;
+  line_data_len = 0U;
+  line_data_idx = 0U;
+  line_state = (line_uart_state_t){0};
+  line_sensor_data = (line_sensor_data_t){0};
+  (void)HAL_UART_Receive_DMA(&huart4, line_rx_dma_buffer, LINE_UART_RX_BUFFER_SIZE);
 }
 
 void LineUart_Update(void)
@@ -84,4 +205,34 @@ void LineUart_GetState(line_uart_state_t *state)
   {
     *state = line_state;
   }
+}
+
+uint8_t LineUart_GetSensorData(line_sensor_data_t *data)
+{
+  if (data != 0)
+  {
+    *data = line_sensor_data;
+    line_sensor_data.valid = 0U;
+    return data->valid;
+  }
+  return 0U;
+}
+
+void LineUart_InitSensor(void)
+{
+  /*
+   * 设置传感器为手动模式（Mode 0），由主机周期性查询。
+   * 协议：上电后发送单字节 0x00 进入手动模式，
+   *       之后用 LineUart_RequestAnalog() 发送 0x02 请求 21 字节模拟量帧。
+   * 参考：HiWonder Arduino UART 例程
+   */
+  uint8_t cmd = 0x00U;
+  (void)HAL_UART_Transmit(&huart4, &cmd, 1U, 100U);
+}
+
+void LineUart_RequestAnalog(void)
+{
+  /* 发送 0x02 请求模拟量帧，传感器返回 21 字节: 0x55 0xAA 0x02 0x10 CH1..CH8 CHECKSUM */
+  uint8_t query = 0x02U;
+  (void)HAL_UART_Transmit(&huart4, &query, 1U, 100U);
 }

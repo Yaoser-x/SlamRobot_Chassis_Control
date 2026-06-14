@@ -10,6 +10,7 @@
 #include "esp12f_flash_bridge.h"
 #include "imu_bmi270.h"
 #include "led_status.h"
+#include "line_control.h"
 #include "line_uart.h"
 #include "ps2_control.h"
 #include "system_monitor.h"
@@ -27,6 +28,8 @@ void ChassisTasks_InitHardware(void)
   ChassisControl_Init();
   UpperUart_Init();
   LineUart_Init();
+  LineUart_InitSensor();
+  LineControl_Init();
   Ps2Control_Init();
   Esp12fComm_Init();
   Esp12fFlashBridge_Init();
@@ -90,6 +93,8 @@ void Task_Line(void *argument)
   for (;;)
   {
     LineUart_Update();
+    LineUart_RequestAnalog();
+    LineControl_Update();
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_LINE, &next_wake, CHASSIS_LINE_PERIOD_MS);
   }
 }

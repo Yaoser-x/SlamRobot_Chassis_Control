@@ -13,7 +13,8 @@ typedef enum
   CONTROL_SOURCE_UPPER = 1,
   CONTROL_SOURCE_PS2 = 2,
   CONTROL_SOURCE_ESP12F = 3,
-  CONTROL_SOURCE_DEBUG = 4
+  CONTROL_SOURCE_DEBUG = 4,
+  CONTROL_SOURCE_LINE = 5
 } control_source_t;
 
 typedef enum

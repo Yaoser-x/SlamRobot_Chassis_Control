@@ -3,6 +3,7 @@
 #include "chassis_config.h"
 #include "cmsis_os2.h"
 #include "control_manager.h"
+#include "line_control.h"
 #include "main.h"
 
 #define PS2_FRAME_LEN 9U
@@ -498,6 +499,12 @@ void Ps2Control_Update(void)
   pressed_btn2 = (uint8_t)(sample.btn2 & (uint8_t)~last_btn2);
   last_btn2 = sample.btn2;
 
+  /* 巡线模式切换：三角键上升沿触发 */
+  if ((pressed_btn2 & PS2_LINE_TOGGLE_MASK) != 0U)
+  {
+    LineControl_Enable((LineControl_IsEnabled() == 0U) ? 1U : 0U);
+  }
+
   linear_x = Ps2Control_ClampFloat(linear_x, PS2_LINEAR_MAX_MPS);
   angular_z = Ps2Control_ClampFloat(angular_z, PS2_ANGULAR_MAX_RPS);
 
@@ -555,6 +562,7 @@ void Ps2Control_Update(void)
   next_state.macro_button = macro_button;
   next_state.linear_x = linear_x;
   next_state.angular_z = angular_z;
+  next_state.line_tracking_enabled = LineControl_IsEnabled();
   Ps2Control_CopyState(&ps2_state, &next_state);
 
   if (command_active == 0U)

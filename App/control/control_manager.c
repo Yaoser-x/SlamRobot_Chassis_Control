@@ -4,7 +4,7 @@
 #include "cmsis_os2.h"
 #include "main.h"
 
-static chassis_cmd_t source_cmds[CONTROL_SOURCE_DEBUG + 1U];
+static chassis_cmd_t source_cmds[CONTROL_SOURCE_LINE + 1U];
 static uint8_t emergency_stop;
 static uint8_t fault_stop;
 
@@ -39,7 +39,7 @@ static uint8_t ControlManager_KinematicsValid(void)
 
 void ControlManager_Init(void)
 {
-  for (uint8_t i = 0U; i <= CONTROL_SOURCE_DEBUG; ++i)
+  for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
   {
     source_cmds[i] = (chassis_cmd_t){0};
   }
@@ -52,7 +52,7 @@ void ControlManager_ClearCommand(void)
   uint32_t primask = __get_PRIMASK();
 
   __disable_irq();
-  for (uint8_t i = 0U; i <= CONTROL_SOURCE_DEBUG; ++i)
+  for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
   {
     source_cmds[i] = (chassis_cmd_t){0};
   }
@@ -63,7 +63,7 @@ void ControlManager_ClearSource(uint8_t source)
 {
   uint32_t primask;
 
-  if (source == CONTROL_SOURCE_NONE || source > CONTROL_SOURCE_DEBUG)
+  if (source == CONTROL_SOURCE_NONE || source > CONTROL_SOURCE_LINE)
   {
     return;
   }
@@ -85,7 +85,7 @@ control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
     {
       return CONTROL_COMMAND_REJECTED;
     }
-    if (sanitized.source == CONTROL_SOURCE_NONE || sanitized.source > CONTROL_SOURCE_DEBUG)
+    if (sanitized.source == CONTROL_SOURCE_NONE || sanitized.source > CONTROL_SOURCE_LINE)
     {
       return CONTROL_COMMAND_REJECTED;
     }
@@ -132,7 +132,7 @@ void ControlManager_SetEmergencyStop(uint8_t enabled)
 
   __disable_irq();
   emergency_stop = (enabled != 0U) ? 1U : 0U;
-  for (uint8_t i = 0U; i <= CONTROL_SOURCE_DEBUG; ++i)
+  for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
   {
     source_cmds[i] = (chassis_cmd_t){0};
   }
@@ -145,7 +145,7 @@ void ControlManager_SetFaultStop(uint8_t enabled)
 
   __disable_irq();
   fault_stop = (enabled != 0U) ? 1U : 0U;
-  for (uint8_t i = 0U; i <= CONTROL_SOURCE_DEBUG; ++i)
+  for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
   {
     source_cmds[i] = (chassis_cmd_t){0};
   }
@@ -158,6 +158,7 @@ uint8_t ControlManager_GetCommand(chassis_cmd_t *cmd, uint32_t now_ms)
     CONTROL_SOURCE_UPPER,
     CONTROL_SOURCE_PS2,
     CONTROL_SOURCE_ESP12F,
+    CONTROL_SOURCE_LINE,
     CONTROL_SOURCE_DEBUG,
   };
   uint32_t primask;

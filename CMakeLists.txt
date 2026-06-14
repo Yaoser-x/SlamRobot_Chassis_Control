@@ -64,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/imu/imu_bmi270_config.c
     BSP/led/led_status.c
     BSP/line/line_uart.c
+    BSP/line/line_control.c
     BSP/motor/motor_driver.c
     BSP/pid/pid_controller.c
     BSP/ps2/ps2_control.c

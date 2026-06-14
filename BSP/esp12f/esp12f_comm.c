@@ -7,6 +7,7 @@
 #include "encoder_driver.h"
 #include "esp12f_flash_bridge.h"
 #include "imu_bmi270.h"
+#include "line_control.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -63,6 +64,10 @@ static void Esp12fComm_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t 
   else if (cmd == UPPER_CMD_ESTOP && payload_len == UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN)
   {
     ControlManager_SetEmergencyStop(payload[0]);
+  }
+  else if (cmd == UPPER_CMD_LINE_CTRL && payload_len == UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN)
+  {
+    LineControl_Enable((payload[0] != 0U) ? 1U : 0U);
   }
 }
 
