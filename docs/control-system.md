@@ -91,6 +91,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 | **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `Esp12fFlashBridge_Update` + `Esp12fComm_Update`：ESP12F 协议收发与烧录桥 |
 | **debugTask** | `Task_Usart1DebugConsole` | BelowNormal | 10ms | `osDelay` | 1024W (4096B) | 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
 | **ledTask** | `Task_Led` | Low (osPriorityLow) | 50ms | `osDelayUntil` | 128W (512B) | `LedStatus_TaskStep`：TEST_LED 状态闪烁 |
+| **oledTask** | `Task_Oled` | Low (osPriorityLow) | 100ms | `osDelayUntil` | 256W (1024B) | `OLED_UI_Update`：SSD1306 OLED 三阶段 UI 刷新（欢迎/自检/运行） |
 | **defaultTask** | `StartDefaultTask` | Low (osPriorityLow) | 1ms | `osDelay` | 128W (512B) | 空闲保活（无实质工作） |
 
 ### 4.2 FreeRTOS 关键配置
@@ -115,6 +116,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 RTOS heap_free=XXXXXB heap_min=XXXXXB tick=XXXXX
 RTOS safety    state=X stack_free=XXXXB missed=X
 ...
+RTOS oled      state=X stack_free=XXXXB missed=X
 RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 ```
 

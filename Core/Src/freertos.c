@@ -75,6 +75,13 @@ const osThreadAttr_t ledTask_attributes = {
   .priority = (osPriority_t) osPriorityLow,
 };
 
+osThreadId_t oledTaskHandle;
+const osThreadAttr_t oledTask_attributes = {
+  .name = "oledTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -247,6 +254,7 @@ void MX_FREERTOS_Init(void) {
   usart1DebugTaskHandle = osThreadNew(Task_Usart1DebugConsole, NULL, &usart1DebugTask_attributes);
   ps2TaskHandle = osThreadNew(Task_Ps2, NULL, &ps2Task_attributes);
   ledTaskHandle = osThreadNew(Task_Led, NULL, &ledTask_attributes);
+  oledTaskHandle = osThreadNew(Task_Oled, NULL, &oledTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -260,7 +268,8 @@ void MX_FREERTOS_Init(void) {
       espTaskHandle == NULL ||
       usart1DebugTaskHandle == NULL ||
       ps2TaskHandle == NULL ||
-      ledTaskHandle == NULL)
+      ledTaskHandle == NULL ||
+      oledTaskHandle == NULL)
   {
     FreeRtos_FatalStop(FREERTOS_FATAL_TASK_CREATE, __FILE__, __LINE__);
   }

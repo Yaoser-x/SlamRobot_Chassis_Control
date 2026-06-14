@@ -10,6 +10,7 @@
 #include "esp12f_comm.h"
 #include "esp12f_flash_bridge.h"
 #include "imu_bmi270.h"
+#include "i2c.h"
 #include "line_control.h"
 #include "line_uart.h"
 #include "motor_driver.h"
@@ -52,6 +53,7 @@ extern osThreadId_t lineTaskHandle;
 extern osThreadId_t espTaskHandle;
 extern osThreadId_t usart1DebugTaskHandle;
 extern osThreadId_t ps2TaskHandle;
+extern osThreadId_t oledTaskHandle;
 extern osThreadId_t ledTaskHandle;
 
 static void DebugConsole_Write(const char *text)
@@ -291,6 +293,7 @@ static void DebugConsole_PrintHelp(void)
     "imutest/imudiag/imuinit/imucal [n]/imucalclear/imu 0|1\r\n"
     "espreset/espboot 0|1\r\n"
     "espflash on|off|status bridge USART1 to ESP12F\r\n"
+    "i2cscan               scan I2C1 bus for devices\r\n"
     "\r\n");
 }
 
@@ -340,6 +343,7 @@ static void DebugConsole_PrintRtosStatus(void)
   DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U);
   DebugConsole_PrintTaskStatus("ps2", ps2TaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_PS2));
   DebugConsole_PrintTaskStatus("led", ledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LED));
+  DebugConsole_PrintTaskStatus("oled", oledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_OLED));
 
   (void)snprintf(tx, sizeof(tx),
                  "RTOS comm upper_tx=%lu upper_drop=%lu esp_tx=%lu esp_drop=%lu\r\n",
@@ -872,6 +876,29 @@ static void DebugConsole_HandleLine(char *line)
   {
     LineControl_Enable(0U);
     DebugConsole_Write("line tracking disabled\r\n");
+  }
+  else if (strcmp(line, "i2cscan") == 0)
+  {
+    char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    int pos = 0;
+    uint8_t found = 0U;
+    pos += snprintf(tx + pos, sizeof(tx) - pos, "I2C1 scan:\r\n");
+    for (uint8_t addr = 1U; addr < 128U; addr++)
+    {
+      HAL_StatusTypeDef st = HAL_I2C_IsDeviceReady(&hi2c1,
+                               (uint16_t)(addr << 1), 1, 5);
+      if (st == HAL_OK)
+      {
+        found = 1U;
+        pos += snprintf(tx + pos, sizeof(tx) - pos,
+                        "  0x%02X (7-bit)  ACK\r\n", addr);
+      }
+    }
+    if (found == 0U)
+    {
+      pos += snprintf(tx + pos, sizeof(tx) - pos, "  no device found\r\n");
+    }
+    DebugConsole_Write(tx);
   }
   else
   {

@@ -225,6 +225,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
 | ESP12F 网页固件 | 🔲 待烧录 | 需 ESP8266 固件开发 |
+| OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 自检 + 模块在线状态 |
 | 上位机 (RPI) 对接 | 🔲 待对接 | 协议已就绪 |
 
 ---
@@ -242,3 +243,4 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | 调试台 `log 1` 输出不完整或乱码 | TX 缓冲区不足或 UART 阻塞 | 减少 log 字段数（使用过滤模式）；检查 `DEBUG_CONSOLE_TX_LINE_SIZE` (768B) |
 | 任务栈溢出 | `configASSERT` 触发或 `stack_free` 急剧下降 | 增大对应任务栈（`freertos.c` 中 `osThreadAttr_t.stack_size`），每次 +128W |
 | 电机不转但无 fault 报错 | DRV_SLEEP_ALL 被拉低或 PWM 占空比为零 | `status` 检查 `out` 位和 `pwm` 值；`estop`/`fault` 是否激活 |
+| OLED 不显示 | I2C 连接异常或器件地址不匹配 | `i2cscan` 确认地址 `0x3C` 有 ACK；检查 PB8/PB9 接线和供电 |

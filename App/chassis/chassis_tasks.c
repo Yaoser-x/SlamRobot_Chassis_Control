@@ -16,6 +16,8 @@
 #include "system_monitor.h"
 #include "upper_uart.h"
 #include "usart1_debug_console.h"
+#include "ssd1306.h"
+#include "oled_ui.h"
 
 void ChassisTasks_InitHardware(void)
 {
@@ -34,6 +36,8 @@ void ChassisTasks_InitHardware(void)
   Esp12fComm_Init();
   Esp12fFlashBridge_Init();
   Usart1DebugConsole_Init();
+  SSD1306_Init();
+  OLED_UI_Init();
 }
 
 uint32_t ChassisTasks_GetMissedPeriodCount(uint32_t task)
@@ -130,5 +134,16 @@ void Task_Led(void *argument)
   {
     LedStatus_TaskStep(CHASSIS_LED_PERIOD_MS);
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_LED, &next_wake, CHASSIS_LED_PERIOD_MS);
+  }
+}
+
+void Task_Oled(void *argument)
+{
+  uint32_t next_wake = osKernelGetTickCount();
+  (void)argument;
+  for (;;)
+  {
+    OLED_UI_Update();
+    ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_OLED, &next_wake, OLED_TASK_PERIOD_MS);
   }
 }

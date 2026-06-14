@@ -174,6 +174,16 @@ extern "C" {
 #define MOTOR_RATED_CURRENT_A               0.65f
 #define MOTOR_STALL_CURRENT_A               2.4f
 
+/* OLED SSD1306 配置 */
+#define OLED_I2C_ADDR                   0x3CU  /* 7-bit addr; HAL <<1 = 0x78 */
+#define OLED_TASK_PERIOD_MS             100U
+#define OLED_WELCOME_DURATION_MS        5000U
+#define OLED_SELFCHECK_ITEM_MS          600U
+#define OLED_SELFCHECK_TOTAL_ITEMS      8U
+#define OLED_ERROR_BLINK_PERIOD_MS      500U
+#define OLED_MODULE_TIMEOUT_RPI_MS      500U
+#define OLED_MODULE_TIMEOUT_LINE_MS     50U
+
 #ifdef __cplusplus
 }
 #endif

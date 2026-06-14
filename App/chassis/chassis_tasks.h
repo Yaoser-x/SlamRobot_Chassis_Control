@@ -18,6 +18,7 @@ void Task_Esp12f(void *argument);
 void Task_Usart1DebugConsole(void *argument);
 void Task_Ps2(void *argument);
 void Task_Led(void *argument);
+void Task_Oled(void *argument);
 
 #ifdef __cplusplus
 }

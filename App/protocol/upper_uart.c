@@ -29,6 +29,7 @@ static uint8_t upper_frame_index;
 static uint8_t upper_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint8_t upper_status_payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN];
 static uint32_t upper_last_status_ms;
+static uint32_t upper_last_rx_timestamp_ms;
 static upper_uart_state_t upper_state;
 
 static void UpperUart_ResetParser(void)
@@ -104,6 +105,8 @@ static void UpperUart_ProcessByte(uint8_t byte)
           const uint8_t *payload = &upper_frame_buf[2];
           uint8_t payload_len = (uint8_t)(upper_frame_len - 1U);
           UpperUart_HandleFrame(cmd, payload, payload_len);
+          /* Record RX timestamp for OLED module online detection */
+          upper_last_rx_timestamp_ms = osKernelGetTickCount();
         }
         UpperUart_ResetParser();
       }
@@ -203,6 +206,7 @@ void UpperUart_Init(void)
   upper_rx_read_pos = 0U;
   upper_last_status_ms = 0U;
   upper_state = (upper_uart_state_t){0};
+  upper_last_rx_timestamp_ms = 0U;
   UpperUart_ResetParser();
   (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
 }
@@ -234,4 +238,9 @@ void UpperUart_GetState(upper_uart_state_t *state)
   {
     *state = upper_state;
   }
+}
+
+uint32_t UpperUart_GetLastRxTimestamp(void)
+{
+  return upper_last_rx_timestamp_ms;
 }

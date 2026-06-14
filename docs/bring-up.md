@@ -9,10 +9,10 @@
 **命令**：`rtos`
 
 **确认项**：
-- 所有 10 个任务均已创建（`defaultTask`–`ledTask`，无 `missing`）
+- 所有 11 个任务均已创建（`defaultTask`–`oledTask`，无 `missing`）
 - `heap_free` > 10KB，`heap_min` 不异常小
 - 各任务 `stack_free` > 256B（尤其 `debugTask` 需 > 1KB，`motorTask` > 512B）
-- 核心任务（`safety`/`motor`/`rpi`/`imu`）`missed=0`
+- 核心任务（`safety`/`motor`/`rpi`/`imu`/`oled`）`missed=0`
 
 ---
 
@@ -28,6 +28,7 @@
 - **IMU**（若已初始化）：`enabled`/`online` 状态正确；`chip=0x24`；加速度/陀螺/欧拉角有合理数值
 - **系统**：`source=0`，`errors=0x00000000`，`drv_fault=0,0,0,0`
 - **通信**：`line` 帧计数、`esp` 收发帧、`ps2` 连接状态均有显示
+- **OLED**：屏幕亮起，依次显示欢迎屏（5s）→ 自检进度（8 项）→ 运行状态（时间/电压/模块在线/控制源）。自检阶段每项显示 PASS/FAIL，正常运行时 8 个模块在线状态用 ●/○ 指示
 
 ---
 

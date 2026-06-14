@@ -17,6 +17,7 @@ void UpperUart_Init(void);
 void UpperUart_Update(void);
 void Task_UpperUart(void *argument);
 void UpperUart_GetState(upper_uart_state_t *state);
+uint32_t UpperUart_GetLastRxTimestamp(void);
 
 #ifdef __cplusplus
 }

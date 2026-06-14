@@ -15,6 +15,7 @@ typedef struct
   uint32_t rx_checksum_errors;
   uint32_t rx_length_errors;
   uint32_t rx_overflow_errors;
+  uint32_t last_rx_timestamp_ms;
   uint8_t boot_mode_download;
 } esp12f_comm_state_t;
 

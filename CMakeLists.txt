@@ -68,6 +68,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/motor/motor_driver.c
     BSP/pid/pid_controller.c
     BSP/ps2/ps2_control.c
+    BSP/oled/ssd1306.c
+    BSP/oled/oled_ui.c
+    BSP/oled/oled_font_data.c
 )
 
 # Add include paths
@@ -86,6 +89,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/motor
     BSP/pid
     BSP/ps2
+    BSP/oled
 )
 
 # Add project symbols (macros)

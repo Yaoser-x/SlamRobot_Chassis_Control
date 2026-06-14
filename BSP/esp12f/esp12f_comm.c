@@ -45,6 +45,8 @@ static void Esp12fComm_ResetParser(void)
 static void Esp12fComm_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len)
 {
   esp12f_state.rx_frames++;
+  /* Record RX timestamp for OLED module online detection */
+  esp12f_state.last_rx_timestamp_ms = osKernelGetTickCount();
   if (cmd == UPPER_CMD_SET_VELOCITY)
   {
     upper_velocity_payload_t velocity;
@@ -198,6 +200,7 @@ void Esp12fComm_Init(void)
   esp12f_rx_tail = 0U;
   esp12f_last_status_ms = 0U;
   esp12f_state = (esp12f_comm_state_t){0};
+  esp12f_state.last_rx_timestamp_ms = 0U;
   Esp12fComm_SetDownloadMode(0U);
   Esp12fComm_RestartRx();
 }

@@ -40,6 +40,7 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | `espflash on` | — | 启用 USART1↔USART2 透明烧录桥 |
 | `espflash off` | — | 关闭烧录桥，ESP12F 正常启动 |
 | `espflash status` | — | 查看桥接统计（收发字节/溢出/错误/自动退出次数） |
+| **`i2cscan`** | — | 扫描 I2C1 总线（地址 1–127），列出所有 ACK 响应的器件 |
 
 ---
 
@@ -152,3 +153,18 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 - `espreset` 通过拉低 `ESP_RST` 复位 ESP12F
 - `espboot 0` 设置下载模式（`ESP_IO0=0` + 复位），`espboot 1` 恢复正常
 - `espflash on` 操作不可逆——需要等待 30s 自动退出或 `espflash off` 或复位整板才能恢复调试台
+
+### 5.5 I2C 扫描 (`i2cscan`)
+
+扫描 I2C1 总线地址 1–127，通过 `HAL_I2C_IsDeviceReady` 逐一探测，列出所有 ACK 响应的器件 7-bit 地址。
+
+**输出示例**：
+
+```
+I2C1 scan:
+  0x3C (7-bit)  ACK
+```
+
+- 7-bit 地址 `0x3C` 对应 SSD1306 OLED（HAL 左移 1 位后 `0x78`）
+- 无器件响应时输出 `"no device found"`
+- 用于验证 I2C 总线连接和器件地址，排查 OLED 不显示问题

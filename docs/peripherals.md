@@ -127,14 +127,14 @@ Bosch BMI270 六轴惯性测量单元，SPI2 接口通信。
 - SPI 硬件诊断（`imudiag`：寄存器回读 + bit-bang 回退 + MISO 上下拉检测）
 - 初始化失败或运行中离线自动重连（1s 间隔重试）
 
-### 5.1 I2C1 预留
+### 5.1 I2C1 — SSD1306 OLED
 
 | 信号 | 引脚 | 配置 |
 | --- | --- | --- |
 | I2C1 SCL | PB8 | 100 kHz, 7-bit |
 | I2C1 SDA | PB9 | 100 kHz, 7-bit |
 
-当前未挂载 I2C 外设，预留扩展。
+I2C1 总线上挂载 SSD1306 128×64 单色 OLED 显示屏（7-bit 地址 `0x3C`，HAL 左移后 `0x78`）。详见 [第 9 节 OLED 显示屏](#9-oled-ssd1306-显示屏)。
 
 ---
 
@@ -249,3 +249,85 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 ### 8.6 调试命令
 
 参见 [调试命令台 — line 命令](debug-console.md#line-命令)。
+
+---
+
+## 9. OLED SSD1306 显示屏
+
+SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPriorityLow, 100ms 周期）刷新。提供三阶段 UI：欢迎屏 → 系统自检 → 运行状态。
+
+### 9.1 硬件连接
+
+| 信号 | 引脚 | 说明 |
+| --- | --- | --- |
+| I2C1 SCL | PB8 | 100 kHz 时钟 |
+| I2C1 SDA | PB9 | 数据线 |
+| VCC | 3.3V | 模组供电 |
+| GND | GND | 共地 |
+
+7-bit 器件地址 `0x3C`，HAL 库左移 1 位后为 `0x78`。
+
+### 9.2 驱动架构
+
+| 文件 | 层级 | 职责 |
+| --- | --- | --- |
+| `BSP/oled/ssd1306.c` | BSP 驱动 | I2C 命令/数据写入、framebuffer 管理（128×8 pages）、像素/字符/矩形/进度条绘制、整屏刷新（page-mode 批量写入，8 次 I2C 事务） |
+| `BSP/oled/oled_ui.c` | BSP 控制 | 三阶段 UI 状态机、自检执行（I2C/IMU/ADC/Motor/Encoder/UART/ESP12F）、模块在线状态聚合、错误码闪烁 |
+| `BSP/oled/oled_font_data.c` | 字体数据 | 8×16 ASCII、12×12/16×16 中文字体位图数据 |
+
+### 9.3 UI 三阶段
+
+| 阶段 | 枚举 | 持续时间 | 显示内容 |
+| --- | --- | --- | --- |
+| **欢迎屏** | `OLED_PHASE_WELCOME` | 5s (`OLED_WELCOME_DURATION_MS`) | 项目名 "F407 V2.0"、中文副标题 "四轮差速底盘控制"、MCU 型号 "STM32F407VET6"、"系统启动中…" |
+| **系统自检** | `OLED_PHASE_SELFCHECK` | 8 项 × 600ms (`OLED_SELFCHECK_ITEM_MS`) | 逐项检测 I2C/IMU/ADC/Motor/Encoder/UART3-RPI/UART4-Line/ESP12F，显示 PASS/FAIL 与进度条 |
+| **正常运行** | `OLED_PHASE_NORMAL` | 持续 | 运行时间、电池电压、8 模块在线状态（●/○）、错误码 hex（有错误时 500ms 闪烁）、当前控制源 |
+
+### 9.4 自检项目
+
+| 序号 | 项目 | 检测方式 | 失败 bit |
+| --- | --- | --- | --- |
+| 1 | I2C | `HAL_I2C_IsDeviceReady` 探测 OLED 地址 | `OLED_SC_ERROR_I2C` (bit 9) |
+| 2 | IMU | 读取 BMI270 `chip_id == 0x24` | `OLED_SC_ERROR_IMU` (bit 10) |
+| 3 | ADC | 电池电压 > 6.0V | `OLED_SC_ERROR_ADC` (bit 11) |
+| 4 | Motor | 四路 nFAULT 均为高电平 | `OLED_SC_ERROR_MOTOR` (bit 12) |
+| 5 | Encoder | `speed_valid_all` 标志 | `OLED_SC_ERROR_ENCODER` (bit 13) |
+| 6 | UART3 RPI | 暂不检测（直接通过） | `OLED_SC_ERROR_UART3_RPI` (bit 14) |
+| 7 | UART4 Line | 暂不检测（直接通过） | `OLED_SC_ERROR_UART4_LINE` (bit 15) |
+| 8 | ESP12F | 暂不检测（直接通过） | `OLED_SC_ERROR_ESP12F` (bit 16) |
+
+> 自检错误 bit 位于 bit 9–16，与 `SystemMonitor` 的 motor/battery 错误 bit（bit 0–8）不冲突。正常运行阶段错误码 hex 为两者 OR 合并显示。
+
+### 9.5 模块在线检测（正常运行阶段）
+
+每 100ms 刷新周期更新各模块在线状态，用实心圆点 `●`（在线）和空心圆点 `○`（离线）显示：
+
+| 标签 | 模块 | 检测方式 |
+| --- | --- | --- |
+| RPI | 上位机 | USART3 最近一帧 RX 时间戳 < `OLED_MODULE_TIMEOUT_RPI_MS`（500ms） |
+| PS2 | PS2 手柄 | `Ps2Control_GetState().online` |
+| IMU | BMI270 | `ImuBmi270_GetState().online` |
+| Line | 巡线传感器 | 传感器数据时间戳 < `OLED_MODULE_TIMEOUT_LINE_MS`（50ms） |
+| Enc | 编码器 | `EncoderDriver_GetState().speed_valid_all` |
+| ESP | ESP12F | `Esp12fComm_GetState().rx_frames > 0` |
+| Motr | 电机驱动 | `SystemMonitor_GetState().error_flags` 无 `DRV_FAULT` |
+| ADC | 模数采样 | `AdcMonitor_GetState().current_valid` |
+
+### 9.6 配置参数
+
+所有参数集中在 `App/chassis/chassis_config.h`：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `OLED_I2C_ADDR` | `0x3CU` | SSD1306 7-bit I2C 地址 |
+| `OLED_TASK_PERIOD_MS` | `100U` | OLED 刷新任务周期 |
+| `OLED_WELCOME_DURATION_MS` | `5000U` | 欢迎屏持续时间 |
+| `OLED_SELFCHECK_ITEM_MS` | `600U` | 每项自检耗时 |
+| `OLED_SELFCHECK_TOTAL_ITEMS` | `8U` | 自检项目总数 |
+| `OLED_ERROR_BLINK_PERIOD_MS` | `500U` | 错误码闪烁周期 |
+| `OLED_MODULE_TIMEOUT_RPI_MS` | `500U` | RPI 模块超时判定 |
+| `OLED_MODULE_TIMEOUT_LINE_MS` | `50U` | 巡线模块超时判定 |
+
+### 9.7 I2C 扫描命令
+
+调试台 `i2cscan` 命令可扫描 I2C1 总线（地址 1–127），列出所有 ACK 响应的器件地址。参见 [调试命令台 — i2cscan](debug-console.md#52-i2c-扫描)。
