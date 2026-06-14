@@ -1,6 +1,7 @@
 #include "motor_driver.h"
 
 #include "chassis_config.h"
+#include "chassis_layout.h"
 #include "main.h"
 #include "tim.h"
 
@@ -12,7 +13,6 @@ typedef struct
   uint32_t in2_channel;
   GPIO_TypeDef *fault_port;
   uint16_t fault_pin;
-  int8_t direction;
 } motor_hw_t;
 
 typedef struct
@@ -22,10 +22,10 @@ typedef struct
 } motor_runtime_t;
 
 static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
-  { &htim1, TIM_CHANNEL_1, &htim8, TIM_CHANNEL_1, M1_FAULT_GPIO_Port, M1_FAULT_Pin, CHASSIS_M1_MOTOR_DIR },
-  { &htim1, TIM_CHANNEL_2, &htim8, TIM_CHANNEL_2, M2_FAULT_GPIO_Port, M2_FAULT_Pin, CHASSIS_M2_MOTOR_DIR },
-  { &htim1, TIM_CHANNEL_3, &htim8, TIM_CHANNEL_3, M3_FAULT_GPIO_Port, M3_FAULT_Pin, CHASSIS_M3_MOTOR_DIR },
-  { &htim1, TIM_CHANNEL_4, &htim8, TIM_CHANNEL_4, M4_FAULT_GPIO_Port, M4_FAULT_Pin, CHASSIS_M4_MOTOR_DIR },
+  { &htim1, TIM_CHANNEL_1, &htim8, TIM_CHANNEL_1, M1_FAULT_GPIO_Port, M1_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_2, &htim8, TIM_CHANNEL_2, M2_FAULT_GPIO_Port, M2_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_3, &htim8, TIM_CHANNEL_3, M3_FAULT_GPIO_Port, M3_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_4, &htim8, TIM_CHANNEL_4, M4_FAULT_GPIO_Port, M4_FAULT_Pin },
 };
 
 static motor_runtime_t motor_runtime[MOTOR_ID_COUNT];
@@ -117,7 +117,15 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 
   hw = &motor_hw[(uint32_t)motor];
   runtime = &motor_runtime[(uint32_t)motor];
-  corrected = (int16_t)(permille * hw->direction);
+  if (ChassisLayout_MotorEnabled(motor) == 0U)
+  {
+    runtime->last_drive_sign = 0;
+    runtime->direction_change_coast_cycles = 0U;
+    MotorDriver_SetRaw(hw, 0U, 0U);
+    return;
+  }
+
+  corrected = (int16_t)(permille * ChassisLayout_MotorDirection(motor));
   drive_sign = MotorDriver_Sign(corrected);
 
   if (corrected < 0)
@@ -187,6 +195,13 @@ void MotorDriver_SetInputPermille(motor_id_t motor, int16_t forward_permille, in
   }
 
   hw = &motor_hw[(uint32_t)motor];
+  if (ChassisLayout_MotorEnabled(motor) == 0U)
+  {
+    motor_runtime[(uint32_t)motor] = (motor_runtime_t){0};
+    MotorDriver_SetRaw(hw, 0U, 0U);
+    return;
+  }
+
   motor_runtime[(uint32_t)motor] = (motor_runtime_t){0};
   MotorDriver_SetRaw(hw,
                      MotorDriver_PulseFromPermille(hw->in1_htim, forward_permille),
@@ -257,8 +272,15 @@ void MotorDriver_UpdateFaults(void)
 
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    fault_active[i] =
-      (HAL_GPIO_ReadPin(motor_hw[i].fault_port, motor_hw[i].fault_pin) == GPIO_PIN_RESET) ? 1U : 0U;
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
+    {
+      fault_active[i] =
+        (HAL_GPIO_ReadPin(motor_hw[i].fault_port, motor_hw[i].fault_pin) == GPIO_PIN_RESET) ? 1U : 0U;
+    }
+    else
+    {
+      fault_active[i] = 0U;
+    }
   }
 
   primask = __get_PRIMASK();

@@ -2,6 +2,7 @@
 
 #include "adc.h"
 #include "chassis_config.h"
+#include "chassis_layout.h"
 
 static uint16_t adc_dma_buffer[ADC_MONITOR_CHANNEL_COUNT];
 static volatile uint16_t adc_sample_snapshot[ADC_MONITOR_CHANNEL_COUNT];
@@ -62,6 +63,12 @@ void AdcMonitor_Update(void)
   float previous_current[MOTOR_ID_COUNT];
   uint8_t next_current_valid;
   uint32_t primask;
+  uint8_t left_count = 0U;
+  uint8_t right_count = 0U;
+  uint32_t left_raw_sum = 0U;
+  uint32_t right_raw_sum = 0U;
+  float left_current_sum = 0.0f;
+  float right_current_sum = 0.0f;
 
   primask = __get_PRIMASK();
   __disable_irq();
@@ -91,14 +98,30 @@ void AdcMonitor_Update(void)
     {
       next_state.current_a[i] = 0.0f;
     }
+
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+    {
+      next_state.raw_current[i] = 0U;
+      next_state.current_a[i] = 0.0f;
+    }
+    else if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)
+    {
+      left_count++;
+      left_raw_sum += next_state.raw_current[i];
+      left_current_sum += next_state.current_a[i];
+    }
+    else
+    {
+      right_count++;
+      right_raw_sum += next_state.raw_current[i];
+      right_current_sum += next_state.current_a[i];
+    }
   }
 
-  next_state.raw_left_current = (uint16_t)(((uint32_t)next_state.raw_current[MOTOR_ID_M1] +
-                                            (uint32_t)next_state.raw_current[MOTOR_ID_M2]) / 2U);
-  next_state.raw_right_current = (uint16_t)(((uint32_t)next_state.raw_current[MOTOR_ID_M3] +
-                                             (uint32_t)next_state.raw_current[MOTOR_ID_M4]) / 2U);
-  next_state.left_current_a = (next_state.current_a[MOTOR_ID_M1] + next_state.current_a[MOTOR_ID_M2]) * 0.5f;
-  next_state.right_current_a = (next_state.current_a[MOTOR_ID_M3] + next_state.current_a[MOTOR_ID_M4]) * 0.5f;
+  next_state.raw_left_current = (left_count != 0U) ? (uint16_t)(left_raw_sum / left_count) : 0U;
+  next_state.raw_right_current = (right_count != 0U) ? (uint16_t)(right_raw_sum / right_count) : 0U;
+  next_state.left_current_a = (left_count != 0U) ? (left_current_sum / (float)left_count) : 0.0f;
+  next_state.right_current_a = (right_count != 0U) ? (right_current_sum / (float)right_count) : 0.0f;
 
   primask = __get_PRIMASK();
   __disable_irq();

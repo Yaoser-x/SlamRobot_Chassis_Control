@@ -45,6 +45,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis/chassis_control.c
+    App/chassis/chassis_layout.c
     App/chassis/chassis_math.c
     App/chassis/chassis_task_timing.c
     App/chassis/chassis_tasks.c
@@ -60,6 +61,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/esp12f/esp12f_comm.c
     BSP/esp12f/esp12f_flash_bridge.c
     BSP/imu/imu_bmi270.c
+    BSP/imu/imu_bmi270_config.c
     BSP/led/led_status.c
     BSP/line/line_uart.c
     BSP/motor/motor_driver.c

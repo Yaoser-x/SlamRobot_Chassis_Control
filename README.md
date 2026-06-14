@@ -18,7 +18,7 @@ STM32F407 V2.0 底盘控制固件工程。当前仓库基于 STM32CubeMX 生成�
 | 链接脚本 | `STM32F407XX_FLASH.ld` |
 | CubeMX 配置 | `F407_V2.0.ioc` |
 | 控制优先级 | `RPI/USART3 > PS2 > ESP12F > DEBUG` |
-| 底盘形式 | 四轮左右差速，`M1+M2` 左侧，`M3+M4` 右侧 |
+| 底盘形式 | 四轮左右差速（可通过 `CHASSIS_Mx_ENABLED`/`CHASSIS_Mx_SIDE` 配置为 2WD 或自定义布局），默认 `M1+M2` 左侧，`M3+M4` 右侧 |
 | 电机驱动 | DRV8874 H-bridge PWM，支持 `nSLEEP` 与低有效 `nFAULT` |
 | IMU | BMI270，`SPI2 + IMU_CS + IMU_INT1` |
 | 巡线 | `UART4 LINE_TX/RX` DMA/ring buffer |
@@ -37,7 +37,7 @@ BSP/
   adc/                  M1-M4 电流 + VBAT DMA 采样换算
   encoder/              TIM2/TIM3/TIM4/TIM5 编码器与回绕差分
   esp12f/               ESP12F 协议、启动控制、USART1 辅助烧录桥
-  imu/                  BMI270 chip-id、基础配置与周期采样
+  imu/                  BMI270 SPI 驱动（配置表加载、陀螺校准、姿态估计、SPI 诊断）
   led/                  TEST_LED 状态灯
   line/                 UART4 巡线 ring buffer
   motor/                TIM1/TIM8 DRV8874 PWM/H-bridge 驱动
@@ -51,7 +51,6 @@ Middlewares/            FreeRTOS 内核与 CMSIS-RTOS2 适配层
 cmake/
   gcc-arm-none-eabi.cmake
   stm32cubemx/          CubeMX 生成的 CMake 目标与源文件清单
-tests/host/             协议、仲裁、底盘数学、编码器差分 host 测试
 .github/workflows/
   firmware-build.yml    GitHub Actions 固件构建流水线
 CMakeLists.txt          顶层 CMake 工程
@@ -67,8 +66,8 @@ startup_stm32f407xx.s   启动文件
 
 | 项目 | 频率 / 配置 |
 | --- | --- |
-| HSE | 8 MHz |
-| PLLM / PLLN / PLLP / PLLQ | 4 / 168 / 2 / 4 |
+| HSI（临时，待 HSE 晶振修复后恢复） | 16 MHz |
+| PLLM / PLLN / PLLP / PLLQ | 16 / 336 / 2 / 7 |
 | SYSCLK | 168 MHz |
 | HCLK / Cortex FCLK | 168 MHz |
 | APB1 | 42 MHz |
@@ -107,7 +106,7 @@ startup_stm32f407xx.s   启动文件
 | M3 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12, IC filter `8`, Period `65535` |
 | M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12, IC filter `8`, Period `0xFFFFFFFF` |
 
-应用层已启动四路编码器并独立计算计数、回绕差分和速度。左右侧状态按 `M1+M2`、`M3+M4` 聚合。当前默认方向在 `App/chassis/chassis_config.h` 中配置：M1/M2 编码器方向为 `+1`，M3/M4 为 `-1`，上板后可按实际验收微调。
+应用层已启动四路编码器并独立计算计数、回绕差分和速度。电机启用、左右侧归属、电机方向和编码器方向集中在 `App/chassis/chassis_config.h` 中配置；默认布局仍为 `M1+M2` 左侧、`M3+M4` 右侧，M1/M2 编码器方向为 `+1`，M3/M4 为 `-1`，上板后可按实际验收微调。
 
 ### ADC 与电源/电流采样
 
@@ -143,7 +142,7 @@ USART3 RX 使用 DMA1 Stream1，UART4 RX 使用 DMA1 Stream2。USART3 复用 V1 
 | IMU_INT1 | PE0 | EXTI0 输入 |
 | I2C1 SCL / SDA | PB8 / PB9 | 100 kHz, 7-bit addressing |
 
-SPI2 在 `.ioc` 中计算速率约为 2.625 Mbit/s。BMI270 当前实现为最小 bring-up 驱动，覆盖 chip-id 探测、软复位、基础电源配置、acc/gyro 周期采样和错误计数。若后续需要高级低功耗、FIFO 或 feature engine，再完整引入 Bosch SensorAPI 配置表。
+SPI2 在 `.ioc` 中计算速率约为 2.625 Mbit/s。BMI270 驱动已完整落地：集成 Bosch SensorAPI 配置表（8192 bytes，版本 v2.86.1），加载至 feature engine 内部 RAM；支持 100 Hz acc/gyro ODR（±2g / ±500dps）；内置陀螺零偏校准（`imucal`，含静止验证）；互补滤波姿态估计（roll/pitch 融合加速度计，yaw 纯积分）；EMA 低通滤波（acc/gyro α=0.20）；SPI 硬件诊断（`imudiag`，含 bit-bang 回退与 MISO 上拉/下拉/悬空检测）；初始化失败或运行中离线时自动重连（1s 间隔重试）。
 
 ### ESP12F 控制 GPIO
 
@@ -157,13 +156,13 @@ SPI2 在 `.ioc` 中计算速率约为 2.625 Mbit/s。BMI270 当前实现为最�
 
 ### PS2 与状态 GPIO
 
-| 信号 | 引脚 | 方向 / 默认状态 |
-| --- | --- | --- |
-| PS2_DI | PE2 | Output, 默认高 |
-| PS2_DO | PE3 | Input, Pull-up |
-| PS2_CS | PE4 | Output, 默认高 |
-| PS2_CLK | PE5 | Output, 默认高 |
-| TEST_LED | PE6 | Output |
+| 信号 | 引脚 | 方向 / 默认状态 | 用途 |
+| --- | --- | --- | --- |
+| PS2_DO | PE3 | Input, Pull-up | CMD（命令线，STM32 输出到 PS2 手柄） |
+| PS2_DI | PE2 | Output, 默认高 | DAT（数据线，PS2 手柄输入到 STM32） |
+| PS2_CS | PE4 | Output, 默认高 | |
+| PS2_CLK | PE5 | Output, 默认高 | |
+| TEST_LED | PE6 | Output | |
 
 PS2 语义沿用 V1：手柄在线时可提交低优先级运动命令，离线达到阈值后清除 PS2 source；零速命令仍视为有效命令，不用旧速度“滑过去”。
 
@@ -177,7 +176,7 @@ PS2 语义沿用 V1：手柄在线时可提交低优先级运动命令，离线�
 - 命令超时为 `CHASSIS_CMD_TIMEOUT_MS`，超时后不继续沿用旧运动命令。
 - 非法 source、NaN/Inf 速度、失能命令、ESTOP、fault-stop 都采用 reject-and-stop 语义。
 - `clearfault` 会清除软件锁存，但如果 DRV8874 `nFAULT` 仍为低电平，下一轮 safety task 会重新锁存。
-- 四轮 PID 独立运行，左右目标按差速模型分配：M1/M2 接收左侧目标，M3/M4 接收右侧目标。
+- 四轮 PID 独立运行，左右目标按差速模型分配；默认 M1/M2 接收左侧目标、M3/M4 接收右侧目标，可通过 `CHASSIS_Mx_ENABLED` 和 `CHASSIS_Mx_SIDE` 改成 2 驱或不同左右布局。
 
 ## 教育科研使用边界
 
@@ -213,6 +212,7 @@ osKernelStart();
 | `configUSE_COUNTING_SEMAPHORES` | 1 |
 | `INCLUDE_uxTaskGetStackHighWaterMark` | 1 |
 | `INCLUDE_uxTaskGetStackHighWaterMark2` | 1 |
+| `configENABLE_FPU` | 1 |
 
 `configASSERT()`、`vApplicationStackOverflowHook()`、`vApplicationMallocFailedHook()` 和任务创建失败检查已接入 fail-safe：一旦发生 RTOS 级异常，会立即拉低 `DRV_SLEEP_ALL` 并停在 fatal loop，避免电机保持旧 PWM。该策略不会自动软复位，便于教学和实验时保留故障现场。
 
@@ -239,10 +239,10 @@ USART1 `rtos` 命令会打印：
 | `safetyTask` | High | 20 ms | `osDelayUntil` | 256 words | 状态聚合、命令超时、fault-stop |
 | `motorTask` | AboveNormal | 10 ms | `osDelayUntil` | 512 words | 编码器更新、速度环、PWM 输出 |
 | `rpiCommTask` | Normal | 5 ms | `osDelayUntil` | 512 words | USART3 上位机协议 |
-| `imuTask` | Normal | 20 ms | `osDelayUntil` | 512 words | BMI270 周期采样 |
+| `imuTask` | Normal | 10 ms | `osDelayUntil` | 512 words | BMI270 周期采样（100 Hz） |
 | `lineTask` | BelowNormal | 5 ms | `osDelayUntil` | 256 words | UART4 巡线收帧计数 |
 | `espTask` | BelowNormal | 5 ms | `osDelayUntil` | 512 words | ESP12F 协议收发与 flash bridge 更新 |
-| `debugTask` | BelowNormal | 10 ms | `osDelay` | 512 words | USART1 命令台 |
+| `debugTask` | BelowNormal | 10 ms | `osDelay` | 1024 words | USART1 命令台 |
 | `ps2Task` | Normal | 20 ms | `osDelayUntil` | 512 words | PS2 手柄控制 |
 | `ledTask` | Low | 50 ms | `osDelayUntil` | 128 words | TEST_LED 状态指示 |
 
@@ -268,6 +268,9 @@ estop
 clearfault
 imutest
 imuinit
+imudiag
+imucal [n]
+imucalclear
 imu <0|1>
 espreset
 espboot <0|1>
@@ -349,11 +352,11 @@ Arduino IDE 可以直接作为 ESP8266 上传工具使用，但要先手动让 S
 1. USART1 输入 `rtos`，确认任务都已创建，heap、栈余量和 missed-period 正常。
 2. 输入 `status`，确认 ADC、编码器、DRV fault、BMI270、PS2、ESP12F、LINE 状态字段会刷新。
 3. 架空轮后执行 `m1` 到 `m4` 单轮 raw 测试，确认 DRV8874 `IN1/IN2` 方向、`nSLEEP` 和 `nFAULT`。
-4. 执行 `left`、`right`、`motor`，确认左侧 `M1+M2`、右侧 `M3+M4` 聚合正确。
+4. 执行 `left`、`right`、`motor`，确认 `CHASSIS_Mx_SIDE` 配置对应的左右侧聚合正确。
 5. 空转和落地分别检查 TIM2/TIM3/TIM4/TIM5 编码器方向与速度符号。
 6. 检查四路电流和 `VBAT_SENSE` 换算，必要时只调整 `chassis_config.h` 中校准常量。
 7. 使用 `vel` 做低速闭环测试，观察 `status` 中目标速度、实际速度、fault-stop 和 missed-period。
-8. 执行 `imutest`/`imuinit`，确认 BMI270 chip-id 为 `0x24` 且采样错误计数不持续增长。
+8. 执行 `imutest`/`imuinit`/`imudiag`，确认 BMI270 chip-id 为 `0x24`；执行 `imucal` 静止校准陀螺零偏；随后观察 `status` 中 Euler 角和采样错误计数。
 9. 执行 `espflash on`，用 `esptool.py --chip esp8266 --port COMx --baud 115200 chip_id` 验证 ESP12F 烧录通道。
 10. 烧录 ESP12F 网页固件后，验证 ESP12F 网页控制和 USART2 帧协议。
 11. 接入 UART4 巡线模块，查看 `status` 中 LINE 收帧计数。
@@ -390,14 +393,6 @@ cmake --preset Release
 cmake --build --preset Release
 ```
 
-Host 测试：
-
-```bash
-cmake -S tests/host -B build/host-tests-ninja -G Ninja
-cmake --build build/host-tests-ninja
-ctest --test-dir build/host-tests-ninja --output-on-failure
-```
-
 构建产物：
 
 ```text
@@ -412,7 +407,6 @@ build/Release/F407_V2.0.map
 | 命令 | 结果 |
 | --- | --- |
 | `cmake --build --preset Debug` | Passed, RAM 70768 B / 128 KB, FLASH 81012 B / 512 KB |
-| `ctest --test-dir build/host-tests-ninja --output-on-failure` | Passed, 1/1 |
 
 ## GitHub Actions
 
@@ -442,7 +436,7 @@ CI 行为：
 - 修改 `.ioc` 后重新生成代码时，需要复查 `Core/Src/freertos.c`、`Core/Inc/main.h`、`Core/Src/gpio.c`、`cmake/stm32cubemx/CMakeLists.txt` 和顶层 `CMakeLists.txt` 的差异。
 - 修改时钟、链接脚本、FreeRTOS heap 或 CMake 工具链后，应同时验证 Debug 和 Release。
 - 控制安全相关改动必须保留 reject-and-stop 语义，不能静默夹紧非法命令后继续运行。
-- BMI270 当前为最小 bring-up 驱动；完整 Bosch SensorAPI 配置加载可作为后续独立补丁。
+- BMI270 驱动已完整落地（Bosch 配置表、陀螺校准、姿态估计）；温度读取、中断驱动和 FIFO 模式待后续实现。
 - ESP12F bridge 第一版固定 `115200`；确认硬件串口稳定后，再考虑动态高速烧录。
 
 ## 提交前检查
@@ -451,9 +445,8 @@ CI 行为：
 
 ```bash
 git status --short --branch
-git diff --check -- .gitignore .gitattributes README.md CMakeLists.txt Core/Src/freertos.c App BSP tests/host
+git diff --check -- .gitattributes README.md CMakeLists.txt Core/Src/freertos.c App BSP
 cmake --build --preset Debug
-ctest --test-dir build/host-tests-ninja --output-on-failure
 ```
 
 涉及构建配置、链接脚本、启动文件或 FreeRTOS 配置时，再补充：

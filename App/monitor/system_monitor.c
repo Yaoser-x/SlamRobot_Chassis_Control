@@ -2,6 +2,7 @@
 
 #include "adc_monitor.h"
 #include "chassis_config.h"
+#include "chassis_layout.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
 #include "main.h"
@@ -39,6 +40,11 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     next_count[i] = previous_count[i];
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+    {
+      next_count[i] = 0U;
+      continue;
+    }
     if (adc_state->current_a[i] > MOTOR_STALL_CURRENT_A)
     {
       if (next_count[i] < MOTOR_OVERCURRENT_DEBOUNCE_COUNT)
@@ -134,7 +140,8 @@ void SystemMonitor_Update(void)
   }
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    if (motor_state.fault_active[i] != 0U)
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+        motor_state.fault_active[i] != 0U)
     {
       new_latched_flags |= SYSTEM_ERROR_DRV_FAULT;
     }
@@ -204,7 +211,8 @@ void SystemMonitor_ClearLatchedFaults(uint32_t mask)
 
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    if ((mask & overcurrent_flags[i]) != 0U &&
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+        (mask & overcurrent_flags[i]) != 0U &&
         SystemMonitor_CurrentBelowFaultThreshold(snapshot.motor_current_a[i]) == 0U)
     {
       clearable &= ~overcurrent_flags[i];
@@ -214,7 +222,8 @@ void SystemMonitor_ClearLatchedFaults(uint32_t mask)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-      if (motor_state.fault_active[i] != 0U)
+      if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+          motor_state.fault_active[i] != 0U)
       {
         clearable &= ~SYSTEM_ERROR_DRV_FAULT;
       }

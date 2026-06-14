@@ -7,6 +7,11 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -38,10 +43,18 @@ jobs:
       - name: Build ${{ matrix.preset }}
         run: cmake --build --preset ${{ matrix.preset }}
 
+      - name: Memory report ${{ matrix.preset }}
+        run: |
+          ELF="build/${{ matrix.preset }}/F407_V2.0.elf"
+          echo "### ${{ matrix.preset }} Memory Usage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          arm-none-eabi-size "$ELF" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload ${{ matrix.preset }} artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: firmware-${{ matrix.preset }}
+          name: firmware-${{ matrix.preset }}-${{ github.sha }}
           if-no-files-found: error
           path: |
             build/${{ matrix.preset }}/F407_V2.0.elf

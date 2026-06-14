@@ -7,10 +7,59 @@ extern "C" {
 
 #define CHASSIS_MOTOR_COUNT                 4U
 
+/* 电机布局编译期配置。
+ *
+ * 命令链路:
+ *   PS2/RPI/ESP/debug -> linear_x/angular_z -> left_mps/right_mps -> enabled motors.
+ *
+ * CHASSIS_Mx_ENABLED:
+ *   1U: 启用该路电机；参与目标分配、PID、编码器、电流、故障检测。
+ *   0U: 禁用该路电机；目标/PWM/PID/编码器/电流固定为 0，nFAULT/过流/编码器异常不触发整车停机。
+ *
+ * CHASSIS_Mx_SIDE:
+ *   MOTOR_SIDE_LEFT:  接收 left_mps。
+ *   MOTOR_SIDE_RIGHT: 接收 right_mps。
+ *
+ * 默认四驱:
+ *   M1/M2 = 左侧，M3/M4 = 右侧，四路启用。
+ *
+ * 常用两驱:
+ *   M1+M3: CHASSIS_M2_ENABLED=0U，CHASSIS_M4_ENABLED=0U。
+ *   M2+M4: CHASSIS_M1_ENABLED=0U，CHASSIS_M3_ENABLED=0U。
+ *
+ * 安全规则:
+ *   左右两侧必须各至少启用一路电机；否则拒绝运动输出。
+ */
+#ifndef CHASSIS_M1_ENABLED
+#define CHASSIS_M1_ENABLED                  1U
+#endif
+#ifndef CHASSIS_M2_ENABLED
+#define CHASSIS_M2_ENABLED                  1U
+#endif
+#ifndef CHASSIS_M3_ENABLED
+#define CHASSIS_M3_ENABLED                  1U
+#endif
+#ifndef CHASSIS_M4_ENABLED
+#define CHASSIS_M4_ENABLED                  1U
+#endif
+
+#ifndef CHASSIS_M1_SIDE
+#define CHASSIS_M1_SIDE                     MOTOR_SIDE_LEFT
+#endif
+#ifndef CHASSIS_M2_SIDE
+#define CHASSIS_M2_SIDE                     MOTOR_SIDE_LEFT
+#endif
+#ifndef CHASSIS_M3_SIDE
+#define CHASSIS_M3_SIDE                     MOTOR_SIDE_RIGHT
+#endif
+#ifndef CHASSIS_M4_SIDE
+#define CHASSIS_M4_SIDE                     MOTOR_SIDE_RIGHT
+#endif
+
 #define CHASSIS_CONTROL_PERIOD_MS           10U
 #define CHASSIS_ENCODER_PERIOD_MS           10U
 #define CHASSIS_ADC_PERIOD_MS               20U
-#define CHASSIS_IMU_PERIOD_MS               20U
+#define CHASSIS_IMU_PERIOD_MS               10U
 #define CHASSIS_LED_PERIOD_MS               50U
 #define CHASSIS_PS2_PERIOD_MS               20U
 #define CHASSIS_ESP12F_PERIOD_MS            5U
@@ -56,6 +105,16 @@ extern "C" {
 #define CHASSIS_ENCODER_QUADRATURE_MULT     4.0f
 #define CHASSIS_MOTOR_GEAR_RATIO            56.0f
 
+/* 方向符号配置。
+ *
+ * CHASSIS_Mx_MOTOR_DIR:
+ *   1 / -1。PWM 方向修正。底盘正输出必须对应车辆前进。
+ *   用 USART1 的 m1/m2/m3/m4 F/R 验证桥臂原始方向。
+ *
+ * CHASSIS_Mx_ENCODER_DIR:
+ *   1 / -1。编码器速度方向修正。车辆前进时 status 中 mm/s 应为正。
+ *   用低速正转配合 status 验证。
+ */
 #define CHASSIS_M1_MOTOR_DIR                1
 #define CHASSIS_M2_MOTOR_DIR                1
 #define CHASSIS_M3_MOTOR_DIR                1

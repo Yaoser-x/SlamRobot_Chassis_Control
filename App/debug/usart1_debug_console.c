@@ -97,7 +97,7 @@ static void DebugConsole_PrintHelp(void)
     "stop             clear tests and commands\r\n"
     "estop 0|1        clear/set emergency stop\r\n"
     "clearfault       clear latched overcurrent/driver faults\r\n"
-    "imutest/imuinit/imu 0|1\r\n"
+    "imutest/imudiag/imuinit/imucal [n]/imucalclear/imu 0|1\r\n"
     "espreset/espboot 0|1\r\n"
     "espflash on|off|status bridge USART1 to ESP12F\r\n"
     "\r\n");
@@ -187,7 +187,7 @@ static void DebugConsole_PrintEspFlashStatus(void)
 
 static void DebugConsole_PrintHeader(void)
 {
-  DebugConsole_Write("t_ms,m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm,vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma,imu_online,imu_chip,errors,source,ps2_ok,ps2_fail,line_bytes,line_frames,esp_rx,esp_tx\r\n");
+  DebugConsole_Write("t_ms,m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm,vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma,imu_online,imu_chip,errors,source,ps2_ok,ps2_fail,line_bytes,line_frames,esp_rx,esp_tx,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg\r\n");
 }
 
 static void DebugConsole_PrintStatus(void)
@@ -249,15 +249,25 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu acc_mg=%ld,%ld,%ld gyro_mdps=%ld,%ld,%ld\r\n",
+                 "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu gcal=%u gbias_mdps=%ld,%ld,%ld acc_mg=%ld,%ld,%ld corr_mdps=%ld,%ld,%ld filt_mdps=%ld,%ld,%ld euler_mdeg=%ld,%ld,%ld\r\n",
                  imu_state.enabled, imu_state.online, imu_state.chip_id, imu_state.last_error,
                  (unsigned long)imu_state.error_count,
+                 imu_state.gyro_calibrated,
+                 (long)DebugConsole_Milli(imu_state.gyro_bias_dps[0]),
+                 (long)DebugConsole_Milli(imu_state.gyro_bias_dps[1]),
+                 (long)DebugConsole_Milli(imu_state.gyro_bias_dps[2]),
                  (long)DebugConsole_Milli(imu_state.accel_g[0]),
                  (long)DebugConsole_Milli(imu_state.accel_g[1]),
                  (long)DebugConsole_Milli(imu_state.accel_g[2]),
-                 (long)DebugConsole_Milli(imu_state.gyro_dps[0]),
-                 (long)DebugConsole_Milli(imu_state.gyro_dps[1]),
-                 (long)DebugConsole_Milli(imu_state.gyro_dps[2]));
+                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[0]),
+                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[1]),
+                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[2]),
+                 (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[0]),
+                 (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[1]),
+                 (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[2]),
+                 (long)DebugConsole_Milli(imu_state.roll_deg),
+                 (long)DebugConsole_Milli(imu_state.pitch_deg),
+                 (long)DebugConsole_Milli(imu_state.yaw_deg));
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
@@ -301,7 +311,7 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
   Esp12fComm_GetState(&esp_state);
 
   (void)snprintf(tx, sizeof(tx),
-                 "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+                 "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld\r\n",
                  (unsigned long)now_ms,
                  (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M1]),
                  (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M2]),
@@ -325,7 +335,19 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
                  (unsigned long)line_state.rx_bytes,
                  (unsigned long)line_state.rx_frames,
                  (unsigned long)esp_state.rx_frames,
-                 (unsigned long)esp_state.tx_frames);
+                 (unsigned long)esp_state.tx_frames,
+                 (long)DebugConsole_Milli(imu_state.accel_g[0]),
+                 (long)DebugConsole_Milli(imu_state.accel_g[1]),
+                 (long)DebugConsole_Milli(imu_state.accel_g[2]),
+                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[0]),
+                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[1]),
+                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[2]),
+                 (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[0]),
+                 (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[1]),
+                 (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[2]),
+                 (long)DebugConsole_Milli(imu_state.roll_deg),
+                 (long)DebugConsole_Milli(imu_state.pitch_deg),
+                 (long)DebugConsole_Milli(imu_state.yaw_deg));
   DebugConsole_Write(tx);
 }
 
@@ -358,7 +380,7 @@ static void DebugConsole_HandleLine(char *line)
 {
   int left;
   int right;
-  int value;
+  int value = 0;
   int lf;
   int lr;
   int rf;
@@ -501,9 +523,57 @@ static void DebugConsole_HandleLine(char *line)
   {
     DebugConsole_Write((ImuBmi270_ProbeNow() != 0U) ? "bmi270 probe ok\r\n" : "bmi270 probe failed\r\n");
   }
+  else if (strcmp(line, "imudiag") == 0)
+  {
+    char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    imu_bmi270_diag_t diag;
+
+    if (ImuBmi270_Diagnose(&diag) == 0U)
+    {
+      DebugConsole_Write("bmi270 diag failed\r\n");
+      return;
+    }
+
+    (void)snprintf(tx, sizeof(tx),
+                   "BMI270 diag hal1 st=%u rx=%02X,%02X,%02X hal2 st=%u rx=%02X,%02X,%02X\r\n",
+                   diag.hal_status[0], diag.hal_rx[0][0], diag.hal_rx[0][1], diag.hal_rx[0][2],
+                   diag.hal_status[1], diag.hal_rx[1][0], diag.hal_rx[1][1], diag.hal_rx[1][2]);
+    DebugConsole_Write(tx);
+    (void)snprintf(tx, sizeof(tx),
+                   "BMI270 diag bitbang rx=%02X,%02X,%02X miso nopull=%u pullup=%u pulldown=%u\r\n",
+                   diag.bitbang_rx[0], diag.bitbang_rx[1], diag.bitbang_rx[2],
+                   diag.miso_nopull, diag.miso_pullup, diag.miso_pulldown);
+    DebugConsole_Write(tx);
+  }
   else if (strcmp(line, "imuinit") == 0)
   {
     DebugConsole_Write((ImuBmi270_ConfigNow() != 0U) ? "bmi270 init ok\r\n" : "bmi270 init failed\r\n");
+  }
+  else if ((strcmp(line, "imucal") == 0) || (sscanf(line, "imucal %d", &value) == 1))
+  {
+    char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    uint16_t samples = (value > 0) ? (uint16_t)value : 0U;
+    imu_bmi270_state_t imu_state;
+
+    DebugConsole_Write("bmi270 gyro calibration: keep still\r\n");
+    if (ImuBmi270_CalibrateGyro(samples, 10U) == 0U)
+    {
+      DebugConsole_Write("bmi270 gyro calibration failed: keep still and retry\r\n");
+      return;
+    }
+
+    ImuBmi270_GetState(&imu_state);
+    (void)snprintf(tx, sizeof(tx),
+                   "bmi270 gyro calibration ok bias_mdps=%ld,%ld,%ld\r\n",
+                   (long)DebugConsole_Milli(imu_state.gyro_bias_dps[0]),
+                   (long)DebugConsole_Milli(imu_state.gyro_bias_dps[1]),
+                   (long)DebugConsole_Milli(imu_state.gyro_bias_dps[2]));
+    DebugConsole_Write(tx);
+  }
+  else if (strcmp(line, "imucalclear") == 0)
+  {
+    ImuBmi270_ClearCalibration();
+    DebugConsole_Write("bmi270 gyro calibration cleared\r\n");
   }
   else if (sscanf(line, "imu %d", &value) == 1)
   {

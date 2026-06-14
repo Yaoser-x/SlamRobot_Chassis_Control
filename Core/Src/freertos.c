@@ -57,7 +57,7 @@ volatile const char *freertos_fatal_file;
 osThreadId_t usart1DebugTaskHandle;
 const osThreadAttr_t usart1DebugTask_attributes = {
   .name = "debugTask",
-  .stack_size = 512 * 4,
+  .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 

@@ -1,6 +1,7 @@
 #include "encoder_driver.h"
 
 #include "chassis_config.h"
+#include "chassis_layout.h"
 #include "encoder_math.h"
 #include "tim.h"
 
@@ -9,14 +10,13 @@
 typedef struct
 {
   TIM_HandleTypeDef *htim;
-  int8_t direction;
 } encoder_hw_t;
 
 static const encoder_hw_t encoder_hw[MOTOR_ID_COUNT] = {
-  { &htim2, CHASSIS_M1_ENCODER_DIR },
-  { &htim3, CHASSIS_M2_ENCODER_DIR },
-  { &htim4, CHASSIS_M3_ENCODER_DIR },
-  { &htim5, CHASSIS_M4_ENCODER_DIR },
+  { &htim2 },
+  { &htim3 },
+  { &htim4 },
+  { &htim5 },
 };
 
 static encoder_state_t encoder_state;
@@ -57,12 +57,28 @@ void EncoderDriver_Update(uint32_t now_ms)
   float meters_per_rev = TWO_PI_F * CHASSIS_WHEEL_RADIUS_M;
   uint32_t primask;
   uint8_t valid_all = 1U;
+  uint8_t left_count = 0U;
+  uint8_t right_count = 0U;
+  int32_t left_count_sum = 0;
+  int32_t right_count_sum = 0;
+  int32_t left_delta_sum = 0;
+  int32_t right_delta_sum = 0;
+  float left_speed_sum = 0.0f;
+  float right_speed_sum = 0.0f;
 
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     uint32_t period = __HAL_TIM_GET_AUTORELOAD(encoder_hw[i].htim);
     now_count[i] = __HAL_TIM_GET_COUNTER(encoder_hw[i].htim);
-    delta[i] = EncoderDriver_DiffCount(now_count[i], last_count[i], period) * encoder_hw[i].direction;
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
+    {
+      delta[i] = EncoderDriver_DiffCount(now_count[i], last_count[i], period) *
+                 ChassisLayout_EncoderDirection((motor_id_t)i);
+    }
+    else
+    {
+      delta[i] = 0;
+    }
     last_count[i] = now_count[i];
   }
 
@@ -72,6 +88,15 @@ void EncoderDriver_Update(uint32_t now_ms)
   encoder_state.last_update_ms = now_ms;
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+    {
+      encoder_state.count[i] = 0;
+      encoder_state.delta[i] = 0;
+      encoder_state.speed_mps[i] = 0.0f;
+      encoder_state.speed_valid[i] = 0U;
+      continue;
+    }
+
     encoder_state.delta[i] = delta[i];
     encoder_state.count[i] += delta[i];
 
@@ -90,18 +115,48 @@ void EncoderDriver_Update(uint32_t now_ms)
       encoder_state.speed_mps[i] = ((float)delta[i] / counts_per_rev) * meters_per_rev / dt_s;
       encoder_state.speed_valid[i] = 1U;
     }
+
+    if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)
+    {
+      left_count++;
+      left_count_sum += encoder_state.count[i];
+      left_delta_sum += encoder_state.delta[i];
+      left_speed_sum += encoder_state.speed_mps[i];
+    }
+    else
+    {
+      right_count++;
+      right_count_sum += encoder_state.count[i];
+      right_delta_sum += encoder_state.delta[i];
+      right_speed_sum += encoder_state.speed_mps[i];
+    }
   }
 
-  encoder_state.left_count = (encoder_state.count[MOTOR_ID_M1] + encoder_state.count[MOTOR_ID_M2]) / 2;
-  encoder_state.right_count = (encoder_state.count[MOTOR_ID_M3] + encoder_state.count[MOTOR_ID_M4]) / 2;
-  encoder_state.left_delta = (encoder_state.delta[MOTOR_ID_M1] + encoder_state.delta[MOTOR_ID_M2]) / 2;
-  encoder_state.right_delta = (encoder_state.delta[MOTOR_ID_M3] + encoder_state.delta[MOTOR_ID_M4]) / 2;
-  encoder_state.left_speed_mps = (encoder_state.speed_mps[MOTOR_ID_M1] + encoder_state.speed_mps[MOTOR_ID_M2]) * 0.5f;
-  encoder_state.right_speed_mps = (encoder_state.speed_mps[MOTOR_ID_M3] + encoder_state.speed_mps[MOTOR_ID_M4]) * 0.5f;
-  encoder_state.left_speed_valid = (encoder_state.speed_valid[MOTOR_ID_M1] != 0U &&
-                                    encoder_state.speed_valid[MOTOR_ID_M2] != 0U) ? 1U : 0U;
-  encoder_state.right_speed_valid = (encoder_state.speed_valid[MOTOR_ID_M3] != 0U &&
-                                     encoder_state.speed_valid[MOTOR_ID_M4] != 0U) ? 1U : 0U;
+  encoder_state.left_count = (left_count != 0U) ? (left_count_sum / (int32_t)left_count) : 0;
+  encoder_state.right_count = (right_count != 0U) ? (right_count_sum / (int32_t)right_count) : 0;
+  encoder_state.left_delta = (left_count != 0U) ? (left_delta_sum / (int32_t)left_count) : 0;
+  encoder_state.right_delta = (right_count != 0U) ? (right_delta_sum / (int32_t)right_count) : 0;
+  encoder_state.left_speed_mps = (left_count != 0U) ? (left_speed_sum / (float)left_count) : 0.0f;
+  encoder_state.right_speed_mps = (right_count != 0U) ? (right_speed_sum / (float)right_count) : 0.0f;
+  encoder_state.left_speed_valid = (left_count != 0U) ? 1U : 0U;
+  encoder_state.right_speed_valid = (right_count != 0U) ? 1U : 0U;
+  for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+    {
+      continue;
+    }
+    if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT &&
+        encoder_state.speed_valid[i] == 0U)
+    {
+      encoder_state.left_speed_valid = 0U;
+    }
+    if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_RIGHT &&
+        encoder_state.speed_valid[i] == 0U)
+    {
+      encoder_state.right_speed_valid = 0U;
+    }
+  }
   if (encoder_state.left_speed_valid == 0U || encoder_state.right_speed_valid == 0U)
   {
     valid_all = 0U;

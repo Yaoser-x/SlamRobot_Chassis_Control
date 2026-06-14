@@ -94,22 +94,22 @@ static void Ps2Control_DelayUs(uint32_t us)
 
 static GPIO_TypeDef *Ps2Control_CmdPort(void)
 {
-  return PS2_DI_GPIO_Port;
+  return PS2_DO_GPIO_Port;
 }
 
 static uint16_t Ps2Control_CmdPin(void)
 {
-  return PS2_DI_Pin;
+  return PS2_DO_Pin;
 }
 
 static GPIO_TypeDef *Ps2Control_DatPort(void)
 {
-  return PS2_DO_GPIO_Port;
+  return PS2_DI_GPIO_Port;
 }
 
 static uint16_t Ps2Control_DatPin(void)
 {
-  return PS2_DO_Pin;
+  return PS2_DI_Pin;
 }
 
 static void Ps2Control_SetCmd(uint8_t high)
