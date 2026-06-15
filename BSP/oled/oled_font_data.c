@@ -2,12 +2,12 @@
  * Copyright 2026 Your Name. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
- * OLED Font Data — Column-Major Format
- * PCtoLCD params: column-major, bit0=top, left-to-right top-to-bottom
+ * OLED Font Data
+ * PCtoLCD params: bit0=top, left-to-right top-to-bottom
  *
- * ASCII 8x16: 95 glyphs (0x20~0x7E), 16 bytes each = 1520 bytes
- * Chinese 12x12: 57 chars, 24 bytes each = 1368 bytes
- * Chinese 16x16: 57 chars, 32 bytes each = 1824 bytes
+ * ASCII 8x16: 95 glyphs (0x20~0x7E), page-major, 16 bytes each = 1520 bytes
+ * Chinese 12x12: 57 chars, column-major, 24 bytes each = 1368 bytes
+ * Chinese 16x16: 57 chars, column-major, 32 bytes each = 1824 bytes
  */
 
 #include "oled_font_8x16.h"
@@ -16,7 +16,8 @@
 
 /* ================================================================
  *  ASCII 8x16 Font — Complete (95 glyphs)
- *  Format: 8 columns x 2 pages = 16 bytes per glyph
+ *  Format: page-major (row-major), 2 pages x 8 columns = 16 bytes/glyph
+ *  PCtoLCD params: page-major, bit0=top, left-to-right top-to-bottom
  *  Glyph index = ASCII_code - 0x20
  * ================================================================ */
 const uint8_t OLED_FONT_8X16_DATA[OLED_FONT_8X16_COUNT * OLED_FONT_8X16_BYTES_PER_CHAR] = {

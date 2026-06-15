@@ -279,16 +279,16 @@ static void OLED_UI_UpdateModuleStatus(void)
  * ================================================================ */
 static void OLED_UI_DrawWelcome(void)
 {
-  /* "F407 V2.0" large title (page 1, centered ~ x=32) */
-  SSD1306_DrawString(32, 1, "F407 V2.0", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+  /* "F407 V2.0" large title (pages 0-1, y=0~15, centered ~ x=32) */
+  SSD1306_DrawString(32, 0, "F407 V2.0", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
 
-  /* Separator line at y=28 */
+  /* Separator line at y=16 (page boundary between title and subtitle) */
   for (uint8_t cx = 16; cx < 112; cx++)
   {
-    SSD1306_SetPixel(cx, 28, 1);
+    SSD1306_SetPixel(cx, 16, 1);
   }
 
-  /* Subtitle: "四轮差速底盘控制" 16x16 Chinese, full width */
+  /* Subtitle: "四轮差速底盘控制" 16x16 Chinese, pages 2-3 (y=16~31) */
   {
     const char *line1 = "四轮差速底盘控制";
     uint8_t cx = (uint8_t)((128 - 8 * 16) / 2);
@@ -296,10 +296,10 @@ static void OLED_UI_DrawWelcome(void)
                            OLED_FONT_16X16_CHARS, 16, 16);
   }
 
-  /* "STM32F407VET6" (page 4, centered) */
+  /* "STM32F407VET6" (pages 4-5, y=32~47, centered) */
   SSD1306_DrawString(24, 4, "STM32F407VET6", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
 
-  /* "系统启动中..." (page 6, centered) */
+  /* "系统启动中..." (pages 6-7, y=48~63, centered) */
   {
     const char *line3 = "系统启动中";
     uint8_t cx = (uint8_t)((128 - 5 * 16) / 2);
@@ -313,7 +313,7 @@ static void OLED_UI_DrawWelcome(void)
  * ================================================================ */
 static void OLED_UI_DrawSelfCheck(void)
 {
-  /* Title: "系统自检中" 16x16 Chinese centered */
+  /* Title: "系统自检中" 16x16 Chinese, pages 0-1 (y=0~15) */
   {
     const char *title = "系统自检中";
     uint8_t cx = (uint8_t)((128 - 5 * 16) / 2);
@@ -321,30 +321,12 @@ static void OLED_UI_DrawSelfCheck(void)
                            OLED_FONT_16X16_CHARS, 16, 16);
   }
 
-  /* Current module name — page 3 centered large */
+  /* Current module name — pages 2-3 (y=16~31), centered */
   uint8_t sci = selfcheck_current;
   if (sci >= SC_COUNT) sci = 0;
-  SSD1306_DrawString(48, 3, sc_names[sci], OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+  SSD1306_DrawString(48, 2, sc_names[sci], OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
 
-  /* Result: OK or FAIL — page 5 centered */
-  if (selfcheck_results[sci] == 1U)
-  {
-    SSD1306_DrawString(52, 5, " OK ", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
-  }
-  else if (selfcheck_results[sci] == 2U)
-  {
-    SSD1306_DrawString(48, 5, "FAIL", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
-  }
-  else
-  {
-    SSD1306_DrawString(52, 5, " ...", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
-  }
-
-  /* Progress bar: page 6, height 6px, y=48 */
-  uint8_t pct = (uint8_t)(((uint16_t)(sci + 1U) * 100U) / SC_COUNT);
-  SSD1306_DrawProgressBar(16, 50, 96, 6, pct);
-
-  /* Page indicator: "[N/8]" 8x16, page 7 bottom */
+  /* Page indicator "[N/8]" — pages 4-5 (y=32~47), full 8x16 visible */
   {
     char buf[8];
     uint8_t item = sci + 1U;
@@ -354,7 +336,21 @@ static void OLED_UI_DrawSelfCheck(void)
     buf[3] = (char)('0' + SC_COUNT);
     buf[4] = ']';
     buf[5] = '\0';
-    SSD1306_DrawString(52, 7, buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+    SSD1306_DrawString(52, 4, buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+  }
+
+  /* Result: OK or FAIL — pages 6-7 (y=48~63), centered */
+  if (selfcheck_results[sci] == 1U)
+  {
+    SSD1306_DrawString(52, 6, " OK ", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+  }
+  else if (selfcheck_results[sci] == 2U)
+  {
+    SSD1306_DrawString(48, 6, "FAIL", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+  }
+  else
+  {
+    SSD1306_DrawString(52, 6, " ...", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
   }
 }
 
@@ -387,8 +383,8 @@ static void OLED_UI_DrawNormal(void)
 
     SSD1306_DrawString(0, 0, time_buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
 
-    /* "运行时间" 16x16 Chinese, x=88 */
-    OLED_UI_DrawChineseStr(88, 0, "运行时间", OLED_FONT_16X16_DATA,
+    /* "运行时间" 16x16 Chinese, x=64 (4×16=64px, ends at x=128) */
+    OLED_UI_DrawChineseStr(64, 0, "运行时间", OLED_FONT_16X16_DATA,
                            OLED_FONT_16X16_CHARS, 16, 16);
   }
 
@@ -411,52 +407,10 @@ static void OLED_UI_DrawNormal(void)
                            OLED_FONT_16X16_CHARS, 16, 16);
   }
 
-  /* Row 2: Module online tags (page 4, 8x16 ASCII, 4+4 two rows) */
+  /* Row 2: Error code + control source — pages 4~5 (y=32~47)
+   * Combined on one line, full 8x16 visible. */
   {
-    static const char *mod_names[8] = {"RPI","PS2","IMU","Line","Enc","ESP","Motr","ADC"};
-    const uint8_t *mod_states[8];
-    mod_states[0] = &mod_rpi_online;
-    mod_states[1] = &mod_ps2_online;
-    mod_states[2] = &mod_imu_online;
-    mod_states[3] = &mod_line_online;
-    mod_states[4] = &mod_enc_online;
-    mod_states[5] = &mod_esp_online;
-    mod_states[6] = &mod_motr_online;
-    mod_states[7] = &mod_adc_online;
-
-    uint8_t x_pos = 0;
-    for (uint8_t i = 0; i < 4; i++)
-    {
-      char buf[5];
-      buf[0] = mod_names[i][0];
-      buf[1] = mod_names[i][1];
-      buf[2] = mod_names[i][2];
-      buf[3] = (char)((*mod_states[i]) ? 0x07 : 0x09);  /* solid dot or hollow dot */
-      buf[4] = '\0';
-      SSD1306_DrawString(x_pos, 4, buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
-      x_pos += 32;
-    }
-
-    x_pos = 0;
-    for (uint8_t i = 4; i < 8; i++)
-    {
-      char buf[5];
-      buf[0] = mod_names[i][0];
-      buf[1] = mod_names[i][1];
-      buf[2] = mod_names[i][2];
-      buf[3] = (char)((*mod_states[i]) ? 0x07 : 0x09);
-      buf[4] = '\0';
-      SSD1306_DrawString(x_pos, 5, buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
-      x_pos += 32;
-    }
-  }
-
-  /* Row 3: Error code + control source (pages 6~7) */
-  {
-    /* "Err:" label */
-    SSD1306_DrawString(0, 6, "Err:", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
-
-    /* Error code hex (blinks when non-zero) */
+    /* Error code hex (blinks when non-zero): "0x0000" at x=0 */
     uint32_t err = mon.error_flags | (selfcheck_errors & 0xFFFF0000UL);
     if (blink_visible || err == 0U)
     {
@@ -469,12 +423,10 @@ static void OLED_UI_DrawNormal(void)
         err_buf[2 + n] = (char)(nib < 10 ? '0' + nib : 'A' + nib - 10);
       }
       err_buf[6] = '\0';
-      SSD1306_DrawString(32, 6, err_buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+      SSD1306_DrawString(0, 4, err_buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
     }
-  }
 
-  /* Row 4: Bottom control source indicator (page 7) */
-  {
+    /* Control source: "M:SRC " at x=56 (6 chars × 8px = 48px → ends at 104) */
     uint8_t src = ControlManager_GetActiveSource();
     static const char *src_names[] = {"NONE","RPI ","PS2 ","ESP ","DBG ","LINE"};
     const char *name = (src <= 5) ? src_names[src] : "????";
@@ -488,7 +440,7 @@ static void OLED_UI_DrawNormal(void)
     buf[5] = name[3];
     buf[6] = ' ';
     buf[7] = '\0';
-    SSD1306_DrawString(80, 7, buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+    SSD1306_DrawString(56, 4, buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
   }
 }
 

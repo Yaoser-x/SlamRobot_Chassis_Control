@@ -118,7 +118,7 @@ void SSD1306_SetPixel(uint8_t x, uint8_t y, uint8_t on)
     framebuffer[idx] &= (uint8_t)(~(1U << (y & 0x07)));
 }
 
-/* --- Draw character (column-major font format) --- */
+/* --- Draw character (page-major font format) --- */
 void SSD1306_DrawChar(uint8_t x, uint8_t page, char ch,
                       const uint8_t *font, uint8_t font_w, uint8_t font_h,
                       uint8_t font_start)
@@ -135,9 +135,9 @@ void SSD1306_DrawChar(uint8_t x, uint8_t page, char ch,
       uint8_t page_y = page + pg;
       if (page_y >= SSD1306_PAGES) break;
 
-      /* Column-major: glyph's (col)-th column, (pg)-th page */
+      /* Row-major (page-major): glyph's (pg)-th page, (col)-th column */
       uint16_t font_idx = (uint16_t)(ch - font_start) * (uint16_t)(font_w * char_pages)
-                        + (uint16_t)col * char_pages + pg;
+                        + (uint16_t)pg * font_w + col;
       uint16_t fb_idx = (uint16_t)page_y * SSD1306_WIDTH + col_x;
 
       framebuffer[fb_idx] = font[font_idx];
