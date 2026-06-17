@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "chassis_tasks.h"
+#include "iwdg.h"
 
 /* USER CODE END Includes */
 
@@ -122,7 +123,7 @@ const osThreadAttr_t imuTask_attributes = {
 osThreadId_t lineTaskHandle;
 const osThreadAttr_t lineTask_attributes = {
   .name = "lineTask",
-  .stack_size = 256 * 4,
+  .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* Definitions for espTask */
@@ -132,7 +133,6 @@ const osThreadAttr_t espTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
-
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 static void FreeRtos_FatalStop(uint32_t reason, const char *file, uint32_t line);
@@ -146,6 +146,10 @@ void StartTask04(void *argument);
 void StartTask05(void *argument);
 void StartTask06(void *argument);
 void StartTask07(void *argument);
+void Task_Usart1DebugConsole(void *argument);
+void Task_Ps2(void *argument);
+void Task_Led(void *argument);
+void Task_Oled(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -273,6 +277,10 @@ void MX_FREERTOS_Init(void) {
   {
     FreeRtos_FatalStop(FREERTOS_FATAL_TASK_CREATE, __FILE__, __LINE__);
   }
+#if defined(DEBUG)
+  __HAL_DBGMCU_FREEZE_IWDG();
+#endif
+  MX_IWDG_Init();
   /* USER CODE END RTOS_EVENTS */
 
 }

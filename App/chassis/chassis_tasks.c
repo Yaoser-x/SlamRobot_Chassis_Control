@@ -1,5 +1,6 @@
 #include "chassis_tasks.h"
 
+#include "iwdg.h"
 #include "adc_monitor.h"
 #include "chassis_config.h"
 #include "chassis_control.h"
@@ -52,6 +53,7 @@ void Task_Safety(void *argument)
   for (;;)
   {
     SystemMonitor_Update();
+    HAL_IWDG_Refresh(&hiwdg);
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_SAFETY, &next_wake, CHASSIS_ADC_PERIOD_MS);
   }
 }
