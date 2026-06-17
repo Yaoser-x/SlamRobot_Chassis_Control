@@ -55,6 +55,8 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 ├── Middlewares/       FreeRTOS 内核 (第三方，禁止手动修改)
 ├── cmake/             工具链文件 + CubeMX CMake 目标
 ├── docs/              详细文档
+├── firmware/          ESP12F Arduino 固件源码
+│   └── esp12f/        WiFi 桥接 + 网页遥控固件 (F407_ESP12F.ino)
 └── .github/workflows/ CI 构建流水线
 ```
 
@@ -66,6 +68,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
 | [调试命令台](docs/debug-console.md) | USART1 全命令参考、CSV 日志字段过滤、line 命令输出格式 |
 | [ESP12F 烧录](docs/esp12f-flashing.md) | esptool.py / Arduino IDE 烧录流程、透明桥行为、常见故障排查 |
+| [ESP12F 固件](firmware/esp12f/) | Arduino 源码：AP+STA WiFi、WebSocket 摇杆遥控、upper_protocol 帧协议 |
 | [Bring-up 验收](docs/bring-up.md) | 11 步分阶段验收：从 RTOS 状态到巡线跟踪 |
 | [开发指南](docs/development.md) | 环境搭建、构建命令、GitHub Actions CI、Git 策略、开发约束、常见排查 |
 | [教学实验](docs/labs/README.md) | 13 个分级实验：开环运动 → 编码器反馈 → PID 调参 → 电流限制 → IMU → 巡线 → PS2 遥操 → 系统安全 → FreeRTOS → 仲裁 → ADC → OLED → ESP12F WiFi |

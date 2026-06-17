@@ -12,6 +12,8 @@ STM32 同时控制 ESP12F 的 `EN`、`RST`、`IO0` 引脚，管理启动模式�
 
 **约束**：第一版固定波特率 `115200 8N1`，不使用高速上传。确认硬件串口稳定后再考虑动态高速烧录。
 
+**固件源码**：`firmware/esp12f/F407_ESP12F.ino`（Arduino 工程），编译和功能说明见 [`firmware/esp12f/README.md`](../firmware/esp12f/README.md)。
+
 ---
 
 ## 2. esptool.py 烧录流程
@@ -100,8 +102,10 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 - 清空当前运动命令（`stop`）
 - 停止 cycle CSV 日志（`stream_mode = 0`）
 - 关闭 `vel` 调试指令
-- 设置 `ESP_IO0 = 0`（下载模式）
-- 复位 ESP12F（`ESP_RST` 脉冲）
+- **下载模式时序**（`Esp12fFlashBridge_StartDownloadBoot`）：
+  1. 同时拉低 `EN` + `IO0` + `RST`，等待 50ms（全芯片掉电复位）
+  2. 释放 `EN`，等待 10ms（ESP8266 在 `EN` 上升沿采样 `IO0`）
+  3. 释放 `RST`，等待 BootROM 就绪
 - 启动 USART1 ↔ USART2 双向透传
 
 ### 4.2 bridge active 期间
@@ -122,16 +126,60 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 
 ---
 
-## 5. 手动退出
+### 4.4 手动退出
 
 如果需要提前退出 bridge（例如烧录完成后立即恢复调试）：
 
 ```
-（在 bridge active 环境下，通过 USART1 发送）
-espflash off
+espflash off    # 关闭烧录桥
+espat off       # 关闭 AT 透传桥
 ```
 
-但注意 bridge active 期间调试台不解析文本命令，因此 `espflash off`**只能在 bridge 未 active 时使用**。如需强制退出，**复位整板**。
+但注意 bridge active 期间调试台不解析文本命令，因此 `espflash off` / `espat off` **只能在 bridge 未 active 时使用**。如需强制退出，**复位整板**。30 秒无串口活动自动退出是最常用的退出方式。
+
+---
+
+## 5. AT 透传模式（连通性测试）
+
+`espat on` 提供与 `espflash on` 相同的 USART1↔USART2 透明桥接，但**不进入下载模式**：IO0 保持高电平，并复位 ESP12F 进入正常运行模式。适用于：
+
+- 焊接后验证 ESP12F 物理连通性（发送 AT 指令看回复）
+- 调试 ESP12F 固件的串口输出
+- 与已烧录固件的 ESP12F 直接交互
+
+### 5.1 步骤
+
+1. 打开 USART1 串口终端，输入：
+
+   ```
+   espat on
+   ```
+
+   提示 `"AT passthrough active: IO0=high, USART1<->USART2 bridge open."`
+
+2. 直接在终端中输入 AT 指令（需 ESP12F 已烧录 AT 固件或支持 AT 指令的自定义固件）：
+
+   ```
+   AT
+   AT+GMR
+   AT+CWMODE?
+   ```
+
+3. 30 秒无操作自动退出，或复位整板强制退出。
+
+### 5.2 与 `espflash on` 的对比
+
+| | `espflash on` | `espat on` |
+|---|---|---|
+| IO0 电平 | 低（下载模式） | 高（正常运行） |
+| RST 操作 | 脉冲复位 → BootROM | 脉冲复位 → 正常固件 |
+| 用途 | esptool.py / Arduino 烧录 | AT 指令测试连通性 |
+| ESP12F 需有固件 | 否（BootROM 烧录） | 是（需运行 AT 固件或自定义固件） |
+| 退出后 | 正常启动（IO0=1, RST 脉冲） | 恢复正常（IO0=1, RST 脉冲） |
+
+### 5.3 空片测试策略
+
+如果 ESP12F 是空片（未烧录任何固件），建议先使用 `espflash on` 烧录 AT 固件或自定义固件，再用 `espat on` 测试连通性。空片本身不会响应 AT 指令。
 
 ---
 
@@ -144,5 +192,5 @@ espflash off
 | `Invalid head of packet` / 上传中断 | 波特率设置错误或串口质量差 | 确认 esptool.py 和 Arduino IDE 均使用 **115200**；不要使用 460800 等高速率 |
 | `chip_id` 返回 `0x000000` 或超时 | ESP12F 未响应 | 检查 `ESP_EN=1`，`ESP_RST=1`；检查 USART2 接线方向；用万用表确认 ESP12F 供电正常 |
 | 烧录成功后 ESP12F 程序不启动 | ESP12F 仍处于下载模式或未复位 | 等待 30 秒自动退出后 ESP12F 自动复位；或复位整板 |
-| 查看桥接统计 | 想知道收发字节数 | bridge 退出后输入 `espflash status`：查看 `pc_rx/pc_tx/esp_rx/esp_tx`、`overflow`、`uart_err`、`auto_exit` |
+| 查看桥接统计 | 想知道收发字节数 | bridge 退出后输入 `espflash status`：查看 `active/download/idle`、`pc_rx/pc_tx/esp_rx/esp_tx`、`ovf`(pc→esp/esp→pc)、`uart_err`、`rx_start_err`、`auto_exit`、`exit_idle` |
 | bridge 中途断开（esptool 报错） | 烧录工具异常退出 | 等待 30 秒自动退出 bridge，或复位整板恢复 |

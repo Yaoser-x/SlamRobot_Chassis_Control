@@ -7,12 +7,12 @@
 #include "usart.h"
 #include "usart1_debug_console.h"
 
-#define ESP12F_FLASH_BRIDGE_RING_SIZE       1024U
-#define ESP12F_FLASH_BRIDGE_TX_CHUNK_SIZE   64U
-#define ESP12F_FLASH_BRIDGE_UART_TIMEOUT_MS 20U
+#define ESP12F_FLASH_BRIDGE_RING_SIZE       4096U
+#define ESP12F_FLASH_BRIDGE_TX_CHUNK_SIZE   128U
 #define ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS 30000U
-#define ESP12F_FLASH_BRIDGE_RESET_LOW_MS    20U
-#define ESP12F_FLASH_BRIDGE_BOOT_WAIT_MS    50U
+#define ESP12F_FLASH_BRIDGE_EN_LOW_MS       50U
+#define ESP12F_FLASH_BRIDGE_EN_TO_RST_MS    10U
+#define ESP12F_FLASH_BRIDGE_BOOT_WAIT_MS    100U
 
 typedef struct
 {
@@ -23,9 +23,35 @@ typedef struct
 
 static bridge_ring_t pc_to_esp_ring;
 static bridge_ring_t esp_to_pc_ring;
+static uint8_t pc_to_esp_tx_chunk[ESP12F_FLASH_BRIDGE_TX_CHUNK_SIZE];
+static uint8_t esp_to_pc_tx_chunk[ESP12F_FLASH_BRIDGE_TX_CHUNK_SIZE];
 static uint8_t usart1_rx_byte;
 static uint8_t usart2_rx_byte;
+static volatile uint8_t pc_to_esp_tx_busy;
+static volatile uint8_t esp_to_pc_tx_busy;
 static esp12f_flash_bridge_state_t bridge_state;
+
+static uint32_t Esp12fFlashBridge_GetIdleMsLocked(void)
+{
+  uint32_t now_ms;
+  uint32_t last_activity_ms;
+  uint32_t primask;
+  int32_t elapsed_ms;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  now_ms = HAL_GetTick();
+  last_activity_ms = bridge_state.last_activity_ms;
+  __set_PRIMASK(primask);
+
+  elapsed_ms = (int32_t)(now_ms - last_activity_ms);
+  if (elapsed_ms <= 0)
+  {
+    return 0U;
+  }
+
+  return (uint32_t)elapsed_ms;
+}
 
 static void BridgeRing_Clear(bridge_ring_t *ring)
 {
@@ -73,23 +99,109 @@ static uint16_t BridgeRing_PopChunk(bridge_ring_t *ring, uint8_t *out, uint16_t 
   return count;
 }
 
+static void Esp12fFlashBridge_ResetTxBusy(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  pc_to_esp_tx_busy = 0U;
+  esp_to_pc_tx_busy = 0U;
+  __set_PRIMASK(primask);
+}
+
+static void Esp12fFlashBridge_StartPcToEspTx(void)
+{
+  uint16_t len = 0U;
+  uint32_t primask;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  if (pc_to_esp_tx_busy == 0U)
+  {
+    len = BridgeRing_PopChunk(&pc_to_esp_ring, pc_to_esp_tx_chunk, (uint16_t)sizeof(pc_to_esp_tx_chunk));
+    if (len > 0U)
+    {
+      pc_to_esp_tx_busy = 1U;
+    }
+  }
+  __set_PRIMASK(primask);
+
+  if (len > 0U)
+  {
+    if (HAL_UART_Transmit_IT(&huart2, pc_to_esp_tx_chunk, len) == HAL_OK)
+    {
+      bridge_state.pc_to_esp_tx_bytes += len;
+    }
+    else
+    {
+      pc_to_esp_tx_busy = 0U;
+      bridge_state.uart_error_count++;
+    }
+  }
+}
+
+static void Esp12fFlashBridge_StartEspToPcTx(void)
+{
+  uint16_t len = 0U;
+  uint32_t primask;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  if (esp_to_pc_tx_busy == 0U)
+  {
+    len = BridgeRing_PopChunk(&esp_to_pc_ring, esp_to_pc_tx_chunk, (uint16_t)sizeof(esp_to_pc_tx_chunk));
+    if (len > 0U)
+    {
+      esp_to_pc_tx_busy = 1U;
+    }
+  }
+  __set_PRIMASK(primask);
+
+  if (len > 0U)
+  {
+    if (HAL_UART_Transmit_IT(&huart1, esp_to_pc_tx_chunk, len) == HAL_OK)
+    {
+      bridge_state.esp_to_pc_tx_bytes += len;
+    }
+    else
+    {
+      esp_to_pc_tx_busy = 0U;
+      bridge_state.uart_error_count++;
+    }
+  }
+}
+
 static void Esp12fFlashBridge_StartDownloadBoot(void)
 {
-  HAL_GPIO_WritePin(ESP_EN_GPIO_Port, ESP_EN_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(ESP_IO0_GPIO_Port, ESP_IO0_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_RESET);
-  HAL_Delay(ESP12F_FLASH_BRIDGE_RESET_LOW_MS);
-  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_SET);
+  /* 1. Pull EN LOW for full chip power-on reset (not just RST) */
+  HAL_GPIO_WritePin(ESP_EN_GPIO_Port,  ESP_EN_Pin,  GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(ESP_IO0_GPIO_Port, ESP_IO0_Pin,  GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin,  GPIO_PIN_RESET);
+  HAL_Delay(ESP12F_FLASH_BRIDGE_EN_LOW_MS);
+
+  /* 2. Release EN - ESP8266 samples IO0 on EN rising edge */
+  HAL_GPIO_WritePin(ESP_EN_GPIO_Port,  ESP_EN_Pin,  GPIO_PIN_SET);
+  HAL_Delay(ESP12F_FLASH_BRIDGE_EN_TO_RST_MS);
+
+  /* 3. Release RST */
+  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin,  GPIO_PIN_SET);
   HAL_Delay(ESP12F_FLASH_BRIDGE_BOOT_WAIT_MS);
 }
 
 static void Esp12fFlashBridge_StartNormalBoot(void)
 {
-  HAL_GPIO_WritePin(ESP_EN_GPIO_Port, ESP_EN_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(ESP_IO0_GPIO_Port, ESP_IO0_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_RESET);
-  HAL_Delay(ESP12F_FLASH_BRIDGE_RESET_LOW_MS);
-  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_SET);
+  /* 1. Pull EN LOW for full chip power-on reset */
+  HAL_GPIO_WritePin(ESP_EN_GPIO_Port,  ESP_EN_Pin,  GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(ESP_IO0_GPIO_Port, ESP_IO0_Pin,  GPIO_PIN_SET);
+  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin,  GPIO_PIN_RESET);
+  HAL_Delay(ESP12F_FLASH_BRIDGE_EN_LOW_MS);
+
+  /* 2. Release EN - ESP8266 samples IO0 on EN rising edge */
+  HAL_GPIO_WritePin(ESP_EN_GPIO_Port,  ESP_EN_Pin,  GPIO_PIN_SET);
+  HAL_Delay(ESP12F_FLASH_BRIDGE_EN_TO_RST_MS);
+
+  /* 3. Release RST */
+  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin,  GPIO_PIN_SET);
   HAL_Delay(ESP12F_FLASH_BRIDGE_BOOT_WAIT_MS);
 }
 
@@ -104,6 +216,8 @@ static void Esp12fFlashBridge_ResetRuntimeState(uint32_t now_ms)
   bridge_state.pc_to_esp_overflow = 0U;
   bridge_state.esp_to_pc_overflow = 0U;
   bridge_state.uart_error_count = 0U;
+  bridge_state.last_auto_exit_idle_ms = 0U;
+  bridge_state.rx_start_errors = 0U;
   bridge_state.last_activity_ms = now_ms;
 }
 
@@ -112,15 +226,17 @@ void Esp12fFlashBridge_Init(void)
   bridge_state = (esp12f_flash_bridge_state_t){0};
   BridgeRing_Clear(&pc_to_esp_ring);
   BridgeRing_Clear(&esp_to_pc_ring);
+  Esp12fFlashBridge_ResetTxBusy();
 }
 
-void Esp12fFlashBridge_Enable(void)
+uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
 {
   uint32_t now_ms = HAL_GetTick();
+  uint8_t rx_ok = 1U;
 
   if (bridge_state.active != 0U)
   {
-    return;
+    return 1U;
   }
 
   ControlManager_ClearCommand();
@@ -129,13 +245,55 @@ void Esp12fFlashBridge_Enable(void)
 
   (void)HAL_UART_Abort(&huart1);
   (void)HAL_UART_Abort(&huart2);
+  Esp12fFlashBridge_ResetTxBusy();
+  Usart1DebugConsole_ClearRxBuffer();
+
+  /* Clear any lingering UART error flags (ORE/FE/NE/PE) that could block
+   * subsequent HAL_UART_Receive_IT calls.  HAL_UART_Abort does not clear
+   * these flags, and a stale ORE would prevent RXNE interrupts from firing. */
+  __HAL_UART_CLEAR_OREFLAG(&huart1);
+  __HAL_UART_CLEAR_OREFLAG(&huart2);
+
   Esp12fFlashBridge_ResetRuntimeState(now_ms);
   bridge_state.active = 1U;
-  bridge_state.download_mode = 1U;
+  bridge_state.download_mode = (download_mode != 0U) ? 1U : 0U;
 
-  Esp12fFlashBridge_StartDownloadBoot();
-  (void)HAL_UART_Receive_IT(&huart1, &usart1_rx_byte, 1U);
-  (void)HAL_UART_Receive_IT(&huart2, &usart2_rx_byte, 1U);
+  if (download_mode != 0U)
+  {
+    Esp12fFlashBridge_StartDownloadBoot();
+  }
+  else
+  {
+    Esp12fFlashBridge_StartNormalBoot();
+  }
+
+  if (HAL_UART_Receive_IT(&huart1, &usart1_rx_byte, 1U) != HAL_OK)
+  {
+    bridge_state.rx_start_errors++;
+    rx_ok = 0U;
+  }
+  if (HAL_UART_Receive_IT(&huart2, &usart2_rx_byte, 1U) != HAL_OK)
+  {
+    bridge_state.rx_start_errors++;
+    rx_ok = 0U;
+  }
+
+  if (rx_ok == 0U)
+  {
+    (void)HAL_UART_Abort(&huart1);
+    (void)HAL_UART_Abort(&huart2);
+    Esp12fFlashBridge_ResetTxBusy();
+    BridgeRing_Clear(&pc_to_esp_ring);
+    BridgeRing_Clear(&esp_to_pc_ring);
+    bridge_state.active = 0U;
+    bridge_state.download_mode = 0U;
+    Esp12fFlashBridge_StartNormalBoot();
+    Usart1DebugConsole_RestartRx();
+    Esp12fComm_RestartRx();
+    return 0U;
+  }
+
+  return 1U;
 }
 
 void Esp12fFlashBridge_Disable(void)
@@ -148,6 +306,7 @@ void Esp12fFlashBridge_Disable(void)
 
   (void)HAL_UART_Abort(&huart1);
   (void)HAL_UART_Abort(&huart2);
+  Esp12fFlashBridge_ResetTxBusy();
   BridgeRing_Clear(&pc_to_esp_ring);
   BridgeRing_Clear(&esp_to_pc_ring);
   bridge_state.active = 0U;
@@ -169,46 +328,45 @@ uint8_t Esp12fFlashBridge_IsActive(void)
   return active;
 }
 
+uint32_t Esp12fFlashBridge_GetIdleMs(void)
+{
+  return Esp12fFlashBridge_GetIdleMsLocked();
+}
+
 void Esp12fFlashBridge_Update(uint32_t now_ms)
 {
-  uint8_t tx_chunk[ESP12F_FLASH_BRIDGE_TX_CHUNK_SIZE];
-  uint16_t len;
+  uint32_t idle_ms;
+
+  (void)now_ms;
 
   if (bridge_state.active == 0U)
   {
     return;
   }
 
-  len = BridgeRing_PopChunk(&pc_to_esp_ring, tx_chunk, (uint16_t)sizeof(tx_chunk));
-  if (len > 0U)
-  {
-    if (HAL_UART_Transmit(&huart2, tx_chunk, len, ESP12F_FLASH_BRIDGE_UART_TIMEOUT_MS) == HAL_OK)
-    {
-      bridge_state.pc_to_esp_tx_bytes += len;
-    }
-    else
-    {
-      bridge_state.uart_error_count++;
-    }
-  }
+  Esp12fFlashBridge_StartPcToEspTx();
+  Esp12fFlashBridge_StartEspToPcTx();
 
-  len = BridgeRing_PopChunk(&esp_to_pc_ring, tx_chunk, (uint16_t)sizeof(tx_chunk));
-  if (len > 0U)
+  idle_ms = Esp12fFlashBridge_GetIdleMsLocked();
+  if (idle_ms >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS)
   {
-    if (HAL_UART_Transmit(&huart1, tx_chunk, len, ESP12F_FLASH_BRIDGE_UART_TIMEOUT_MS) == HAL_OK)
-    {
-      bridge_state.esp_to_pc_tx_bytes += len;
-    }
-    else
-    {
-      bridge_state.uart_error_count++;
-    }
-  }
-
-  if ((now_ms - bridge_state.last_activity_ms) >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS)
-  {
+    bridge_state.last_auto_exit_idle_ms = idle_ms;
     bridge_state.auto_exit_count++;
     Esp12fFlashBridge_Disable();
+  }
+}
+
+void Esp12fFlashBridge_OnTxCplt(UART_HandleTypeDef *huart)
+{
+  if (huart == &huart1)
+  {
+    esp_to_pc_tx_busy = 0U;
+    Esp12fFlashBridge_StartEspToPcTx();
+  }
+  else if (huart == &huart2)
+  {
+    pc_to_esp_tx_busy = 0U;
+    Esp12fFlashBridge_StartPcToEspTx();
   }
 }
 
@@ -254,13 +412,14 @@ void Esp12fFlashBridge_OnUartError(UART_HandleTypeDef *huart)
   }
 
   bridge_state.uart_error_count++;
-  bridge_state.last_activity_ms = HAL_GetTick();
   if (huart == &huart1)
   {
+    esp_to_pc_tx_busy = 0U;
     (void)HAL_UART_Receive_IT(&huart1, &usart1_rx_byte, 1U);
   }
   else if (huart == &huart2)
   {
+    pc_to_esp_tx_busy = 0U;
     (void)HAL_UART_Receive_IT(&huart2, &usart2_rx_byte, 1U);
   }
 }

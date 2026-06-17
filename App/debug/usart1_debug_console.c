@@ -292,7 +292,8 @@ static void DebugConsole_PrintHelp(void)
     "line/line on/off       line sensor raw data / toggle control\r\n"
     "imutest/imudiag/imuinit/imucal [n]/imucalclear/imu 0|1\r\n"
     "espreset/espboot 0|1\r\n"
-    "espflash on|off|status bridge USART1 to ESP12F\r\n"
+    "espflash on|off|status bridge USART1 to ESP12F (download mode)\r\n"
+    "espat on|off          bridge USART1 to ESP12F (normal/AT mode)\r\n"
     "i2cscan               scan I2C1 bus for devices\r\n"
     "\r\n");
 }
@@ -358,14 +359,13 @@ static void DebugConsole_PrintEspFlashStatus(void)
 {
   char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
   esp12f_flash_bridge_state_t bridge_state;
-  uint32_t now_ms = osKernelGetTickCount();
   uint32_t idle_ms;
 
   Esp12fFlashBridge_GetState(&bridge_state);
-  idle_ms = now_ms - bridge_state.last_activity_ms;
+  idle_ms = Esp12fFlashBridge_GetIdleMs();
 
   (void)snprintf(tx, sizeof(tx),
-                 "ESPFLASH active=%u download=%u idle=%lums pc_rx=%lu pc_tx=%lu esp_rx=%lu esp_tx=%lu ovf=%lu/%lu uart_err=%lu auto_exit=%lu\r\n",
+                 "ESPFLASH active=%u download=%u idle=%lums pc_rx=%lu pc_tx=%lu esp_rx=%lu esp_tx=%lu ovf=%lu/%lu uart_err=%lu rx_start_err=%lu auto_exit=%lu exit_idle=%lums\r\n",
                  bridge_state.active,
                  bridge_state.download_mode,
                  (unsigned long)idle_ms,
@@ -376,7 +376,9 @@ static void DebugConsole_PrintEspFlashStatus(void)
                  (unsigned long)bridge_state.pc_to_esp_overflow,
                  (unsigned long)bridge_state.esp_to_pc_overflow,
                  (unsigned long)bridge_state.uart_error_count,
-                 (unsigned long)bridge_state.auto_exit_count);
+                 (unsigned long)bridge_state.rx_start_errors,
+                 (unsigned long)bridge_state.auto_exit_count,
+                 (unsigned long)bridge_state.last_auto_exit_idle_ms);
   DebugConsole_Write(tx);
 }
 
@@ -851,8 +853,14 @@ static void DebugConsole_HandleLine(char *line)
   {
     stream_mode = 0U;
     debug_velocity_enabled = 0U;
-    DebugConsole_Write("esp12f flash bridge on: close this terminal and use esptool/Arduino at 115200\r\n");
-    Esp12fFlashBridge_Enable();
+    if (Esp12fFlashBridge_Enable(1U) != 0U)
+    {
+      DebugConsole_Write("esp12f flash bridge on: close this terminal and use esptool/Arduino at 115200\r\n");
+    }
+    else
+    {
+      DebugConsole_Write("esp12f flash bridge failed: UART RX not ready\r\n");
+    }
   }
   else if (strcmp(line, "espflash off") == 0)
   {
@@ -862,6 +870,25 @@ static void DebugConsole_HandleLine(char *line)
   else if (strcmp(line, "espflash status") == 0)
   {
     DebugConsole_PrintEspFlashStatus();
+  }
+  else if (strcmp(line, "espat on") == 0)
+  {
+    stream_mode = 0U;
+    debug_velocity_enabled = 0U;
+    if (Esp12fFlashBridge_Enable(0U) != 0U)
+    {
+      DebugConsole_Write("AT passthrough active: IO0=high, USART1<->USART2 bridge open.\r\n"
+                         "Type AT commands directly. Auto-exit after 30s idle.\r\n");
+    }
+    else
+    {
+      DebugConsole_Write("AT passthrough failed: UART RX not ready\r\n");
+    }
+  }
+  else if (strcmp(line, "espat off") == 0)
+  {
+    Esp12fFlashBridge_Disable();
+    DebugConsole_Write("AT passthrough off, normal boot requested\r\n");
   }
   else if (strcmp(line, "line") == 0)
   {
@@ -922,6 +949,11 @@ static void DebugConsole_PollRx(void)
         rx_line[rx_len] = '\0';
         DebugConsole_HandleLine(rx_line);
         rx_len = 0U;
+        if (Esp12fFlashBridge_IsActive() != 0U)
+        {
+          Usart1DebugConsole_ClearRxBuffer();
+          break;
+        }
       }
     }
     else if (rx_len < (DEBUG_CONSOLE_RX_LINE_SIZE - 1U))
@@ -951,11 +983,20 @@ void Usart1DebugConsole_Init(void)
   DebugConsole_Write("USART1 debug console ready, type help\r\n");
 }
 
-void Usart1DebugConsole_RestartRx(void)
+void Usart1DebugConsole_ClearRxBuffer(void)
 {
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
   rx_len = 0U;
   rx_head = 0U;
   rx_tail = 0U;
+  __set_PRIMASK(primask);
+}
+
+void Usart1DebugConsole_RestartRx(void)
+{
+  Usart1DebugConsole_ClearRxBuffer();
   (void)HAL_UART_Receive_IT(&huart1, &rx_byte, 1U);
 }
 

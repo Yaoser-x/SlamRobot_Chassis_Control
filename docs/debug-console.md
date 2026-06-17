@@ -37,9 +37,11 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | `imu` | `<0\|1>` | 启用/禁用 IMU 周期采样 |
 | `espreset` | — | 复位 ESP12F（`ESP_RST` 脉冲） |
 | `espboot` | `<0\|1>` | 设置 ESP12F 正常启动 / 下载模式（`ESP_IO0`） |
-| `espflash on` | — | 启用 USART1↔USART2 透明烧录桥 |
+| `espflash on` | — | 启用 USART1↔USART2 透明烧录桥（下载模式：IO0=0 + 复位） |
 | `espflash off` | — | 关闭烧录桥，ESP12F 正常启动 |
 | `espflash status` | — | 查看桥接统计（收发字节/溢出/错误/自动退出次数） |
+| **`espat on`** | — | 启用 USART1↔USART2 AT 透传桥（正常模式：IO0=1 + 复位） |
+| **`espat off`** | — | 关闭 AT 透传桥，ESP12F 正常启动 |
 | **`i2cscan`** | — | 扫描 I2C1 总线（地址 1–127），列出所有 ACK 响应的器件 |
 
 ---
@@ -48,11 +50,11 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 
 ### 3.1 基本用法
 
-日志以 500ms 间隔（2 Hz）向 USART1 输出 CSV 行。**全字段模式**（`log 1` 无参数）输出全部 37 列，兼容历史数据解析脚本。**过滤模式**仅输出指定字段，减少串口带宽占用：
+日志以 500ms 间隔（2 Hz）向 USART1 输出 CSV 行。**全字段模式**（`log 1` 无参数）输出全部 36 列，兼容历史数据解析脚本。**过滤模式**仅输出指定字段，减少串口带宽占用：
 
 ```
 log 0                          停止日志
-log 1                          全字段（37 列），兼容旧行为
+log 1                          全字段（36 列），兼容旧行为
 log 1 imu                      仅时间戳 + IMU 14 列
 log 1 motor imu                时间戳 + motor(8 列) + imu(14 列)，按输入顺序
 log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
@@ -152,7 +154,10 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 - `espreset` 通过拉低 `ESP_RST` 复位 ESP12F
 - `espboot 0` 设置下载模式（`ESP_IO0=0` + 复位），`espboot 1` 恢复正常
-- `espflash on` 操作不可逆——需要等待 30s 自动退出或 `espflash off` 或复位整板才能恢复调试台
+- `espflash on` 进入烧录桥（下载模式：IO0=0, RST 脉冲），用于 esptool.py 或 Arduino 烧录
+- `espat on` 进入 AT 透传桥（正常模式：IO0=1, RST 脉冲），用于手动发 AT 指令测试连通性
+- `espat on` / `espflash on` 操作均不可逆——需要等待 30s 自动退出或复位整板才能恢复调试台
+- `espflash off` / `espat off` 用于桥未激活时手动恢复（或复位整板强制退出）
 
 ### 5.5 I2C 扫描 (`i2cscan`)
 
