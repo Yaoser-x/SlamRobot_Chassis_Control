@@ -12,6 +12,13 @@
 
 PS2 手柄使用类 SPI 协议（CLK/CMD/DAT/CS），GPIO bit-bang 实现：
 
+| 信号 | STM32 引脚 | 运行时方向 |
+|------|-----------|------------|
+| CMD / PS2_DO | PE3 | 输出到手柄 |
+| DAT / PS2_DI | PE2 | 从手柄输入 |
+| CS | PE4 | 输出，低有效 |
+| CLK | PE5 | 输出 |
+
 ```
 帧长: 9 字节 (0x01 0x42 ...)
 速率: ~50 kbps (CLK half-period = 10μs)

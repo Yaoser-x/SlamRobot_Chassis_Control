@@ -22,6 +22,7 @@ extern "C" {
  *
  * 默认两驱:
  *   M1 = 左侧，M3 = 右侧，M2/M4 禁用。
+ *   V2.0 实板 M3: PWM=PE13/PC8，nFAULT=PA3，ENC=PB4/PB5，IPROPI=PC1。
  *
  * 常用两驱:
  *   M1+M3: CHASSIS_M2_ENABLED=0U，CHASSIS_M4_ENABLED=0U。

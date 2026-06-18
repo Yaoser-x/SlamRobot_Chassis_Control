@@ -9,9 +9,11 @@
 | 电机 | 侧别 | IN1 (前进 PWM) | IN2 (后退 PWM) | nFAULT |
 | --- | --- | --- | --- | --- |
 | M1 | 左侧 | TIM1 CH1 / PE9 | TIM8 CH1 / PC6 | PA2 |
-| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PA3 |
-| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PD14 |
+| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PD14 |
+| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PA3 |
 | M4 | 右侧 | TIM1 CH4 / PE14 | TIM8 CH4 / PC9 | PD15 |
+
+> 注意：CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名；运行时在 BSP 映射层修正 M2/M3 的 nFAULT、编码器和电流归属，不改变引脚复用。
 
 ### 1.2 PWM 与保护信号
 
@@ -43,8 +45,8 @@
 | 电机 | 定时器 | 通道引脚 | 模式 | 滤波 | Period |
 | --- | --- | --- | --- | --- | --- |
 | M1 | TIM2 | PA15 CH1, PB3 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
-| M2 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
-| M3 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
+| M2 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
+| M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
 | M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
 
 **配置参数**（`App/chassis/chassis_config.h`）：
@@ -70,8 +72,8 @@ ADC1 配置为 12-bit 分辨率、连续扫描模式、软件触发、DMA2 Strea
 | Rank | ADC 通道 | 引脚 | 信号 | 采样时间 |
 | --- | --- | --- | --- | --- |
 | 1 | ADC1_IN10 | PC0 | M1 电流 | 84 cycles |
-| 2 | ADC1_IN11 | PC1 | M2 电流 | 84 cycles |
-| 3 | ADC1_IN12 | PC2 | M3 电流 | 84 cycles |
+| 2 | ADC1_IN11 | PC1 | M3 电流 | 84 cycles |
+| 3 | ADC1_IN12 | PC2 | M2 电流 | 84 cycles |
 | 4 | ADC1_IN13 | PC3 | M4 电流 | 84 cycles |
 | 5 | ADC1_IN14 | PC4 | VBAT 电池电压 | 84 cycles |
 
@@ -166,8 +168,8 @@ I2C1 总线上挂载 SSD1306 128×64 单色 OLED 显示屏（7-bit 地址 `0x3C`
 
 | 信号 | 引脚 | 方向 | 默认电平 | 用途 |
 | --- | --- | --- | --- | --- |
-| PS2_DO (CMD) | PE3 | Input, Pull-up | — | 命令线（STM32 → 手柄） |
-| PS2_DI (DAT) | PE2 | Output | 高 | 数据线（手柄 → STM32） |
+| PS2_DO (CMD) | PE3 | Output | 高 | 命令线（STM32 → 手柄） |
+| PS2_DI (DAT) | PE2 | Input, Pull-up | — | 数据线（手柄 → STM32） |
 | PS2_CS | PE4 | Output | 高 | 片选（低有效） |
 | PS2_CLK | PE5 | Output | 高 | 时钟（~250 kHz） |
 | TEST_LED | PE6 | Output | — | 状态指示灯 |
@@ -294,7 +296,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | 1 | I2C | `HAL_I2C_IsDeviceReady` 探测 OLED 地址 | `OLED_SC_ERROR_I2C` (bit 9) |
 | 2 | IMU | 读取 BMI270 `chip_id == 0x24` | `OLED_SC_ERROR_IMU` (bit 10) |
 | 3 | ADC | 电池电压 > 6.0V | `OLED_SC_ERROR_ADC` (bit 11) |
-| 4 | Motor | 四路 nFAULT 均为高电平 | `OLED_SC_ERROR_MOTOR` (bit 12) |
+| 4 | Motor | 通过 `MotorDriver_GetState()` 检查已启用逻辑电机无 nFAULT | `OLED_SC_ERROR_MOTOR` (bit 12) |
 | 5 | Encoder | `speed_valid_all` 标志 | `OLED_SC_ERROR_ENCODER` (bit 13) |
 | 6 | UART3 RPI | 暂不检测（直接通过） | `OLED_SC_ERROR_UART3_RPI` (bit 14) |
 | 7 | UART4 Line | 暂不检测（直接通过） | `OLED_SC_ERROR_UART4_LINE` (bit 15) |

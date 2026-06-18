@@ -15,10 +15,12 @@ STM32F407 ADC1 以 DMA 模式循环采样 5 个通道：
 | 通道 | ADC 引脚 | 信号 | 物理意义 |
 |------|---------|------|----------|
 | CH10 | PC0 | M1_IPROPI | M1 电机电流 |
-| CH11 | PC1 | M2_IPROPI | M2 电机电流 |
-| CH12 | PC2 | M3_IPROPI | M3 电机电流 |
+| CH11 | PC1 | M3_IPROPI | M3 电机电流 |
+| CH12 | PC2 | M2_IPROPI | M2 电机电流 |
 | CH13 | PC3 | M4_IPROPI | M4 电机电流 |
 | CH14 | PC4 | VBAT_SENSE | 电池电压（经分压） |
+
+> ADC DMA Rank 仍按 `CH10, CH11, CH12, CH13, CH14` 采样；BSP 层把 `PC1/CH11` 归为逻辑 M3，把 `PC2/CH12` 归为逻辑 M2。
 
 参数（`chassis_config.h`）：
 

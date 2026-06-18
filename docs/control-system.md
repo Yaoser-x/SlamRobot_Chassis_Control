@@ -142,6 +142,8 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 
 **常用两驱**：`CHASSIS_M2_ENABLED=0U, CHASSIS_M4_ENABLED=0U`（仅 M1+M3）或 `CHASSIS_M1_ENABLED=0U, CHASSIS_M3_ENABLED=0U`（仅 M2+M4）。
 
+**V2.0 实板 M3 映射**：逻辑 M3 仍属于右侧，PWM 使用 `TIM1_CH3/TIM8_CH3` (`PE13/PC8`)，但 nFAULT 使用 `PA3`，编码器使用 `TIM3 PB4/PB5`，电流采样使用 `PC1`。CubeMX 生成层的 M2/M3 label 仍保留旧名，BSP 层负责修正逻辑归属。
+
 **安全约束**：左右两侧必须各至少启用一路电机，否则 `ChassisLayout` 拒绝运动输出。
 
 ---

@@ -17,6 +17,7 @@
 #include "ps2_control.h"
 #include "reset_trace.h"
 #include "system_monitor.h"
+#include "tim.h"
 #include "upper_uart.h"
 #include "usart.h"
 
@@ -472,6 +473,7 @@ static void DebugConsole_PrintStatus(void)
   line_uart_state_t line_state;
   esp12f_comm_state_t esp_state;
   motor_driver_state_t motor_state;
+  uint32_t encoder_hw_count[MOTOR_ID_COUNT];
 
   AdcMonitor_GetState(&adc_state);
   EncoderDriver_GetState(&encoder_state);
@@ -482,13 +484,21 @@ static void DebugConsole_PrintStatus(void)
   LineUart_GetState(&line_state);
   Esp12fComm_GetState(&esp_state);
   MotorDriver_GetState(&motor_state);
+  encoder_hw_count[MOTOR_ID_M1] = __HAL_TIM_GET_COUNTER(&htim2);
+  encoder_hw_count[MOTOR_ID_M2] = __HAL_TIM_GET_COUNTER(&htim4);
+  encoder_hw_count[MOTOR_ID_M3] = __HAL_TIM_GET_COUNTER(&htim3);
+  encoder_hw_count[MOTOR_ID_M4] = __HAL_TIM_GET_COUNTER(&htim5);
 
   (void)snprintf(tx, sizeof(tx),
-                 "ENC m1=%ld d=%ld %ldmm/s v=%u m2=%ld d=%ld %ldmm/s v=%u m3=%ld d=%ld %ldmm/s v=%u m4=%ld d=%ld %ldmm/s v=%u\r\n",
+                 "ENC m1=%ld d=%ld %ldmm/s v=%u m2=%ld d=%ld %ldmm/s v=%u m3=%ld d=%ld %ldmm/s v=%u m4=%ld d=%ld %ldmm/s v=%u hw=%lu,%lu,%lu,%lu\r\n",
                  (long)encoder_state.count[MOTOR_ID_M1], (long)encoder_state.delta[MOTOR_ID_M1], (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M1]), encoder_state.speed_valid[MOTOR_ID_M1],
                  (long)encoder_state.count[MOTOR_ID_M2], (long)encoder_state.delta[MOTOR_ID_M2], (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M2]), encoder_state.speed_valid[MOTOR_ID_M2],
                  (long)encoder_state.count[MOTOR_ID_M3], (long)encoder_state.delta[MOTOR_ID_M3], (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M3]), encoder_state.speed_valid[MOTOR_ID_M3],
-                 (long)encoder_state.count[MOTOR_ID_M4], (long)encoder_state.delta[MOTOR_ID_M4], (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M4]), encoder_state.speed_valid[MOTOR_ID_M4]);
+                 (long)encoder_state.count[MOTOR_ID_M4], (long)encoder_state.delta[MOTOR_ID_M4], (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M4]), encoder_state.speed_valid[MOTOR_ID_M4],
+                 (unsigned long)encoder_hw_count[MOTOR_ID_M1],
+                 (unsigned long)encoder_hw_count[MOTOR_ID_M2],
+                 (unsigned long)encoder_hw_count[MOTOR_ID_M3],
+                 (unsigned long)encoder_hw_count[MOTOR_ID_M4]);
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),

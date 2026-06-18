@@ -29,7 +29,9 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 四轮差速, M1+M2 左侧 / M3+M4 右侧, 可通过 `CHASSIS_Mx_ENABLED` + `CHASSIS_Mx_SIDE` 配置 |
-| **构建验证** | Debug — RAM 70,904 B (54%) / FLASH 107,596 B (21%) — Host 测试 2/2 通过 — CI 双 preset |
+| **构建验证** | Debug — RAM 78,760 B (60%) / FLASH 125,120 B (24%) — Host 测试 3/3 通过 — CI 双 preset |
+
+> V2.0 实板 M3 已按板上验证同步：PWM=`PE13/PC8`，nFAULT=`PA3`，编码器=`TIM3 PB4/PB5`，电流采样=`PC1`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名，运行时在 BSP 映射层修正归属。
 
 ## 目录结构
 

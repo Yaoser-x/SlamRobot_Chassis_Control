@@ -17,6 +17,7 @@
 #include "ps2_control.h"
 #include "imu_bmi270.h"
 #include "encoder_driver.h"
+#include "motor_driver.h"
 #include "line_uart.h"
 #include "esp12f_comm.h"
 #include "adc_monitor.h"
@@ -187,12 +188,16 @@ static uint8_t OLED_UI_RunSelfCheck(selfcheck_item_t item)
 
     case SC_MOTOR:
     {
-      GPIO_PinState m1 = HAL_GPIO_ReadPin(M1_FAULT_GPIO_Port, M1_FAULT_Pin);
-      GPIO_PinState m2 = HAL_GPIO_ReadPin(M2_FAULT_GPIO_Port, M2_FAULT_Pin);
-      GPIO_PinState m3 = HAL_GPIO_ReadPin(M3_FAULT_GPIO_Port, M3_FAULT_Pin);
-      GPIO_PinState m4 = HAL_GPIO_ReadPin(M4_FAULT_GPIO_Port, M4_FAULT_Pin);
-      return ((m1 == GPIO_PIN_SET) && (m2 == GPIO_PIN_SET) &&
-              (m3 == GPIO_PIN_SET) && (m4 == GPIO_PIN_SET)) ? 1U : 2U;
+      motor_driver_state_t motor_state;
+      MotorDriver_GetState(&motor_state);
+      for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+      {
+        if (motor_state.fault_active[i] != 0U)
+        {
+          return 2U;
+        }
+      }
+      return 1U;
     }
 
     case SC_ENCODER:

@@ -15,6 +15,14 @@ static uint16_t current_zero_sample_count;
 static uint16_t current_zero_raw[MOTOR_ID_COUNT];
 static uint32_t current_zero_sum[MOTOR_ID_COUNT];
 
+/* ADC DMA order follows CubeMX ranks; logical M2/M3 are swapped here. */
+static const uint8_t current_adc_index[MOTOR_ID_COUNT] = {
+  0U,
+  2U,
+  1U,
+  3U,
+};
+
 static float AdcMonitor_RawToVoltage(uint16_t raw)
 {
   return ((float)raw * ADC_MONITOR_VREF_V) / ADC_MONITOR_RESOLUTION_COUNTS;
@@ -129,7 +137,7 @@ void AdcMonitor_Update(void)
   __disable_irq();
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    raw_current[i] = adc_sample_snapshot[i];
+    raw_current[i] = adc_sample_snapshot[current_adc_index[i]];
     zero_raw[i] = current_zero_raw[i];
     previous_current[i] = adc_state.current_a[i];
   }

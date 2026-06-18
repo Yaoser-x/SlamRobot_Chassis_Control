@@ -12,10 +12,11 @@ typedef struct
   TIM_HandleTypeDef *htim;
 } encoder_hw_t;
 
+/* CubeMX labels keep the legacy M2/M3 names; logical IDs are mapped here. */
 static const encoder_hw_t encoder_hw[MOTOR_ID_COUNT] = {
   { &htim2 },
-  { &htim3 },
   { &htim4 },
+  { &htim3 },
   { &htim5 },
 };
 

@@ -21,10 +21,11 @@ typedef struct
   uint8_t direction_change_coast_cycles;
 } motor_runtime_t;
 
+/* CubeMX labels keep legacy M2/M3 names; logical M2/M3 nFAULT pins are crossed here. */
 static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
   { &htim1, TIM_CHANNEL_1, &htim8, TIM_CHANNEL_1, M1_FAULT_GPIO_Port, M1_FAULT_Pin },
-  { &htim1, TIM_CHANNEL_2, &htim8, TIM_CHANNEL_2, M2_FAULT_GPIO_Port, M2_FAULT_Pin },
-  { &htim1, TIM_CHANNEL_3, &htim8, TIM_CHANNEL_3, M3_FAULT_GPIO_Port, M3_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_2, &htim8, TIM_CHANNEL_2, M3_FAULT_GPIO_Port, M3_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_3, &htim8, TIM_CHANNEL_3, M2_FAULT_GPIO_Port, M2_FAULT_Pin },
   { &htim1, TIM_CHANNEL_4, &htim8, TIM_CHANNEL_4, M4_FAULT_GPIO_Port, M4_FAULT_Pin },
 };
 
