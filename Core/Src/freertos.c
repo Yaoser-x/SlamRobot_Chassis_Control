@@ -27,6 +27,9 @@
 /* USER CODE BEGIN Includes */
 #include "chassis_tasks.h"
 #include "iwdg.h"
+#include "reset_trace.h"
+
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -58,7 +61,7 @@ volatile const char *freertos_fatal_file;
 osThreadId_t usart1DebugTaskHandle;
 const osThreadAttr_t usart1DebugTask_attributes = {
   .name = "debugTask",
-  .stack_size = 1024 * 4,
+  .stack_size = 2048 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 
@@ -135,7 +138,11 @@ const osThreadAttr_t espTask_attributes = {
 };
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-static void FreeRtos_FatalStop(uint32_t reason, const char *file, uint32_t line);
+static void FreeRtos_FatalStop(uint32_t reason,
+                               const char *file,
+                               uint32_t line,
+                               reset_trace_task_t task);
+static reset_trace_task_t FreeRtos_TaskFromName(const char *name);
 
 /* USER CODE END FunctionPrototypes */
 
@@ -158,11 +165,44 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName);
 void vApplicationMallocFailedHook(void);
 
 /* USER CODE BEGIN 4 */
-static void FreeRtos_FatalStop(uint32_t reason, const char *file, uint32_t line)
+static reset_trace_task_t FreeRtos_TaskFromName(const char *name)
+{
+  if (name == NULL)
+  {
+    return RESET_TRACE_TASK_NONE;
+  }
+  if (strcmp(name, "safetyTask") == 0)
+  {
+    return RESET_TRACE_TASK_SAFETY;
+  }
+  if (strcmp(name, "motorTask") == 0)
+  {
+    return RESET_TRACE_TASK_MOTOR;
+  }
+  if (strcmp(name, "ps2Task") == 0)
+  {
+    return RESET_TRACE_TASK_PS2;
+  }
+  if (strcmp(name, "espTask") == 0)
+  {
+    return RESET_TRACE_TASK_ESP;
+  }
+  if (strcmp(name, "debugTask") == 0)
+  {
+    return RESET_TRACE_TASK_DEBUG;
+  }
+  return RESET_TRACE_TASK_NONE;
+}
+
+static void FreeRtos_FatalStop(uint32_t reason,
+                               const char *file,
+                               uint32_t line,
+                               reset_trace_task_t task)
 {
   freertos_fatal_reason = reason;
   freertos_fatal_file = file;
   freertos_fatal_line = line;
+  ResetTrace_CaptureWithTask(RESET_TRACE_KIND_FREERTOS, reason, line, task);
   DRV_SLEEP_ALL_GPIO_Port->BSRR = ((uint32_t)DRV_SLEEP_ALL_Pin << 16U);
   __disable_irq();
   for (;;)
@@ -177,7 +217,10 @@ void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
    configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
    called if a stack overflow is detected. */
   (void)xTask;
-  FreeRtos_FatalStop(FREERTOS_FATAL_STACK_OVERFLOW, (const char *)pcTaskName, 0U);
+  FreeRtos_FatalStop(FREERTOS_FATAL_STACK_OVERFLOW,
+                     (const char *)pcTaskName,
+                     0U,
+                     FreeRtos_TaskFromName((const char *)pcTaskName));
 }
 /* USER CODE END 4 */
 
@@ -189,19 +232,19 @@ void vApplicationMallocFailedHook(void)
    function that will get called if a call to pvPortMalloc() fails.
    pvPortMalloc() is called internally by the kernel whenever a task, queue,
    timer or semaphore is created. It is also called by various parts of the
-   demo application. If heap_1.c or heap_2.c are used, then the size of the
-   heap available to pvPortMalloc() is defined by configTOTAL_HEAP_SIZE in
-   FreeRTOSConfig.h, and the xPortGetFreeHeapSize() API function can be used
-   to query the size of free heap space that remains (although it does not
-   provide information on how the remaining heap might be fragmented). */
-  FreeRtos_FatalStop(FREERTOS_FATAL_MALLOC_FAILED, 0, 0U);
+  demo application. If heap_1.c or heap_2.c are used, then the size of the
+  heap available to pvPortMalloc() is defined by configTOTAL_HEAP_SIZE in
+  FreeRTOSConfig.h, and the xPortGetFreeHeapSize() API function can be used
+  to query the size of free heap space that remains (although it does not
+  provide information on how the remaining heap might be fragmented). */
+  FreeRtos_FatalStop(FREERTOS_FATAL_MALLOC_FAILED, 0, 0U, RESET_TRACE_TASK_NONE);
 }
 /* USER CODE END 5 */
 
 /* USER CODE BEGIN 6 */
 void vApplicationAssertHook(const char *file, unsigned long line)
 {
-  FreeRtos_FatalStop(FREERTOS_FATAL_ASSERT, file, (uint32_t)line);
+  FreeRtos_FatalStop(FREERTOS_FATAL_ASSERT, file, (uint32_t)line, RESET_TRACE_TASK_NONE);
 }
 /* USER CODE END 6 */
 
@@ -275,7 +318,7 @@ void MX_FREERTOS_Init(void) {
       ledTaskHandle == NULL ||
       oledTaskHandle == NULL)
   {
-    FreeRtos_FatalStop(FREERTOS_FATAL_TASK_CREATE, __FILE__, __LINE__);
+    FreeRtos_FatalStop(FREERTOS_FATAL_TASK_CREATE, __FILE__, __LINE__, RESET_TRACE_TASK_NONE);
   }
 #if defined(DEBUG)
   __HAL_DBGMCU_FREEZE_IWDG();

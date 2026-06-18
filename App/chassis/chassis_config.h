@@ -20,8 +20,8 @@ extern "C" {
  *   MOTOR_SIDE_LEFT:  接收 left_mps。
  *   MOTOR_SIDE_RIGHT: 接收 right_mps。
  *
- * 默认四驱:
- *   M1/M2 = 左侧，M3/M4 = 右侧，四路启用。
+ * 默认两驱:
+ *   M1 = 左侧，M3 = 右侧，M2/M4 禁用。
  *
  * 常用两驱:
  *   M1+M3: CHASSIS_M2_ENABLED=0U，CHASSIS_M4_ENABLED=0U。
@@ -34,13 +34,13 @@ extern "C" {
 #define CHASSIS_M1_ENABLED                  1U
 #endif
 #ifndef CHASSIS_M2_ENABLED
-#define CHASSIS_M2_ENABLED                  1U
+#define CHASSIS_M2_ENABLED                  0U
 #endif
 #ifndef CHASSIS_M3_ENABLED
 #define CHASSIS_M3_ENABLED                  1U
 #endif
 #ifndef CHASSIS_M4_ENABLED
-#define CHASSIS_M4_ENABLED                  1U
+#define CHASSIS_M4_ENABLED                  0U
 #endif
 
 #ifndef CHASSIS_M1_SIDE
@@ -124,7 +124,7 @@ extern "C" {
  *   1 / -1。编码器速度方向修正。车辆前进时 status 中 mm/s 应为正。
  *   用低速正转配合 status 验证。
  */
-#define CHASSIS_M1_MOTOR_DIR                1
+#define CHASSIS_M1_MOTOR_DIR                -1
 #define CHASSIS_M2_MOTOR_DIR                1
 #define CHASSIS_M3_MOTOR_DIR                1
 #define CHASSIS_M4_MOTOR_DIR                1
@@ -139,6 +139,8 @@ extern "C" {
 #define ADC_MONITOR_BATTERY_R_UPPER_OHM     47000.0f
 #define ADC_MONITOR_BATTERY_R_LOWER_OHM     10000.0f
 #define ADC_MONITOR_BATTERY_DIVIDER         ((ADC_MONITOR_BATTERY_R_UPPER_OHM + ADC_MONITOR_BATTERY_R_LOWER_OHM) / ADC_MONITOR_BATTERY_R_LOWER_OHM)
+#define ADC_MONITOR_BATTERY_FILTER_ALPHA    0.10f
+#define ADC_MONITOR_CURRENT_ZERO_SAMPLES    256U
 #define MOTOR_CURRENT_SHUNT_OHM             0.1f
 #define MOTOR_CURRENT_ZERO_V                0.0f
 #define MOTOR_CURRENT_VOLTS_PER_AMP         0.1f

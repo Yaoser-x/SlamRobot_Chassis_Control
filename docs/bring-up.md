@@ -89,10 +89,10 @@ motor 0 0
 **命令**：`status`
 
 **确认项**：
-- `vbat` 与万用表测量值一致，偏差 < 0.2V
-- 四路 `current_ma` 在电机空载时接近零（±50mA）
+- `vbat` 与万用表测量值一致，偏差 < 0.2V；`raw` 为 VBAT ADC 原始值
+- `cal=256/256 valid=1` 后，四路电流在静止时接近零（±50mA）
 - 若电池电压偏差明显，调整 `ADC_MONITOR_BATTERY_R_UPPER_OHM` / `_R_LOWER_OHM`
-- 若电流零点偏移，调整 `MOTOR_CURRENT_ZERO_V`
+- 若电流零点偏移，先确认上电校准期间电机未转动，再查看各路 `z=` raw 零点
 
 ---
 

@@ -27,6 +27,7 @@
 
 #define UART_BAUD         115200
 #define STA_TIMEOUT_MS    12000   // STA 连接超时（12s）
+#define STA_RECONNECT_INTERVAL_MS 10000
 #define AP_SSID           "F407_Chassis"
 #define AP_PASS           "12345678"
 #define WEB_SOCKET_PORT   81
@@ -35,9 +36,9 @@
 #define EEPROM_MAGIC      0xA5
 #define EEPROM_MAGIC_ADDR 0
 #define EEPROM_SSID_ADDR  4
-#define EEPROM_PASS_ADDR  36      // 4 + 32
+#define EEPROM_PASS_ADDR  36      // EEPROM_SSID_ADDR + MAX_SSID_LEN
 #define MAX_SSID_LEN      32
-#define MAX_PASS_LEN      32
+#define MAX_PASS_LEN      64
 
 // 底盘控制范围
 #define MAX_LINEAR_MPS    0.5f    // 最大线速度 m/s
@@ -48,17 +49,19 @@
 
 // 底盘状态（解析自 STM32 status 帧）
 struct ChassisStatus {
-  float    left_speed;
-  float    right_speed;
-  int32_t  left_encoder;
-  int32_t  right_encoder;
-  float    battery_voltage;
-  float    left_current;
-  float    right_current;
-  int16_t  imu_accel[3];
-  int16_t  imu_gyro[3];
+  uint8_t  protocol_version;
+  uint8_t  status_flags;
+  uint8_t  control_source;
+  uint8_t  motor_enabled_mask;
   uint32_t error_flags;
-  uint8_t  control_mode;
+  uint32_t latched_error_flags;
+  uint16_t battery_mv;
+  int16_t  motor_speed_mmps[4];
+  int32_t  encoder_count[4];
+  uint16_t motor_current_ma[4];
+  int16_t  motor_target_mmps[4];
+  int16_t  motor_output_permille[4];
+  uint8_t  motor_speed_valid_mask;
 };
 
 // ============================================================================
@@ -114,13 +117,19 @@ static uint8_t crc8(const uint8_t *data, uint16_t len) {
 
 #define PROTO_HEAD_0        0xA5
 #define PROTO_HEAD_1        0x5A
+#define PROTO_VERSION       2
 #define PROTO_MAX_PAYLOAD   64
 #define CMD_SET_VELOCITY    0x01
 #define CMD_ESTOP           0x02
 #define CMD_LINE_CTRL       0x03
 #define CMD_STATUS          0x81
 #define VELOCITY_PAYLOAD_LEN 10
-#define STATUS_PAYLOAD_LEN  45
+#define STATUS_PAYLOAD_LEN  64
+
+#define STATUS_FLAG_ESTOP           (1U << 0)
+#define STATUS_FLAG_FAULT_STOP      (1U << 1)
+#define STATUS_FLAG_LINE_ENABLED    (1U << 2)
+#define STATUS_FLAG_SPEED_VALID_ALL (1U << 3)
 
 // 组装帧：out 至少需 (payload_len + 5) 字节
 static uint16_t buildFrame(uint8_t cmd, const uint8_t *payload,
@@ -165,35 +174,34 @@ static bool parseStatusFrame(const uint8_t *payload, uint8_t len, ChassisStatus 
   if (len != STATUS_PAYLOAD_LEN) return false;
   uint8_t off = 0;
 
-  auto readFloat = [&]() -> float {
-    uint32_t raw = payload[off] | ((uint32_t)payload[off+1] << 8) |
-                   ((uint32_t)payload[off+2] << 16) | ((uint32_t)payload[off+3] << 24);
-    off += 4;
-    float v; memcpy(&v, &raw, 4); return v;
-  };
-  auto readI32 = [&]() -> int32_t {
-    int32_t raw = (int32_t)(payload[off] | ((uint32_t)payload[off+1] << 8) |
-                   ((uint32_t)payload[off+2] << 16) | ((uint32_t)payload[off+3] << 24));
-    off += 4; return raw;
-  };
-  auto readI16 = [&]() -> int16_t {
-    int16_t raw = (int16_t)(payload[off] | ((uint16_t)payload[off+1] << 8));
+  auto readU8 = [&]() -> uint8_t { return payload[off++]; };
+  auto readU16 = [&]() -> uint16_t {
+    uint16_t raw = (uint16_t)(payload[off] | ((uint16_t)payload[off + 1] << 8));
     off += 2; return raw;
   };
+  auto readI16 = [&]() -> int16_t { return (int16_t)readU16(); };
+  auto readU32 = [&]() -> uint32_t {
+    uint32_t raw = (uint32_t)payload[off] | ((uint32_t)payload[off + 1] << 8) |
+                   ((uint32_t)payload[off + 2] << 16) | ((uint32_t)payload[off + 3] << 24);
+    off += 4; return raw;
+  };
+  auto readI32 = [&]() -> int32_t { return (int32_t)readU32(); };
 
-  s.left_speed      = readFloat();
-  s.right_speed     = readFloat();
-  s.left_encoder    = readI32();
-  s.right_encoder   = readI32();
-  s.battery_voltage = readFloat();
-  s.left_current    = readFloat();
-  s.right_current   = readFloat();
-  for (int i = 0; i < 3; i++) s.imu_accel[i] = readI16();
-  for (int i = 0; i < 3; i++) s.imu_gyro[i]  = readI16();
-  s.error_flags     = (uint32_t)(payload[off] | ((uint32_t)payload[off+1] << 8) |
-                       ((uint32_t)payload[off+2] << 16) | ((uint32_t)payload[off+3] << 24));
-  off += 4;
-  s.control_mode    = payload[off];
+  s.protocol_version = readU8();
+  if (s.protocol_version != PROTO_VERSION) return false;
+  s.status_flags = readU8();
+  s.control_source = readU8();
+  s.motor_enabled_mask = readU8();
+  s.error_flags = readU32();
+  s.latched_error_flags = readU32();
+  s.battery_mv = readU16();
+  for (int i = 0; i < 4; i++) s.motor_speed_mmps[i] = readI16();
+  for (int i = 0; i < 4; i++) s.encoder_count[i] = readI32();
+  for (int i = 0; i < 4; i++) s.motor_current_ma[i] = readU16();
+  for (int i = 0; i < 4; i++) s.motor_target_mmps[i] = readI16();
+  for (int i = 0; i < 4; i++) s.motor_output_permille[i] = readI16();
+  s.motor_speed_valid_mask = readU8();
+  (void)readU8();  // reserved
   return true;
 }
 
@@ -267,6 +275,7 @@ static char sta_pass[MAX_PASS_LEN + 1] = "";
 static bool sta_configured = false;
 static bool wifi_connected = false;
 static String my_ip;
+static unsigned long g_last_sta_retry_ms = 0;
 
 static void eepromLoad() {
   EEPROM.begin(EEPROM_SIZE);
@@ -290,20 +299,30 @@ static void eepromSave(const char *ssid, const char *pass) {
 }
 
 static void wifiStartAP() {
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(AP_SSID, AP_PASS);
   my_ip = WiFi.softAPIP().toString();
   wifi_connected = true;
 }
 
+static void wifiBeginSta() {
+  if (sta_configured) {
+    if (strlen(sta_pass) > 0) {
+      WiFi.begin(sta_ssid, sta_pass);
+    } else {
+      WiFi.begin(sta_ssid);
+    }
+    g_last_sta_retry_ms = millis();
+  }
+}
+
 static void wifiInit() {
   eepromLoad();
   WiFi.persistent(false);
+  wifiStartAP();
 
   if (sta_configured) {
-    // 尝试 STA 模式
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(sta_ssid, sta_pass);
+    wifiBeginSta();
 
     unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && (millis() - start) < STA_TIMEOUT_MS) {
@@ -318,12 +337,30 @@ static void wifiInit() {
     if (WiFi.status() == WL_CONNECTED) {
       my_ip = WiFi.localIP().toString();
       wifi_connected = true;
-      return;
     }
   }
+}
 
-  // STA 失败或未配置 → AP 模式
-  wifiStartAP();
+static void wifiMaintain() {
+  if (!sta_configured) return;
+  if (WiFi.status() == WL_CONNECTED) {
+    my_ip = WiFi.localIP().toString();
+    wifi_connected = true;
+    return;
+  }
+  wifi_connected = true;
+  if (millis() - g_last_sta_retry_ms >= STA_RECONNECT_INTERVAL_MS) {
+    WiFi.mode(WIFI_AP_STA);
+    wifiBeginSta();
+  }
+}
+
+static float jsonFloatValue(const String &cmd, const char *key, float fallback) {
+  int idx = cmd.indexOf(key);
+  if (idx < 0) return fallback;
+  idx += strlen(key);
+  while (idx < (int)cmd.length() && (cmd[idx] == ' ' || cmd[idx] == '"')) idx++;
+  return cmd.substring(idx).toFloat();
 }
 
 // ============================================================================
@@ -368,15 +405,19 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
 
   case WStype_TEXT: {
     // 解析 JSON 指令
-    String cmd = String((const char *)payload);
+    String cmd;
+    cmd.reserve(length + 1);
+    for (size_t i = 0; i < length; ++i) {
+      cmd += (char)payload[i];
+    }
 
     if (cmd.startsWith("{\"cmd\":\"vel\"")) {
       // {"cmd":"vel","lx":0.30,"az":0.00}
       int lxIdx = cmd.indexOf("\"lx\":");
       int azIdx = cmd.indexOf("\"az\":");
       if (lxIdx > 0 && azIdx > 0) {
-        g_lx = cmd.substring(lxIdx + 5).toFloat();
-        g_az = cmd.substring(azIdx + 5).toFloat();
+        g_lx = jsonFloatValue(cmd, "\"lx\":", g_lx);
+        g_az = jsonFloatValue(cmd, "\"az\":", g_az);
         // 钳位
         if (g_lx >  MAX_LINEAR_MPS)  g_lx =  MAX_LINEAR_MPS;
         if (g_lx < -MAX_LINEAR_MPS)  g_lx = -MAX_LINEAR_MPS;
@@ -425,7 +466,7 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
         ssid.toCharArray(sta_ssid, MAX_SSID_LEN + 1);
         pass.toCharArray(sta_pass, MAX_PASS_LEN + 1);
         eepromSave(sta_ssid, sta_pass);
-        ws.sendTXT(num, "{\"msg\":\"WiFi config saved. Reboot to apply.\"}");
+        ws.sendTXT(num, "{\"msg\":\"WiFi 配置已保存，重启后生效。\"}");
       }
     }
     break;
@@ -443,131 +484,72 @@ static const char HTML_PAGE[] PROGMEM = R"raw(
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,
-  viewport-fit=cover,maximum-scale=1">
-<title>F407 Chassis</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover,maximum-scale=1">
+<title>F407 底盘控制</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;
-  display:flex;flex-direction:column;align-items:center;min-height:100vh;
-  padding:10px;user-select:none;-webkit-user-select:none;touch-action:none}
-h1{font-size:18px;margin:4px 0;color:#00d2ff}
-#status{font-size:11px;color:#888;margin-bottom:6px;text-align:center}
-#joystick{width:200px;height:200px;background:#16213e;border-radius:50%;
-  border:2px solid #0f3460;position:relative;margin:8px 0}
-#knob{width:56px;height:56px;background:radial-gradient(circle,#00d2ff,#0077b6);
-  border-radius:50%;position:absolute;top:72px;left:72px;
-  box-shadow:0 0 20px rgba(0,210,255,.5)}
-.row{display:flex;gap:8px;margin:4px 0;flex-wrap:wrap;justify-content:center}
-.btn{padding:10px 14px;border:none;border-radius:8px;font-size:14px;
-  font-weight:600;cursor:pointer;min-width:60px}
-.btn-stop{background:#e63946;color:#fff}
-.btn-estop{background:#ff6b00;color:#fff}
-.btn-line{background:#2a9d8f;color:#fff}
-.btn-line.off{background:#555;color:#999}
-#telem{font-size:11px;color:#aaa;margin-top:8px;width:100%;max-width:320px;
-  display:grid;grid-template-columns:1fr 1fr;gap:2px 12px}
-#telem span{color:#00d2ff}
-.slider-row{display:flex;align-items:center;gap:6px;margin:2px 0;font-size:12px}
-.slider-row input{flex:1;max-width:140px}
+:root{--bg:#F6F8FB;--surface:#FFFFFF;--elev:#FFFFFF;--primary:#2563EB;--primary-soft:#DBEAFE;--accent:#0F766E;--ok:#059669;--warn:#D97706;--danger:#DC2626;--text:#111827;--muted:#6B7280;--border:#E5E7EB;--track:#EEF2F7;--shadow:0 10px 24px rgba(15,23,42,.08)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;user-select:none;-webkit-user-select:none}button,input{font:inherit}.app{min-height:100vh;display:flex;flex-direction:column;padding:10px 12px calc(12px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}.top{min-height:44px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:rgba(255,255,255,.88);border:1px solid var(--border);border-radius:8px;padding:6px 8px;gap:8px;box-shadow:var(--shadow);font-size:12px}.conn{display:flex;align-items:center;gap:6px;min-width:0;font-weight:700}.dot{width:8px;height:8px;border-radius:50%;background:var(--danger)}.connected .dot{background:var(--ok)}.ap{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.right{display:flex;align-items:center;justify-content:flex-end;gap:8px}.mono{font-family:"SF Mono","Cascadia Code",Consolas,monospace}.icon{width:32px;height:32px;border:1px solid transparent;background:transparent;color:var(--muted);display:grid;place-items:center;border-radius:8px}.icon:active{background:var(--track);border-color:var(--border)}main{display:grid;gap:10px;padding-top:10px}.dash{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .2s}.stale .dash{opacity:.55}.panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;box-shadow:var(--shadow)}.battery{display:grid;place-items:center;position:relative;min-height:92px}.battery svg{width:126px;height:72px}.battery .read{position:absolute;top:34px;text-align:center}.big{font-size:18px;font-weight:800}.small{font-size:11px;color:var(--muted)}.mode{display:grid;align-content:center;gap:8px}.mode-pill{display:inline-flex;align-items:center;justify-content:center;min-height:30px;border-radius:8px;background:var(--primary-soft);color:var(--primary);font-weight:800}.motors{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.motor{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:8px;padding:9px 10px}.motor:nth-child(n+3){border-left-color:var(--accent)}.motor.fault{border-left-color:var(--danger);background:#FEF2F2;animation:pulse .5s infinite alternate}.mh{display:flex;justify-content:space-between;font-size:11px;font-weight:800;color:var(--muted)}.kv{display:grid;grid-template-columns:42px 1fr 22px;gap:6px;margin-top:5px;align-items:baseline}.kv label{font-size:10px;color:var(--muted)}.kv span{font-size:15px;font-weight:800}.kv b{font-size:10px;color:var(--muted)}.flash{color:var(--primary);transition:color .25s}.error{grid-column:1/-1;display:none;border-left:3px solid var(--danger);background:#FEF2F2;color:var(--danger);border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700}.error.show{display:block}.control{display:grid;gap:10px}.joy{height:210px;max-width:380px;width:100%;margin:0 auto;position:relative;background:linear-gradient(180deg,#FFFFFF,#F8FAFC);border:1px solid var(--border);border-radius:8px;overflow:hidden;touch-action:none;box-shadow:var(--shadow)}.joy:before,.joy:after{content:"";position:absolute;background:var(--border)}.joy:before{left:50%;top:0;width:1px;height:100%}.joy:after{left:0;top:50%;width:100%;height:1px}.joy.locked:after{content:"急停已锁定";display:grid;place-items:center;background:rgba(255,255,255,.86);inset:0;width:auto;height:auto;color:var(--danger);font-weight:900;z-index:3}.thumb{width:52px;height:52px;border-radius:50%;position:absolute;left:calc(50% - 26px);top:calc(50% - 26px);background:var(--primary);box-shadow:0 10px 22px rgba(37,99,235,.28),inset 0 0 0 7px rgba(255,255,255,.28);z-index:2;transition:left .2s ease-out,top .2s ease-out}.dragging .thumb{transition:none}.slider{display:grid;grid-template-columns:auto 1fr 48px;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700}.slider input{width:100%;accent-color:var(--primary)}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}.btn{height:42px;border:0;border-radius:8px;color:white;font-weight:800}.stop{grid-column:1/-1;height:48px;background:var(--danger)}.estop{background:var(--warn)}.estop.active{background:var(--danger);animation:pulse .7s infinite alternate}.line{background:#E5E7EB;color:#374151}.line.active{background:var(--ok);color:white}.btn:active{transform:scale(.98)}.btn:disabled{opacity:.45}.drawer{position:fixed;inset:0;pointer-events:none;z-index:10}.drawer.open{pointer-events:auto}.shade{position:absolute;inset:0;background:rgba(17,24,39,.35);opacity:0;transition:opacity .25s}.drawer.open .shade{opacity:1}.sheet{position:absolute;right:0;top:0;height:100%;width:min(320px,88vw);background:var(--elev);border-left:1px solid var(--border);padding:14px;transform:translateX(100%);transition:transform .25s ease-out;display:grid;align-content:start;gap:12px;box-shadow:-12px 0 32px rgba(15,23,42,.12)}.drawer.open .sheet{transform:translateX(0)}.sheet-head{display:flex;align-items:center;justify-content:space-between}.field{display:grid;gap:5px}.field label{font-size:11px;color:var(--muted);font-weight:700}.field input{height:42px;border-radius:8px;border:1px solid var(--border);background:#F9FAFB;color:var(--text);padding:0 10px}.save{height:42px;border:0;border-radius:8px;background:var(--primary);color:white;font-weight:800}.save:disabled{opacity:.4}.info{border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--muted);font-size:12px;background:#F9FAFB}.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--text);border-radius:8px;padding:8px 12px;color:white;display:none;z-index:12;box-shadow:var(--shadow)}.toast.show{display:block}@keyframes pulse{from{box-shadow:0 0 0 rgba(220,38,38,0)}to{box-shadow:0 0 0 4px rgba(220,38,38,.18)}}@media (min-width:700px){.app{max-width:760px}.dash{grid-template-columns:180px 1fr}.motors{grid-column:auto;grid-template-columns:1fr 1fr}.error{grid-column:1/-1}.control{grid-template-columns:1fr 260px;align-items:start}.joy{max-width:none}}
 </style>
 </head>
 <body>
-<h1>F407 Chassis</h1>
-<div id="status">Connecting...</div>
-<div id="joystick"><div id="knob"></div></div>
-<div class="row">
-  <button class="btn btn-stop" id="btnStop">STOP</button>
-  <button class="btn btn-estop" id="btnEstop">E-STOP</button>
-  <button class="btn btn-line off" id="btnLine">巡线</button>
+<div class="app" id="app">
+  <div class="top" id="top">
+    <div class="conn"><span class="dot"></span><span id="connText">重连中...</span></div>
+    <div class="ap" id="apName">F407_Chassis</div>
+    <div class="right"><span class="mono" id="batTop">--.-V</span><button class="icon" id="openSettings" aria-label="网络设置"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2.1.2 1.8 1.8 0 0 0-.8 1.8V22H9.3v-.3a1.8 1.8 0 0 0-.8-1.8 1.8 1.8 0 0 0-2.1-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.2H3V10h.2a1.7 1.7 0 0 0 1.4-1.2 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.8 1.8 0 0 0 2.1-.2 1.8 1.8 0 0 0 .8-1.8V1h5.4v.3a1.8 1.8 0 0 0 .8 1.8 1.8 1.8 0 0 0 2.1.2l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 20.8 10h.2v3.8h-.2A1.7 1.7 0 0 0 19.4 15Z"/></svg></button></div>
+  </div>
+  <main>
+    <section class="dash">
+      <div class="panel battery">
+        <svg viewBox="0 0 120 70"><path d="M12 58 A48 48 0 0 1 108 58" pathLength="100" fill="none" stroke="var(--border)" stroke-width="10" stroke-linecap="round"/><path id="batArc" d="M12 58 A48 48 0 0 1 108 58" pathLength="100" fill="none" stroke="var(--ok)" stroke-width="10" stroke-linecap="round" stroke-dasharray="100" stroke-dashoffset="100"/></svg>
+        <div class="read"><div class="big" id="batMain">--.-V</div><div class="small" id="batPct">--%</div></div>
+      </div>
+      <div class="panel mode"><div class="small">控制来源</div><div class="mode-pill" id="mode">无</div><div class="small">协议 v<span id="proto">-</span> · <span id="fresh">超时</span></div></div>
+      <div class="motors">
+        <div class="motor" id="m0"><div class="mh"><span>电机 1</span><span id="v0">--</span></div><div class="kv"><label>速度</label><span class="mono" id="s0">0.00</span><b>m/s</b></div><div class="kv"><label>编码</label><span class="mono" id="e0">0</span><b></b></div><div class="kv"><label>电流</label><span class="mono" id="c0">0.00</span><b>A</b></div><div class="kv"><label>输出</label><span class="mono" id="p0">0</span><b></b></div></div>
+        <div class="motor" id="m1"><div class="mh"><span>电机 2</span><span id="v1">--</span></div><div class="kv"><label>速度</label><span class="mono" id="s1">0.00</span><b>m/s</b></div><div class="kv"><label>编码</label><span class="mono" id="e1">0</span><b></b></div><div class="kv"><label>电流</label><span class="mono" id="c1">0.00</span><b>A</b></div><div class="kv"><label>输出</label><span class="mono" id="p1">0</span><b></b></div></div>
+        <div class="motor" id="m2"><div class="mh"><span>电机 3</span><span id="v2">--</span></div><div class="kv"><label>速度</label><span class="mono" id="s2">0.00</span><b>m/s</b></div><div class="kv"><label>编码</label><span class="mono" id="e2">0</span><b></b></div><div class="kv"><label>电流</label><span class="mono" id="c2">0.00</span><b>A</b></div><div class="kv"><label>输出</label><span class="mono" id="p2">0</span><b></b></div></div>
+        <div class="motor" id="m3"><div class="mh"><span>电机 4</span><span id="v3">--</span></div><div class="kv"><label>速度</label><span class="mono" id="s3">0.00</span><b>m/s</b></div><div class="kv"><label>编码</label><span class="mono" id="e3">0</span><b></b></div><div class="kv"><label>电流</label><span class="mono" id="c3">0.00</span><b>A</b></div><div class="kv"><label>输出</label><span class="mono" id="p3">0</span><b></b></div></div>
+      </div>
+      <div class="error" id="errBar">错误 0x00000000</div>
+    </section>
+    <section class="control">
+      <div class="joy" id="joy"><div class="thumb" id="thumb"></div></div>
+      <div class="panel">
+        <div class="slider"><span>速度上限</span><input type="range" id="spdScale" min="10" max="100" value="60"><span class="mono" id="spdVal">60%</span></div>
+        <div class="buttons" style="margin-top:10px"><button class="btn stop" id="btnStop">停止</button><button class="btn estop" id="btnEstop">急停</button><button class="btn line" id="btnLine">巡线关</button></div>
+      </div>
+    </section>
+  </main>
 </div>
-<div class="slider-row">
-  <label>Max spd:</label>
-  <input type="range" id="spdScale" min="10" max="100" value="60">
-  <span id="spdVal">60%</span>
-</div>
-<div id="telem">
-  <div>Left: <span id="tls">0.00</span> m/s</div>
-  <div>Right: <span id="trs">0.00</span> m/s</div>
-  <div>Battery: <span id="tbat">0.0</span> V</div>
-  <div>L-Enc: <span id="tle">0</span></div>
-  <div>R-Enc: <span id="tre">0</span></div>
-  <div>Err: <span id="terr">0</span></div>
-  <div>Cmd Lx: <span id="tlx">0.00</span></div>
-  <div>Cmd Az: <span id="taz">0.00</span></div>
-</div>
+<div class="drawer" id="drawer"><div class="shade" id="shade"></div><div class="sheet"><div class="sheet-head"><strong>网络设置</strong><button class="icon" id="closeSettings" aria-label="关闭"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><div class="field"><label>WiFi 名称</label><input id="ssid" maxlength="32" autocomplete="off"></div><div class="field"><label>WiFi 密码</label><input id="pass" maxlength="64" type="password"></div><button class="save" id="saveWifi" disabled>保存配置</button><div class="info">IP: <span id="ipInfo">-</span><br>WebSocket: <span id="wsInfo">离线</span></div></div></div>
+<div class="toast" id="toast"></div>
 <script>
-var ws,knob,joystick,active=false,knobR=28,joyR=100,knobCX=100,knobCY=100;
-var lineOn=false,spdScale=0.6,estopActive=false;
-
-function connect(){
-  var ip=location.hostname;
-  ws=new WebSocket('ws://'+ip+':81');
-  ws.onopen=function(){document.getElementById('status').textContent='Connected | '+ip};
-  ws.onclose=function(){document.getElementById('status').textContent='Disconnected';setTimeout(connect,2000)};
-  ws.onmessage=function(e){
-    try{
-      var d=JSON.parse(e.data);
-      document.getElementById('tls').textContent=d.ls.toFixed(2);
-      document.getElementById('trs').textContent=d.rs.toFixed(2);
-      document.getElementById('tbat').textContent=d.bat.toFixed(1);
-      document.getElementById('tle').textContent=d.le;
-      document.getElementById('tre').textContent=d.re;
-      document.getElementById('terr').textContent=d.err;
-      document.getElementById('tlx').textContent=d.lx.toFixed(2);
-      document.getElementById('taz').textContent=d.az.toFixed(2);
-    }catch(_){}
-  };
-}
-
-function send(cmd){if(ws&&ws.readyState==1)ws.send(JSON.stringify(cmd))}
-
-function updateJoystick(tx,ty){
-  var rect=joystick.getBoundingClientRect();
-  var cx=tx-rect.left-rect.width/2,cy=ty-rect.top-rect.height/2;
-  var dist=Math.sqrt(cx*cx+cy*cy);
-  var maxR=joyR-knobR;
-  if(dist>maxR){cx=cx/dist*maxR;cy=cy/dist*maxR}
-  knob.style.left=(knobCX+cx-knobR)+'px';
-  knob.style.top=(knobCY+cy-knobR)+'px';
-  var lx=-(cy/maxR)*0.5*spdScale;
-  var az=(cx/maxR)*1.0*spdScale;
-  send({cmd:'vel',lx:lx.toFixed(3),az:az.toFixed(3)});
-}
-
-function resetJoystick(){
-  knob.style.left='72px';knob.style.top='72px';
-  send({cmd:'vel',lx:'0.000',az:'0.000'});
-}
-
-knob=document.getElementById('knob');
-joystick=document.getElementById('joystick');
-
-joystick.addEventListener('touchstart',function(e){active=true;updateJoystick(e.touches[0].clientX,e.touches[0].clientY)});
-joystick.addEventListener('touchmove',function(e){e.preventDefault();if(active)updateJoystick(e.touches[0].clientX,e.touches[0].clientY)});
-joystick.addEventListener('touchend',function(){active=false;resetJoystick()});
-joystick.addEventListener('mousedown',function(e){active=true;updateJoystick(e.clientX,e.clientY)});
-joystick.addEventListener('mousemove',function(e){if(active)updateJoystick(e.clientX,e.clientY)});
-joystick.addEventListener('mouseup',function(){active=false;resetJoystick()});
-
-document.getElementById('btnStop').addEventListener('click',function(){resetJoystick();send({cmd:'stop'})});
-document.getElementById('btnEstop').addEventListener('click',function(){
-  estopActive=!estopActive;
-  this.style.background=estopActive?'#ff0000':'#ff6b00';
-  this.textContent=estopActive?'UNSTOP':'E-STOP';
-  send({cmd:'estop',v:estopActive?1:0});
-});
-document.getElementById('btnLine').addEventListener('click',function(){
-  lineOn=!lineOn;
-  this.classList.toggle('off',!lineOn);
-  this.textContent=lineOn?'巡线:ON':'巡线:OFF';
-  send({cmd:'line',v:lineOn?1:0});
-});
-document.getElementById('spdScale').addEventListener('input',function(){
-  spdScale=parseInt(this.value)/100;
-  document.getElementById('spdVal').textContent=this.value+'%';
-});
-
+var ws,active=false,spdScale=.6,lastSend=0,lastData=0,lx=0,az=0,estop=false,lineOn=false;
+var srcNames=['无','上位机','手柄','ESP12F','调试','巡线'];
+var joy=document.getElementById('joy'),thumb=document.getElementById('thumb');
+function el(id){return document.getElementById(id)}
+function text(id,v){var n=el(id),s=String(v);if(n.textContent!==s){n.textContent=s;n.classList.add('flash');setTimeout(function(){n.classList.remove('flash')},260)}}
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+function toast(msg){var t=el('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
+function connect(){var ip=location.hostname;ws=new WebSocket('ws://'+ip+':81');ws.onopen=function(){el('top').classList.add('connected');text('connText','已连接');text('ipInfo',ip);text('wsInfo','在线')};ws.onclose=function(){el('top').classList.remove('connected');el('drawer').classList.remove('open');text('connText','重连中...');text('wsInfo','离线');setTimeout(connect,2000)};ws.onerror=function(){try{ws.close()}catch(e){}};ws.onmessage=function(e){try{var d=JSON.parse(e.data);if(d.msg){toast(d.msg);setTimeout(function(){el('drawer').classList.remove('open')},2000);return}update(d)}catch(_){}}}
+function hex(v){return('00000000'+(v>>>0).toString(16).toUpperCase()).slice(-8)}
+function update(d){lastData=Date.now();el('app').classList.remove('stale');var bat=d.bat||0,pct=Math.max(0,Math.min(100,Math.round((bat-10.5)/(12.6-10.5)*100)));text('proto',d.pv);text('batTop',bat.toFixed(1)+'V');text('batMain',bat.toFixed(1)+'V');text('batPct',pct+'%');el('batArc').style.strokeDashoffset=100-pct;el('batArc').style.stroke=bat<10.5?'var(--danger)':(bat<11.5?'var(--warn)':'var(--ok)');text('mode',srcNames[d.src]||String(d.src));text('fresh','实时');estop=!!(d.flags&1);lineOn=!!(d.flags&4);el('joy').classList.toggle('locked',estop);el('btnEstop').classList.toggle('active',estop);text('btnEstop',estop?'解除急停':'急停');el('btnLine').classList.toggle('active',lineOn);text('btnLine',lineOn?'巡线开':'巡线关');el('btnStop').disabled=estop;el('btnLine').disabled=estop;var err=d.err>>>0,lat=d.lat>>>0;el('errBar').classList.toggle('show',err!==0||lat!==0);text('errBar','错误 0x'+hex(err)+'  锁存 0x'+hex(lat));for(var i=0;i<4;i++){var en=!!(d.mask&(1<<i)),valid=!!(d.valid&(1<<i)),fault=!!(err&(1<<(i+1)));el('m'+i).classList.toggle('fault',fault);text('v'+i,en?(valid?'正常':'超时'):'关闭');text('s'+i,(d.spd[i]||0).toFixed(2));text('e'+i,d.enc[i]||0);text('c'+i,(d.cur[i]||0).toFixed(2));text('p'+i,d.pwm[i]||0)}}
+function resetJoy(){active=false;joy.classList.remove('dragging');thumb.style.left='calc(50% - 26px)';thumb.style.top='calc(50% - 26px)';lx=0;az=0;send({cmd:'vel',lx:0,az:0});send({cmd:'stop'})}
+function moveJoy(x,y,force){if(estop)return;var r=joy.getBoundingClientRect(),maxX=r.width/2-26,maxY=r.height/2-26,dx=x-r.left-r.width/2,dy=y-r.top-r.height/2;dx=Math.max(-maxX,Math.min(maxX,dx));dy=Math.max(-maxY,Math.min(maxY,dy));thumb.style.left=(r.width/2+dx-26)+'px';thumb.style.top=(r.height/2+dy-26)+'px';var dead=12;if(Math.sqrt(dx*dx+dy*dy)<dead){lx=0;az=0}else{lx=-(dy/maxY)*.5*spdScale;az=(dx/maxX)*1.0*spdScale}var now=Date.now();if(force||now-lastSend>=50){lastSend=now;send({cmd:'vel',lx:Number(lx.toFixed(3)),az:Number(az.toFixed(3))})}}
+joy.addEventListener('pointerdown',function(e){if(estop)return;active=true;joy.classList.add('dragging');joy.setPointerCapture(e.pointerId);moveJoy(e.clientX,e.clientY,true)});
+joy.addEventListener('pointermove',function(e){if(active)moveJoy(e.clientX,e.clientY,false)});
+joy.addEventListener('pointerup',resetJoy);joy.addEventListener('pointercancel',resetJoy);
+el('btnStop').onclick=function(){resetJoy()};
+el('btnEstop').onclick=function(){send({cmd:'estop',v:estop?0:1})};
+el('btnLine').onclick=function(){if(!estop)send({cmd:'line',v:lineOn?0:1})};
+el('spdScale').oninput=function(){spdScale=parseInt(this.value,10)/100;text('spdVal',this.value+'%')};
+el('openSettings').onclick=function(){el('drawer').classList.add('open')};
+el('closeSettings').onclick=el('shade').onclick=function(){el('drawer').classList.remove('open')};
+function wifiValid(){el('saveWifi').disabled=!el('ssid').value}
+el('ssid').oninput=wifiValid;el('pass').oninput=wifiValid;
+el('saveWifi').onclick=function(){send({cmd:'config',ssid:el('ssid').value,pass:el('pass').value});toast('正在保存网络配置')};
+setInterval(function(){if(Date.now()-lastData>300){el('app').classList.add('stale');text('fresh','超时')}},150);
 connect();
 </script>
 </body>
@@ -581,16 +563,37 @@ static void pushTelemetry() {
   if (now - g_last_telem_ms < TELEM_INTERVAL_MS) return;
   g_last_telem_ms = now;
 
-  char json[256];
+  char json[512];
   snprintf(json, sizeof(json),
-    "{\"ls\":%.2f,\"rs\":%.2f,\"le\":%d,\"re\":%d,"
-    "\"bat\":%.1f,\"lc\":%.2f,\"rc\":%.2f,"
-    "\"err\":%u,\"src\":%u,\"lx\":%.2f,\"az\":%.2f}",
-    g_status.left_speed, g_status.right_speed,
-    g_status.left_encoder, g_status.right_encoder,
-    g_status.battery_voltage,
-    g_status.left_current, g_status.right_current,
-    g_status.error_flags, g_status.control_mode,
+    "{\"pv\":%u,\"flags\":%u,\"src\":%u,\"mask\":%u,\"valid\":%u,"
+    "\"err\":%lu,\"lat\":%lu,\"bat\":%.2f,"
+    "\"spd\":[%.2f,%.2f,%.2f,%.2f],"
+    "\"enc\":[%ld,%ld,%ld,%ld],"
+    "\"cur\":[%.2f,%.2f,%.2f,%.2f],"
+    "\"tgt\":[%.2f,%.2f,%.2f,%.2f],"
+    "\"pwm\":[%d,%d,%d,%d],"
+    "\"lx\":%.2f,\"az\":%.2f}",
+    g_status.protocol_version, g_status.status_flags, g_status.control_source,
+    g_status.motor_enabled_mask, g_status.motor_speed_valid_mask,
+    (unsigned long)g_status.error_flags,
+    (unsigned long)g_status.latched_error_flags,
+    (float)g_status.battery_mv / 1000.0f,
+    (float)g_status.motor_speed_mmps[0] / 1000.0f,
+    (float)g_status.motor_speed_mmps[1] / 1000.0f,
+    (float)g_status.motor_speed_mmps[2] / 1000.0f,
+    (float)g_status.motor_speed_mmps[3] / 1000.0f,
+    (long)g_status.encoder_count[0], (long)g_status.encoder_count[1],
+    (long)g_status.encoder_count[2], (long)g_status.encoder_count[3],
+    (float)g_status.motor_current_ma[0] / 1000.0f,
+    (float)g_status.motor_current_ma[1] / 1000.0f,
+    (float)g_status.motor_current_ma[2] / 1000.0f,
+    (float)g_status.motor_current_ma[3] / 1000.0f,
+    (float)g_status.motor_target_mmps[0] / 1000.0f,
+    (float)g_status.motor_target_mmps[1] / 1000.0f,
+    (float)g_status.motor_target_mmps[2] / 1000.0f,
+    (float)g_status.motor_target_mmps[3] / 1000.0f,
+    g_status.motor_output_permille[0], g_status.motor_output_permille[1],
+    g_status.motor_output_permille[2], g_status.motor_output_permille[3],
     g_lx, g_az);
   ws.sendTXT(g_ws_client_id, json);
 }
@@ -598,18 +601,20 @@ static void pushTelemetry() {
 // HTTP 路由：首页
 static void handleRoot() {
   http.sendHeader("Cache-Control", "no-cache");
-  http.send(200, "text/html", FPSTR(HTML_PAGE));
+  http.send_P(200, "text/html", HTML_PAGE);
 }
 
 // HTTP 路由：状态 JSON（方便调试）
 static void handleStatus() {
   char json[256];
   snprintf(json, sizeof(json),
-    "{\"ls\":%.2f,\"rs\":%.2f,\"bat\":%.1f,\"err\":%u,\"src\":%u,"
+    "{\"pv\":%u,\"bat\":%.2f,\"err\":%lu,\"lat\":%lu,\"src\":%u,"
     "\"wifi\":\"%s\",\"sta_cfg\":%d,\"ws\":%d}",
-    g_status.left_speed, g_status.right_speed,
-    g_status.battery_voltage,
-    g_status.error_flags, g_status.control_mode,
+    g_status.protocol_version,
+    (float)g_status.battery_mv / 1000.0f,
+    (unsigned long)g_status.error_flags,
+    (unsigned long)g_status.latched_error_flags,
+    g_status.control_source,
     my_ip.c_str(), sta_configured, g_ws_connected);
   http.send(200, "application/json", json);
 }
@@ -657,8 +662,7 @@ void loop() {
       uint8_t *payload = &rx_frame_buf[4];
       uint8_t payload_len = cmd_len - 1;
 
-      if (cmd == CMD_STATUS && payload_len == STATUS_PAYLOAD_LEN) {
-        parseStatusFrame(payload, payload_len, g_status);
+      if (cmd == CMD_STATUS && parseStatusFrame(payload, payload_len, g_status)) {
         g_status_valid = true;
       }
     }
@@ -677,6 +681,7 @@ void loop() {
   }
 
   // --- HTTP / WebSocket 事件 ---
+  wifiMaintain();
   http.handleClient();
   ws.loop();
 

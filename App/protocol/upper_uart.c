@@ -2,10 +2,11 @@
 
 #include "chassis_config.h"
 #include "chassis_control.h"
+#include "chassis_layout.h"
 #include "cmsis_os2.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
-#include "imu_bmi270.h"
+#include "line_control.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -150,7 +151,6 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   chassis_control_state_t chassis_state;
   encoder_state_t encoder_state;
   system_monitor_state_t monitor_state;
-  imu_bmi270_state_t imu_state;
   uint8_t payload_len;
   uint16_t frame_len;
 
@@ -168,23 +168,44 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   ChassisControl_GetState(&chassis_state);
   EncoderDriver_GetState(&encoder_state);
   SystemMonitor_GetState(&monitor_state);
-  ImuBmi270_GetState(&imu_state);
 
-  status.left_speed = chassis_state.left_actual_mps;
-  status.right_speed = chassis_state.right_actual_mps;
-  status.left_encoder = encoder_state.left_count;
-  status.right_encoder = encoder_state.right_count;
   status.battery_voltage = monitor_state.battery_voltage;
-  status.left_current = monitor_state.left_current_a;
-  status.right_current = monitor_state.right_current_a;
-  status.imu_accel[0] = imu_state.accel_raw[0];
-  status.imu_accel[1] = imu_state.accel_raw[1];
-  status.imu_accel[2] = imu_state.accel_raw[2];
-  status.imu_gyro[0] = imu_state.gyro_raw[0];
-  status.imu_gyro[1] = imu_state.gyro_raw[1];
-  status.imu_gyro[2] = imu_state.gyro_raw[2];
   status.error_flags = monitor_state.error_flags;
-  status.control_mode = monitor_state.control_mode;
+  status.latched_error_flags = monitor_state.latched_error_flags;
+  status.control_source = monitor_state.control_mode;
+  if (ControlManager_IsEmergencyStop() != 0U)
+  {
+    status.status_flags |= UPPER_STATUS_FLAG_ESTOP;
+  }
+  if (ControlManager_IsFaultStop() != 0U)
+  {
+    status.status_flags |= UPPER_STATUS_FLAG_FAULT_STOP;
+  }
+  if (LineControl_IsEnabled() != 0U)
+  {
+    status.status_flags |= UPPER_STATUS_FLAG_LINE_ENABLED;
+  }
+  if (encoder_state.speed_valid_all != 0U)
+  {
+    status.status_flags |= UPPER_STATUS_FLAG_SPEED_VALID_ALL;
+  }
+  for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
+  {
+    motor_id_t motor = (motor_id_t)i;
+    status.motor_speed_mps[i] = chassis_state.motor_actual_mps[i];
+    status.encoder_count[i] = encoder_state.count[i];
+    status.motor_current_a[i] = monitor_state.motor_current_a[i];
+    status.motor_target_mps[i] = chassis_state.motor_target_mps[i];
+    status.motor_output_permille[i] = chassis_state.motor_output_permille[i];
+    if (ChassisLayout_MotorEnabled(motor) != 0U)
+    {
+      status.motor_enabled_mask |= (uint8_t)(1U << i);
+    }
+    if (encoder_state.speed_valid[i] != 0U)
+    {
+      status.motor_speed_valid_mask |= (uint8_t)(1U << i);
+    }
+  }
 
   payload_len = UpperProtocol_BuildStatusPayload(&status, upper_status_payload, sizeof(upper_status_payload));
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_STATUS, upper_status_payload, payload_len, upper_tx_frame, sizeof(upper_tx_frame));

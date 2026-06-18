@@ -15,6 +15,7 @@
 #include "line_uart.h"
 #include "motor_driver.h"
 #include "ps2_control.h"
+#include "reset_trace.h"
 #include "system_monitor.h"
 #include "upper_uart.h"
 #include "usart.h"
@@ -43,6 +44,8 @@ static uint8_t rx_byte;
 static volatile uint8_t rx_ring[DEBUG_CONSOLE_RX_RING_SIZE];
 static volatile uint16_t rx_head;
 static volatile uint16_t rx_tail;
+static uint32_t boot_reset_flags;
+static uint8_t boot_reset_flags_captured;
 
 extern osThreadId_t defaultTaskHandle;
 extern osThreadId_t safetyTaskHandle;
@@ -80,6 +83,76 @@ static int16_t DebugConsole_ClampPermille(int32_t value)
     return -CHASSIS_PWM_MAX_PERMILLE;
   }
   return (int16_t)value;
+}
+
+static void DebugConsole_CaptureResetFlags(void)
+{
+  if (boot_reset_flags_captured == 0U)
+  {
+    boot_reset_flags = RCC->CSR;
+    boot_reset_flags_captured = 1U;
+    __HAL_RCC_CLEAR_RESET_FLAGS();
+  }
+}
+
+static uint8_t DebugConsole_ResetFlag(uint32_t flag)
+{
+  return ((boot_reset_flags & flag) != 0UL) ? 1U : 0U;
+}
+
+static void DebugConsole_PrintResetFlags(void)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+
+  DebugConsole_CaptureResetFlags();
+  (void)snprintf(tx, sizeof(tx),
+                 "RESET csr=0x%08lX bor=%u por=%u pin=%u sftr=%u iwdg=%u wwdg=%u lpwr=%u\r\n",
+                 (unsigned long)boot_reset_flags,
+                 DebugConsole_ResetFlag(RCC_CSR_BORRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_PORRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_PINRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_SFTRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_IWDGRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_WWDGRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_LPWRRSTF));
+  DebugConsole_Write(tx);
+}
+
+static void DebugConsole_PrintResetTrace(void)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  reset_trace_record_t trace;
+  uint8_t valid = ResetTrace_GetBootRecord(&trace);
+
+  (void)snprintf(tx, sizeof(tx),
+                 "RESETTRACE valid=%u kind=%lu reason=%lu task=%lu line=%lu cfsr=0x%08lX hfsr=0x%08lX bfar=0x%08lX mmfar=0x%08lX pc=0x%08lX lr=0x%08lX xpsr=0x%08lX exc=0x%08lX sp=0x%08lX d0=0x%08lX d1=0x%08lX d2=0x%08lX d3=0x%08lX safety=%lu motor=%lu ps2=%lu esp=%lu debug=%lu source=%lu estop=%lu fault=%lu\r\n",
+                 valid,
+                 (unsigned long)trace.kind,
+                 (unsigned long)trace.reason,
+                 (unsigned long)trace.task,
+                 (unsigned long)trace.line,
+                 (unsigned long)trace.cfsr,
+                 (unsigned long)trace.hfsr,
+                 (unsigned long)trace.bfar,
+                 (unsigned long)trace.mmfar,
+                 (unsigned long)trace.stacked_pc,
+                 (unsigned long)trace.stacked_lr,
+                 (unsigned long)trace.stacked_xpsr,
+                 (unsigned long)trace.exc_return,
+                 (unsigned long)trace.stack_ptr,
+                 (unsigned long)trace.detail0,
+                 (unsigned long)trace.detail1,
+                 (unsigned long)trace.detail2,
+                 (unsigned long)trace.detail3,
+                 (unsigned long)trace.heartbeat_safety,
+                 (unsigned long)trace.heartbeat_motor,
+                 (unsigned long)trace.heartbeat_ps2,
+                 (unsigned long)trace.heartbeat_esp,
+                 (unsigned long)trace.heartbeat_debug,
+                 (unsigned long)trace.source,
+                 (unsigned long)trace.estop,
+                 (unsigned long)trace.fault);
+  DebugConsole_Write(tx);
 }
 
 static uint8_t DebugConsole_MotorTestAllowed(void)
@@ -436,12 +509,15 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "ADC vbat=%ldmV m1=%ldmA raw=%u m2=%ldmA raw=%u m3=%ldmA raw=%u m4=%ldmA raw=%u valid=%u\r\n",
+                 "ADC vbat=%ldmV raw=%u m1=%ldmA raw=%u z=%u m2=%ldmA raw=%u z=%u m3=%ldmA raw=%u z=%u m4=%ldmA raw=%u z=%u cal=%u/%u valid=%u\r\n",
                  (long)DebugConsole_Milli(adc_state.battery_voltage),
-                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M1]), adc_state.raw_current[MOTOR_ID_M1],
-                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M2]), adc_state.raw_current[MOTOR_ID_M2],
-                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M3]), adc_state.raw_current[MOTOR_ID_M3],
-                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M4]), adc_state.raw_current[MOTOR_ID_M4],
+                 adc_state.raw_battery,
+                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M1]), adc_state.raw_current[MOTOR_ID_M1], adc_state.current_zero_raw[MOTOR_ID_M1],
+                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M2]), adc_state.raw_current[MOTOR_ID_M2], adc_state.current_zero_raw[MOTOR_ID_M2],
+                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M3]), adc_state.raw_current[MOTOR_ID_M3], adc_state.current_zero_raw[MOTOR_ID_M3],
+                 (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M4]), adc_state.raw_current[MOTOR_ID_M4], adc_state.current_zero_raw[MOTOR_ID_M4],
+                 adc_state.current_zero_sample_count,
+                 (uint16_t)ADC_MONITOR_CURRENT_ZERO_SAMPLES,
                  adc_state.current_valid);
   DebugConsole_Write(tx);
 
@@ -468,10 +544,15 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "SYS source=%u errors=0x%08lX latched=0x%08lX drv_fault=%u,%u,%u,%u line=%lu/%lu esp=%lu/%lu ps2=%u ok=%lu fail=%lu\r\n",
+                 "SYS source=%u errors=0x%08lX latched=0x%08lX reset=0x%08lX bor=%u por=%u iwdg=%u sftr=%u drv_fault=%u,%u,%u,%u line=%lu/%lu esp=%lu/%lu ps2=%u ok=%lu fail=%lu\r\n",
                  monitor_state.control_mode,
                  (unsigned long)monitor_state.error_flags,
                  (unsigned long)monitor_state.latched_error_flags,
+                 (unsigned long)boot_reset_flags,
+                 DebugConsole_ResetFlag(RCC_CSR_BORRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_PORRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_IWDGRSTF),
+                 DebugConsole_ResetFlag(RCC_CSR_SFTRSTF),
                  motor_state.fault_active[MOTOR_ID_M1],
                  motor_state.fault_active[MOTOR_ID_M2],
                  motor_state.fault_active[MOTOR_ID_M3],
@@ -484,6 +565,7 @@ static void DebugConsole_PrintStatus(void)
                  (unsigned long)ps2_state.rx_ok_count,
                  (unsigned long)ps2_state.rx_fail_count);
   DebugConsole_Write(tx);
+  DebugConsole_PrintResetTrace();
 }
 
 static void DebugConsole_PrintLogFrame(uint32_t now_ms)
@@ -970,6 +1052,7 @@ static void DebugConsole_PollRx(void)
 
 void Usart1DebugConsole_Init(void)
 {
+  DebugConsole_CaptureResetFlags();
   rx_len = 0U;
   stream_mode = 0U;
   debug_velocity_enabled = 0U;
@@ -980,6 +1063,8 @@ void Usart1DebugConsole_Init(void)
   HAL_NVIC_EnableIRQ(USART1_IRQn);
   Usart1DebugConsole_RestartRx();
   DebugConsole_Write("\r\nF407 V2 chassis firmware\r\n");
+  DebugConsole_PrintResetFlags();
+  DebugConsole_PrintResetTrace();
   DebugConsole_Write("USART1 debug console ready, type help\r\n");
 }
 
@@ -1026,6 +1111,7 @@ void Task_Usart1DebugConsole(void *argument)
   {
     uint32_t now_ms = osKernelGetTickCount();
 
+    ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_DEBUG, now_ms);
     if (Esp12fFlashBridge_IsActive() != 0U)
     {
       osDelay(DEBUG_CONSOLE_TASK_PERIOD_MS);

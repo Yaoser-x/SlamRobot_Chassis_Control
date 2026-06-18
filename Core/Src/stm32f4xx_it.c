@@ -22,6 +22,7 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "reset_trace.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,6 +32,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define ADC_DMA_GUARD_REASON_INSTANCE (1UL << 0)
+#define ADC_DMA_GUARD_REASON_BASE     (1UL << 1)
+#define ADC_DMA_GUARD_REASON_INDEX    (1UL << 2)
+#define ADC_DMA_GUARD_REASON_PARENT   (1UL << 3)
 
 /* USER CODE END PD */
 
@@ -41,16 +46,71 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
+extern DMA_HandleTypeDef hdma_adc1;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
+static void HardFault_HandlerC(uint32_t *stack, uint32_t exc_return) __attribute__((used, noreturn));
+static uint32_t AdcDmaGuardReason(void);
+static void AdcDmaGuardStop(uint32_t reason);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void Fault_DisableMotorDriver(void)
+{
+  DRV_SLEEP_ALL_GPIO_Port->BSRR = ((uint32_t)DRV_SLEEP_ALL_Pin << 16U);
+}
+
+static void HardFault_HandlerC(uint32_t *stack, uint32_t exc_return)
+{
+  ResetTrace_CaptureFaultStack(RESET_TRACE_KIND_HARDFAULT, stack, exc_return);
+  Fault_DisableMotorDriver();
+  while (1)
+  {
+  }
+}
+
+static uint32_t AdcDmaGuardReason(void)
+{
+  uint32_t reason = 0U;
+
+  if (hdma_adc1.Instance != DMA2_Stream0)
+  {
+    reason |= ADC_DMA_GUARD_REASON_INSTANCE;
+  }
+  if (hdma_adc1.StreamBaseAddress != (uint32_t)DMA2)
+  {
+    reason |= ADC_DMA_GUARD_REASON_BASE;
+  }
+  if (hdma_adc1.StreamIndex != 0U)
+  {
+    reason |= ADC_DMA_GUARD_REASON_INDEX;
+  }
+  if (hdma_adc1.Parent == 0)
+  {
+    reason |= ADC_DMA_GUARD_REASON_PARENT;
+  }
+  return reason;
+}
+
+static void AdcDmaGuardStop(uint32_t reason)
+{
+  ResetTrace_CaptureWithDetails(RESET_TRACE_KIND_DMA_GUARD,
+                                reason,
+                                __LINE__,
+                                RESET_TRACE_TASK_NONE,
+                                (uint32_t)hdma_adc1.Instance,
+                                hdma_adc1.StreamBaseAddress,
+                                hdma_adc1.StreamIndex,
+                                (uint32_t)hdma_adc1.Parent);
+  DMA2->LIFCR = 0x3FU;
+  HAL_NVIC_DisableIRQ(DMA2_Stream0_IRQn);
+  Fault_DisableMotorDriver();
+}
 
 /* USER CODE END 0 */
 
@@ -76,6 +136,8 @@ extern TIM_HandleTypeDef htim6;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
+  ResetTrace_Capture(RESET_TRACE_KIND_NMI, 0U, 0U);
+  Fault_DisableMotorDriver();
 
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
@@ -88,16 +150,19 @@ void NMI_Handler(void)
 /**
   * @brief This function handles Hard fault interrupt.
   */
-void HardFault_Handler(void)
+__attribute__((naked)) void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  __asm volatile
+  (
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "mov r1, lr      \n"
+    "b HardFault_HandlerC \n"
+  );
   /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
-    /* USER CODE END W1_HardFault_IRQn 0 */
-  }
 }
 
 /**
@@ -106,6 +171,8 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
+  ResetTrace_Capture(RESET_TRACE_KIND_MEMMANAGE, 0U, 0U);
+  Fault_DisableMotorDriver();
 
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
@@ -121,6 +188,8 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
+  ResetTrace_Capture(RESET_TRACE_KIND_BUSFAULT, 0U, 0U);
+  Fault_DisableMotorDriver();
 
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
@@ -136,6 +205,8 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
+  ResetTrace_Capture(RESET_TRACE_KIND_USAGEFAULT, 0U, 0U);
+  Fault_DisableMotorDriver();
 
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
@@ -269,8 +340,14 @@ void TIM6_DAC_IRQHandler(void)
 void DMA2_Stream0_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA2_Stream0_IRQn 0 */
+  uint32_t guard_reason = AdcDmaGuardReason();
 
   /* USER CODE END DMA2_Stream0_IRQn 0 */
+  if (guard_reason != 0U)
+  {
+    AdcDmaGuardStop(guard_reason);
+    return;
+  }
   HAL_DMA_IRQHandler(&hdma_adc1);
   /* USER CODE BEGIN DMA2_Stream0_IRQn 1 */
 

@@ -14,11 +14,13 @@
 #include "line_control.h"
 #include "line_uart.h"
 #include "ps2_control.h"
+#include "reset_trace.h"
 #include "system_monitor.h"
 #include "upper_uart.h"
 #include "usart1_debug_console.h"
 #include "ssd1306.h"
 #include "oled_ui.h"
+#include "control_manager.h"
 
 void ChassisTasks_InitHardware(void)
 {
@@ -52,7 +54,13 @@ void Task_Safety(void *argument)
   (void)argument;
   for (;;)
   {
+    uint32_t now_ms = osKernelGetTickCount();
+
     SystemMonitor_Update();
+    ResetTrace_UpdateControl(ControlManager_GetActiveSource(),
+                             ControlManager_IsEmergencyStop(),
+                             ControlManager_IsFaultStop());
+    ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_SAFETY, now_ms);
     HAL_IWDG_Refresh(&hiwdg);
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_SAFETY, &next_wake, CHASSIS_ADC_PERIOD_MS);
   }
@@ -64,8 +72,11 @@ void Task_MotorControl(void *argument)
   (void)argument;
   for (;;)
   {
-    EncoderDriver_Update(osKernelGetTickCount());
-    ChassisControl_Step(osKernelGetTickCount());
+    uint32_t now_ms = osKernelGetTickCount();
+
+    ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_MOTOR, now_ms);
+    EncoderDriver_Update(now_ms);
+    ChassisControl_Step(now_ms);
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_MOTOR, &next_wake, CHASSIS_CONTROL_PERIOD_MS);
   }
 }
@@ -111,7 +122,10 @@ void Task_Esp12f(void *argument)
   (void)argument;
   for (;;)
   {
-    Esp12fFlashBridge_Update(osKernelGetTickCount());
+    uint32_t now_ms = osKernelGetTickCount();
+
+    ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_ESP, now_ms);
+    Esp12fFlashBridge_Update(now_ms);
     Esp12fComm_Update();
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_ESP, &next_wake, CHASSIS_ESP12F_PERIOD_MS);
   }
@@ -123,6 +137,7 @@ void Task_Ps2(void *argument)
   (void)argument;
   for (;;)
   {
+    ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_PS2, osKernelGetTickCount());
     Ps2Control_Update();
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_PS2, &next_wake, CHASSIS_PS2_PERIOD_MS);
   }

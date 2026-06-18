@@ -12,6 +12,7 @@ extern "C" {
 typedef struct
 {
   uint16_t raw_current[MOTOR_ID_COUNT];
+  uint16_t current_zero_raw[MOTOR_ID_COUNT];
   uint16_t raw_battery;
   uint16_t raw_left_current;
   uint16_t raw_right_current;
@@ -19,6 +20,9 @@ typedef struct
   float battery_voltage;
   float left_current_a;
   float right_current_a;
+  uint16_t current_zero_sample_count;
+  uint8_t samples_ready;
+  uint8_t current_zero_valid;
   uint8_t current_valid;
 } adc_monitor_state_t;
 

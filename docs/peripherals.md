@@ -81,6 +81,8 @@ ADC1 配置为 12-bit 分辨率、连续扫描模式、软件触发、DMA2 Strea
 | --- | --- | --- |
 | `ADC_MONITOR_VREF_V` | `3.3f` | ADC 参考电压 |
 | `ADC_MONITOR_RESOLUTION_COUNTS` | `4095.0f` | 12-bit 满量程 |
+| `ADC_MONITOR_BATTERY_FILTER_ALPHA` | `0.10f` | 电池电压 EMA 滤波系数 |
+| `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | `256U` | 上电电流零点采样次数 |
 | `MOTOR_CURRENT_SHUNT_OHM` | `0.1f` | 电流采样电阻 |
 | `MOTOR_CURRENT_VOLTS_PER_AMP` | `0.1f` | 电流传感器增益 (100mV/A) |
 | `MOTOR_CURRENT_FILTER_ALPHA` | `0.25f` | 电流 EMA 滤波系数 |
@@ -88,6 +90,8 @@ ADC1 配置为 12-bit 分辨率、连续扫描模式、软件触发、DMA2 Strea
 | `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` | `5U` | 过流去抖计数 |
 
 **电池分压**：`VBAT × R_lower / (R_upper + R_lower)`，默认 `R_upper = 47kΩ`，`R_lower = 10kΩ`，分压比 `5.7`。
+
+**电流零点**：上电后 ADC monitor 在静止阶段累计 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次采样，分别生成 M1-M4 的 raw 零点；`status` 中 `cal=n/256` 表示零点采样进度，完成后 `valid=1`。
 
 ---
 
@@ -330,4 +334,41 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 
 ### 9.7 I2C 扫描命令
 
-调试台 `i2cscan` 命令可扫描 I2C1 总线（地址 1–127），列出所有 ACK 响应的器件地址。参见 [调试命令台 — i2cscan](debug-console.md#52-i2c-扫描)。
+调试台 `i2cscan` 命令可扫描 I2C1 总线（地址 1–127），列出所有 ACK 响应的器件地址。参见 [调试命令台 — i2cscan](debug-console.md#56-i2c-扫描-i2cscan)。
+
+---
+
+## 10. Reset Trace 崩溃追踪
+
+掉电不丢失的崩溃诊断系统，记录故障类型、堆栈帧、任务心跳和控制状态。
+
+### 10.1 存储机制
+
+`reset_trace_record_t` 结构体（120 字节）存放在链接脚本定义的 `.noinit` RAM 段（`STM32F407XX_FLASH.ld`），该段在启动时不清零，掉电后内容保留。记录通过 XOR-shift checksum 自校验。
+
+| 文件 | 职责 |
+| --- | --- |
+| `App/debug/reset_trace.c` | 核心逻辑：心跳更新、控制状态跟踪、崩溃捕获、校验和计算 |
+| `App/debug/reset_trace.h` | 类型定义和 API 声明 |
+| `STM32F407XX_FLASH.ld` | `.noinit` 段定义 |
+
+### 10.2 崩溃捕获点
+
+| 捕获点 | 记录内容 | 电机禁用 |
+| --- | --- | --- |
+| `HardFault_Handler` | 裸函数提取堆栈帧 (PC/LR/XPSR/SP)、CFSR/HFSR/BFAR/MMFAR | 是 |
+| `NMI_Handler` | NMI 标志 | 是 |
+| `MemManage_Handler` | CFSR MemManage 位 | 是 |
+| `BusFault_Handler` | CFSR BusFault 位、BFAR | 是 |
+| `UsageFault_Handler` | CFSR UsageFault 位 | 是 |
+| `Error_Handler` | HAL 错误 | 是 |
+| FreeRTOS hooks | 任务名→task ID 映射、溢出/分配失败原因 | 是 |
+| DMA2_Stream0 guard | DMA 句柄完整性校验失败原因 | 是 |
+
+### 10.3 任务心跳
+
+`safetyTask`、`motorTask`、`ps2Task`、`espTask`、`debugTask` 每个周期调用 `ResetTrace_TaskHeartbeat()` 记录当前 tick。崩溃时通过各任务最后心跳判断哪个任务首先停止。
+
+### 10.4 调试台输出
+
+上电时自动打印 `RESET` 和 `RESETTRACE` 行；`status` 命令也包含这些信息。详见 [调试命令台 — 复位诊断](debug-console.md#55-复位诊断reset-trace)。

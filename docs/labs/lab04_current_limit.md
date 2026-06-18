@@ -13,9 +13,8 @@
 DRV8874 的 IPROPI 引脚输出与电机电流成比例的电压，经 ADC 采样后换算：
 
 ```
-I_motor = (V_adc − V_zero) / (R_shunt × Gain)
-         = (V_adc − MOTOR_CURRENT_ZERO_V) / (0.1Ω × 1.0)
-         = (V_adc − 0.0) / 0.1 = V_adc × 10
+I_motor = abs(V_adc − V_zero) / (R_shunt × Gain)
+         = abs(ADC_raw − ADC_zero_raw) / 4095 × 3.3 / 0.1
 ```
 
 参数（`chassis_config.h`）：
@@ -23,7 +22,7 @@ I_motor = (V_adc − V_zero) / (R_shunt × Gain)
 | 参数 | 符号 | 默认值 |
 |------|------|--------|
 | 分流电阻 | `MOTOR_CURRENT_SHUNT_OHM` | 0.1 Ω |
-| 电流零点 | `MOTOR_CURRENT_ZERO_V` | 0.0 V |
+| 上电零点采样 | `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | 256 |
 | 电压-电流比 | `MOTOR_CURRENT_VOLTS_PER_AMP` | 0.1 V/A |
 | 电流限幅 | `MOTOR_CURRENT_LIMIT_A` | 0.8 A |
 | 过流去抖次数 | `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` | 5 |
@@ -92,19 +91,10 @@ log 0
 `status` 实时观察 ADC 行：
 
 ```
-ADC vbat=11700mV m1=120mA raw=1452 m2=110mA raw=1334 m3=130mA raw=1580 m4=105mA raw=1280 valid=1
-         │           │       │        │       │         │       │         │       │         │
-         │           │       │        │       │         │       │         │       │         └─ ADC 校准有效
-         │           │       │        │       │         │       │         │       └─ M4 电流
-         │           │       │        │       │         │       │         └─ M4 raw ADC
-         │           │       │        │       │         │       └─ M3 电流
-         │           │       │        │       │         └─ M3 raw ADC
-         │           │       │        │       └─ M2 电流
-         │           │       │        └─ M2 raw ADC
-         │           │       └─ M1 电流
-         │           └─ M1 raw ADC 值
-         └─ 电池电压 (mV)
+ADC vbat=11700mV raw=2545 m1=120mA raw=1452 z=1437 m2=110mA raw=1334 z=1320 m3=130mA raw=1580 z=1564 m4=105mA raw=1280 z=1267 cal=256/256 valid=1
 ```
+
+字段含义：`vbat` 为滤波后的电池电压，紧随其后的 `raw` 为 VBAT ADC 原始值；每路电机的 `raw` 是当前 IPROPI 原始值，`z` 是上电静止校准得到的零点；`cal=256/256 valid=1` 表示电流零点完成且当前电流读数有效。
 
 **记录四路空载电流（mA）**：
 
@@ -245,14 +235,14 @@ print(f'Noise reduction: {(1 - noise_filtered/noise_raw)*100:.1f}%')
 
 4. `MOTOR_CURRENT_LIMIT_A = 0.8A` 比 `MOTOR_RATED_CURRENT_A = 0.65A` 高约 23%。这个余量是否合理？如果要让底盘具备更强的爬坡能力，提高限流值有什么风险和收益？
 
-5. `MOTOR_CURRENT_ZERO_V = 0.0f` 假设零电流时 ADC 电压为 0V。实际运放输出可能有偏移（如 10mV），这会导致什么误差？如何校准零点？
+5. 如果上电零点校准期间电机没有完全静止，错误的 `ADC_zero_raw` 会导致什么误差？如何重新上电验证零点？
 
 ## 常见问题
 
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
-| 四路电流读数均为 0 | ADC 校准未完成 | `status` 检查 `valid=1`，等待片上 ADC 校准 |
-| 某路电流持续为负 | 电流零点偏移或方向反接 | 检查 DRV8874 IPROPI 接线；调整 `MOTOR_CURRENT_ZERO_V` |
+| 四路电流读数均为 0 | ADC 零点未完成 | `status` 检查 `cal=256/256 valid=1`，等待上电零点采样完成 |
+| 某路电流持续异常 | 电流零点错误或 IPROPI 接线异常 | 确认上电校准期间电机静止；检查该路 `z=` raw 零点和 DRV8874 IPROPI 接线 |
 | 轻微负载即触发过流 | 限流阈值过低 | 确认 `MOTOR_CURRENT_LIMIT_A` 与实际电机规格匹配 |
 | `clearfault` 无效 | 电流仍高于阈值或 nFAULT 仍低 | `status` 确认电流已回落；检查 DRV nFAULT 引脚 |
 | 电流读数噪声大 | α 过小或 ADC 参考电压不稳 | 增大 `MOTOR_CURRENT_FILTER_ALPHA`；检查 VREF 去耦电容 |

@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis/chassis_task_timing.c
     App/chassis/chassis_tasks.c
     App/control/control_manager.c
+    App/debug/reset_trace.c
     App/debug/usart1_debug_console.c
     App/monitor/system_monitor.c
     App/protocol/upper_protocol.c

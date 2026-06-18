@@ -10,6 +10,12 @@ static void UpperProtocol_WriteU32(uint8_t *out, uint32_t value)
   out[3] = (uint8_t)((value >> 24) & 0xFFU);
 }
 
+static void UpperProtocol_WriteU16(uint8_t *out, uint16_t value)
+{
+  out[0] = (uint8_t)(value & 0xFFU);
+  out[1] = (uint8_t)((value >> 8) & 0xFFU);
+}
+
 static void UpperProtocol_WriteI32(uint8_t *out, int32_t value)
 {
   UpperProtocol_WriteU32(out, (uint32_t)value);
@@ -22,11 +28,50 @@ static void UpperProtocol_WriteI16(uint8_t *out, int16_t value)
   out[1] = (uint8_t)((raw >> 8) & 0xFFU);
 }
 
-static void UpperProtocol_WriteFloat(uint8_t *out, float value)
+static int32_t UpperProtocol_RoundScaledFloat(float value, float scale)
 {
-  uint32_t raw = 0U;
-  (void)memcpy(&raw, &value, sizeof(raw));
-  UpperProtocol_WriteU32(out, raw);
+  float scaled = value * scale;
+
+  if (scaled >= 0.0f)
+  {
+    return (int32_t)(scaled + 0.5f);
+  }
+  return (int32_t)(scaled - 0.5f);
+}
+
+static uint16_t UpperProtocol_SaturateU16FromFloat(float value, float scale)
+{
+  int32_t rounded = UpperProtocol_RoundScaledFloat(value, scale);
+
+  if (rounded <= 0)
+  {
+    return 0U;
+  }
+  if (rounded >= 65535)
+  {
+    return 65535U;
+  }
+  return (uint16_t)rounded;
+}
+
+static int16_t UpperProtocol_SaturateI16FromFloat(float value, float scale)
+{
+  int32_t rounded = UpperProtocol_RoundScaledFloat(value, scale);
+
+  if (rounded > 32767)
+  {
+    return 32767;
+  }
+  if (rounded < -32768)
+  {
+    return -32768;
+  }
+  return (int16_t)rounded;
+}
+
+static int16_t UpperProtocol_SaturateI16(int16_t value)
+{
+  return value;
 }
 
 static uint32_t UpperProtocol_ReadU32(const uint8_t *in)
@@ -145,35 +190,45 @@ uint8_t UpperProtocol_BuildStatusPayload(const upper_status_payload_t *status, u
     return 0U;
   }
 
-  UpperProtocol_WriteFloat(&out[offset], status->left_speed);
-  offset = (uint8_t)(offset + 4U);
-  UpperProtocol_WriteFloat(&out[offset], status->right_speed);
-  offset = (uint8_t)(offset + 4U);
-  UpperProtocol_WriteI32(&out[offset], status->left_encoder);
-  offset = (uint8_t)(offset + 4U);
-  UpperProtocol_WriteI32(&out[offset], status->right_encoder);
-  offset = (uint8_t)(offset + 4U);
-  UpperProtocol_WriteFloat(&out[offset], status->battery_voltage);
-  offset = (uint8_t)(offset + 4U);
-  UpperProtocol_WriteFloat(&out[offset], status->left_current);
-  offset = (uint8_t)(offset + 4U);
-  UpperProtocol_WriteFloat(&out[offset], status->right_current);
-  offset = (uint8_t)(offset + 4U);
-
-  for (uint8_t i = 0U; i < 3U; ++i)
-  {
-    UpperProtocol_WriteI16(&out[offset], status->imu_accel[i]);
-    offset = (uint8_t)(offset + 2U);
-  }
-  for (uint8_t i = 0U; i < 3U; ++i)
-  {
-    UpperProtocol_WriteI16(&out[offset], status->imu_gyro[i]);
-    offset = (uint8_t)(offset + 2U);
-  }
+  out[offset++] = UPPER_PROTOCOL_VERSION;
+  out[offset++] = status->status_flags;
+  out[offset++] = status->control_source;
+  out[offset++] = status->motor_enabled_mask;
 
   UpperProtocol_WriteU32(&out[offset], status->error_flags);
   offset = (uint8_t)(offset + 4U);
-  out[offset] = status->control_mode;
+  UpperProtocol_WriteU32(&out[offset], status->latched_error_flags);
+  offset = (uint8_t)(offset + 4U);
+  UpperProtocol_WriteU16(&out[offset], UpperProtocol_SaturateU16FromFloat(status->battery_voltage, 1000.0f));
+  offset = (uint8_t)(offset + 2U);
+
+  for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
+  {
+    UpperProtocol_WriteI16(&out[offset], UpperProtocol_SaturateI16FromFloat(status->motor_speed_mps[i], 1000.0f));
+    offset = (uint8_t)(offset + 2U);
+  }
+  for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
+  {
+    UpperProtocol_WriteI32(&out[offset], status->encoder_count[i]);
+    offset = (uint8_t)(offset + 4U);
+  }
+  for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
+  {
+    UpperProtocol_WriteU16(&out[offset], UpperProtocol_SaturateU16FromFloat(status->motor_current_a[i], 1000.0f));
+    offset = (uint8_t)(offset + 2U);
+  }
+  for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
+  {
+    UpperProtocol_WriteI16(&out[offset], UpperProtocol_SaturateI16FromFloat(status->motor_target_mps[i], 1000.0f));
+    offset = (uint8_t)(offset + 2U);
+  }
+  for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
+  {
+    UpperProtocol_WriteI16(&out[offset], UpperProtocol_SaturateI16(status->motor_output_permille[i]));
+    offset = (uint8_t)(offset + 2U);
+  }
+  out[offset++] = status->motor_speed_valid_mask;
+  out[offset] = 0U;
 
   return UPPER_PROTOCOL_STATUS_PAYLOAD_LEN;
 }

@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNormal, 10ms 周期, 1024W 栈）驱动，通过中断式环形缓冲区接收命令行，`\r` 或 `\n` 为行结束符。
+USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNormal, 10ms 周期, 2048W 栈）驱动，通过中断式环形缓冲区接收命令行，`\r` 或 `\n` 为行结束符。
 
 **安全约束**：ESP12F flash bridge active 期间调试台暂停命令解析（避免二进制烧录流被误当作文本命令）。
 
@@ -13,7 +13,7 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
 | `help` / `h` | — | 打印命令列表 |
-| `status` / `s` | — | 打印所有子系统单次快照（编码器/底盘/ADC/IMU/系统/巡线） |
+| `status` / `s` | — | 打印所有子系统单次快照（编码器/底盘/ADC/IMU/系统/巡线/ResetTrace） |
 | `rtos` | — | FreeRTOS heap、各任务栈余量、missed-period、通信统计 |
 | `header` | — | 打印全字段 CSV 日志标题行 |
 | **`log 0`** | — | 停止 CSV 日志输出 |
@@ -134,7 +134,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ### 5.1 状态查询
 
-- **`status` / `s`**：单次输出所有子系统快照（5 行），含编码器速度与计数、底盘目标/实际速度与 PWM、ADC 电压电流、IMU 状态与欧拉角、系统错误标志与控制源、通信统计
+- **`status` / `s`**：单次输出所有子系统快照（6 行），含编码器速度与计数、底盘目标/实际速度与 PWM、ADC 电压电流（含零点校准进度）、IMU 状态与欧拉角、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
 - **`rtos`**：FreeRTOS 运行时状态，除 heap/栈外还包括 USART3 TX drop 和 ESP12F TX drop 计数
 - **`header`**：打印全字段 CSV 标题行（调试用，正常由 `log 1` 自动输出）
 
@@ -159,7 +159,50 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 - `espat on` / `espflash on` 操作均不可逆——需要等待 30s 自动退出或复位整板才能恢复调试台
 - `espflash off` / `espat off` 用于桥未激活时手动恢复（或复位整板强制退出）
 
-### 5.5 I2C 扫描 (`i2cscan`)
+### 5.5 复位诊断（Reset Trace）
+
+上电时自动打印复位源标志和崩溃追踪记录。`status` 命令也会输出这些信息。
+
+**启动输出示例**：
+
+```
+RESET csr=0x0C000000 bor=0 por=0 pin=0 sftr=0 iwdg=0 wwdg=0 lpwr=0
+RESETTRACE valid=1 kind=2 reason=0 task=2 line=0 cfsr=0x00000082 hfsr=0x40000000 bfar=0x00000000 mmfar=0x00000000 pc=0x0800ABCD lr=0x08001234 xpsr=0x61000000 exc=0xFFFFFFEC sp=0x2001FF00 d0=0 d1=0 d2=0 d3=0 safety=12345 motor=12340 ps2=12300 esp=12200 debug=12100 source=2 estop=0 fault=0
+```
+
+**复位源字段**（`RESET` 行）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `csr` | RCC->CSR 寄存器原始值 |
+| `bor` | 欠压复位 (Brown-out Reset) |
+| `por` | 上电复位 (Power-on Reset) |
+| `pin` | NRST 引脚复位 |
+| `sftr` | 软件复位 (Software Reset) |
+| `iwdg` | 独立看门狗复位 |
+| `wwdg` | 窗口看门狗复位 |
+| `lpwr` | 低功耗复位 |
+
+**ResetTrace 字段**（`RESETTRACE` 行）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `valid` | 记录是否有效（magic + checksum 通过） |
+| `kind` | 崩溃类型：0=NONE, 1=NMI, 2=HardFault, 3=MemManage, 4=BusFault, 5=UsageFault, 6=Error_Handler, 7=FreeRTOS, 8=DMA_GUARD |
+| `task` | 最后活跃任务：0=NONE, 1=Safety, 2=Motor, 3=PS2, 4=ESP, 5=Debug |
+| `cfsr` | Configurable Fault Status Register（含 MMARVALID/BFARVALID/各种 fault 原因位） |
+| `hfsr` | HardFault Status Register |
+| `bfar` | Bus Fault Address Register |
+| `mmfar` | MemManage Fault Address Register |
+| `pc/lr/xpsr` | 崩溃时堆栈上的 PC/LR/XPSR（HardFault 专用） |
+| `exc` | EXC_RETURN 值 |
+| `sp` | 崩溃时的栈指针 |
+| `safety/motor/ps2/esp/debug` | 各任务最后一次心跳 tick（ms） |
+| `source/estop/fault` | 崩溃时的控制源/ESTOP/fault-stop 状态 |
+
+**原理**：`reset_trace_record_t` 存放在 `.noinit` RAM 段（链接脚本 `STM32F407XX_FLASH.ld` 定义），掉电不清零。正常关机时记录被清除；崩溃时 HardFault 裸函数提取堆栈帧写入记录，下次上电启动时读取并打印。
+
+### 5.6 I2C 扫描 (`i2cscan`)
 
 扫描 I2C1 总线地址 1–127，通过 `HAL_I2C_IsDeviceReady` 逐一探测，列出所有 ACK 响应的器件 7-bit 地址。
 

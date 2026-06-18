@@ -39,6 +39,7 @@ static uint8_t macro_active;
 static uint8_t macro_button;
 static float macro_angular_z;
 static uint32_t macro_end_ms;
+static uint8_t ps2_timing_fault;
 
 static void Ps2Control_CopyState(ps2_control_state_t *dst, const ps2_control_state_t *src)
 {
@@ -81,15 +82,29 @@ static void Ps2Control_DwtDelayInit(void)
   }
   DWT->CYCCNT = 0U;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+  ps2_timing_fault = 0U;
 }
 
 static void Ps2Control_DelayUs(uint32_t us)
 {
   uint32_t start = DWT->CYCCNT;
   uint32_t ticks = (SystemCoreClock / 1000000U) * us;
+  uint32_t guard = ticks + (ticks / 2U) + 1000U;
+
+  if ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) == 0U || ticks == 0U)
+  {
+    ps2_timing_fault = 1U;
+    return;
+  }
 
   while ((DWT->CYCCNT - start) < ticks)
   {
+    if (guard == 0U)
+    {
+      ps2_timing_fault = 1U;
+      return;
+    }
+    guard--;
   }
 }
 
@@ -189,23 +204,33 @@ static uint8_t Ps2Control_TransferByte(uint8_t tx)
   return rx;
 }
 
-static void Ps2Control_Send(const uint8_t *tx, uint8_t *rx, uint8_t len)
+static uint8_t Ps2Control_Send(const uint8_t *tx, uint8_t *rx, uint8_t len)
 {
+  ps2_timing_fault = 0U;
   Ps2Control_SetCs(0U);
   Ps2Control_DelayUs(PS2_FRAME_GAP_US);
 
   for (uint8_t i = 0U; i < len; ++i)
   {
     uint8_t value = Ps2Control_TransferByte(tx[i]);
+    if (ps2_timing_fault != 0U)
+    {
+      break;
+    }
     if (rx != 0)
     {
       rx[i] = value;
     }
     Ps2Control_DelayUs(PS2_BYTE_GAP_US);
+    if (ps2_timing_fault != 0U)
+    {
+      break;
+    }
   }
 
   Ps2Control_SetCs(1U);
   Ps2Control_DelayUs(PS2_FRAME_GAP_US);
+  return (ps2_timing_fault == 0U) ? 1U : 0U;
 }
 
 static uint8_t Ps2Control_HandshakeOk(const uint8_t *rx)
@@ -221,7 +246,7 @@ static uint8_t Ps2Control_IsAnalogMode(uint8_t mode)
 static void Ps2Control_ShortPoll(void)
 {
   static const uint8_t poll[5] = {0x01U, 0x42U, 0x00U, 0x00U, 0x00U};
-  Ps2Control_Send(poll, 0, (uint8_t)sizeof(poll));
+  (void)Ps2Control_Send(poll, 0, (uint8_t)sizeof(poll));
 }
 
 static void Ps2Control_ConfigAnalog(void)
@@ -235,13 +260,13 @@ static void Ps2Control_ConfigAnalog(void)
   Ps2Control_ShortPoll();
   Ps2Control_ShortPoll();
   HAL_Delay(2U);
-  Ps2Control_Send(enter_cfg, 0, (uint8_t)sizeof(enter_cfg));
+  (void)Ps2Control_Send(enter_cfg, 0, (uint8_t)sizeof(enter_cfg));
   HAL_Delay(2U);
-  Ps2Control_Send(analog_cfg, 0, (uint8_t)sizeof(analog_cfg));
+  (void)Ps2Control_Send(analog_cfg, 0, (uint8_t)sizeof(analog_cfg));
   HAL_Delay(2U);
-  Ps2Control_Send(vibration_cfg, 0, (uint8_t)sizeof(vibration_cfg));
+  (void)Ps2Control_Send(vibration_cfg, 0, (uint8_t)sizeof(vibration_cfg));
   HAL_Delay(2U);
-  Ps2Control_Send(exit_cfg, 0, (uint8_t)sizeof(exit_cfg));
+  (void)Ps2Control_Send(exit_cfg, 0, (uint8_t)sizeof(exit_cfg));
   HAL_Delay(2U);
 }
 
@@ -251,8 +276,8 @@ static uint8_t Ps2Control_Probe(uint8_t require_analog)
 
   for (uint8_t i = 0U; i < 6U; ++i)
   {
-    Ps2Control_Send(ps2_poll_frame, rx, (uint8_t)sizeof(rx));
-    if (Ps2Control_HandshakeOk(rx) != 0U &&
+    if (Ps2Control_Send(ps2_poll_frame, rx, (uint8_t)sizeof(rx)) != 0U &&
+        Ps2Control_HandshakeOk(rx) != 0U &&
         (require_analog == 0U || Ps2Control_IsAnalogMode(rx[1]) != 0U))
     {
       return 1U;
@@ -282,8 +307,8 @@ static uint8_t Ps2Control_ReadSample(ps2_sample_t *sample)
     return 0U;
   }
 
-  Ps2Control_Send(ps2_poll_frame, ps2_rx, (uint8_t)sizeof(ps2_poll_frame));
-  if (Ps2Control_HandshakeOk(ps2_rx) == 0U)
+  if (Ps2Control_Send(ps2_poll_frame, ps2_rx, (uint8_t)sizeof(ps2_poll_frame)) == 0U ||
+      Ps2Control_HandshakeOk(ps2_rx) == 0U)
   {
     Ps2Control_IncrementRxFail();
     return 0U;

@@ -9,13 +9,20 @@ extern "C" {
 
 #define UPPER_PROTOCOL_HEAD_0 0xA5U
 #define UPPER_PROTOCOL_HEAD_1 0x5AU
+#define UPPER_PROTOCOL_VERSION 2U
 #define UPPER_PROTOCOL_MAX_PAYLOAD 64U
 #define UPPER_PROTOCOL_MAX_FRAME (UPPER_PROTOCOL_MAX_PAYLOAD + 5U)
 #define UPPER_PROTOCOL_CMD_LEN(payload_len) ((uint8_t)(1U + (payload_len)))
-#define UPPER_PROTOCOL_STATUS_PAYLOAD_LEN 45U
+#define UPPER_PROTOCOL_STATUS_PAYLOAD_LEN 64U
 #define UPPER_PROTOCOL_VELOCITY_PAYLOAD_LEN 10U
 #define UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN 1U
 #define UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN 1U
+#define UPPER_PROTOCOL_MOTOR_COUNT 4U
+
+#define UPPER_STATUS_FLAG_ESTOP           (1U << 0)
+#define UPPER_STATUS_FLAG_FAULT_STOP      (1U << 1)
+#define UPPER_STATUS_FLAG_LINE_ENABLED    (1U << 2)
+#define UPPER_STATUS_FLAG_SPEED_VALID_ALL (1U << 3)
 
 typedef enum
 {
@@ -35,17 +42,18 @@ typedef struct
 
 typedef struct
 {
-  float left_speed;
-  float right_speed;
-  int32_t left_encoder;
-  int32_t right_encoder;
   float battery_voltage;
-  float left_current;
-  float right_current;
-  int16_t imu_accel[3];
-  int16_t imu_gyro[3];
+  float motor_speed_mps[UPPER_PROTOCOL_MOTOR_COUNT];
+  int32_t encoder_count[UPPER_PROTOCOL_MOTOR_COUNT];
+  float motor_current_a[UPPER_PROTOCOL_MOTOR_COUNT];
+  float motor_target_mps[UPPER_PROTOCOL_MOTOR_COUNT];
+  int16_t motor_output_permille[UPPER_PROTOCOL_MOTOR_COUNT];
   uint32_t error_flags;
-  uint8_t control_mode;
+  uint32_t latched_error_flags;
+  uint8_t status_flags;
+  uint8_t control_source;
+  uint8_t motor_enabled_mask;
+  uint8_t motor_speed_valid_mask;
 } upper_status_payload_t;
 
 uint8_t UpperProtocol_Checksum8(const uint8_t *data, uint16_t length);

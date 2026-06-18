@@ -82,14 +82,14 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 | 任务 | 入口函数 | 优先级 | 周期 | 调度方式 | 栈大小 | 核心职责 |
 | --- | --- | --- | --- | --- | --- | --- |
-| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 256W (1024B) | `SystemMonitor_Update`：状态聚合、命令超时检测、fault-stop 锁存 |
-| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | `osDelayUntil` | 512W (2048B) | `EncoderDriver_Update` + `ChassisControl_Step`：编码器刷新、差速+PID+PWM |
+| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 256W (1024B) | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳 |
+| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `EncoderDriver_Update` + `ChassisControl_Step`：编码器刷新、差速+PID+PWM |
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUart_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | 10ms | `osDelayUntil` | 512W (2048B) | `ImuBmi270_Update`：100 Hz 采样、校准、姿态估计 |
-| **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
+| **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
 | **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 256W (1024B) | `LineUart_Update` + `LineUart_RequestAnalog` + `LineControl_Update`：帧解析、传感器查询、P 控制提交 |
-| **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `Esp12fFlashBridge_Update` + `Esp12fComm_Update`：ESP12F 协议收发与烧录桥 |
-| **debugTask** | `Task_Usart1DebugConsole` | BelowNormal | 10ms | `osDelay` | 1024W (4096B) | 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
+| **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `Esp12fComm_Update`：ESP12F 协议收发与烧录桥 |
+| **debugTask** | `Task_Usart1DebugConsole` | BelowNormal | 10ms | `osDelay` | 2048W (8192B) | `ResetTrace_TaskHeartbeat` + 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
 | **ledTask** | `Task_Led` | Low (osPriorityLow) | 50ms | `osDelayUntil` | 128W (512B) | `LedStatus_TaskStep`：TEST_LED 状态闪烁 |
 | **oledTask** | `Task_Oled` | Low (osPriorityLow) | 100ms | `osDelayUntil` | 256W (1024B) | `OLED_UI_Update`：SSD1306 OLED 三阶段 UI 刷新（欢迎/自检/运行） |
 | **defaultTask** | `StartDefaultTask` | Low (osPriorityLow) | 1ms | `osDelay` | 128W (512B) | 空闲保活（无实质工作） |

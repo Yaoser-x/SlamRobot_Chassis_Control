@@ -14,11 +14,11 @@ STM32F407 ADC1 以 DMA 模式循环采样 5 个通道：
 
 | 通道 | ADC 引脚 | 信号 | 物理意义 |
 |------|---------|------|----------|
-| CH8 | PB0 | BAT_ADC | 电池电压（经分压） |
-| CH9 | PB1 | M1_IPROPI | M1 电机电流 |
-| CH14 | PA4 | M2_IPROPI | M2 电机电流 |
-| CH15 | PA5 | M3_IPROPI | M3 电机电流 |
-| CH7 | PA7 | M4_IPROPI | M4 电机电流 |
+| CH10 | PC0 | M1_IPROPI | M1 电机电流 |
+| CH11 | PC1 | M2_IPROPI | M2 电机电流 |
+| CH12 | PC2 | M3_IPROPI | M3 电机电流 |
+| CH13 | PC3 | M4_IPROPI | M4 电机电流 |
+| CH14 | PC4 | VBAT_SENSE | 电池电压（经分压） |
 
 参数（`chassis_config.h`）：
 
@@ -54,10 +54,10 @@ V_propi = I_motor × R_shunt × Gain = I × 0.1Ω × 1 = I × 0.1
 
 I_motor = V_propi / 0.1 = V_propi × 10
 
-I_mA = (ADC_raw / 4095 × 3.3 - MOTOR_CURRENT_ZERO_V) / 0.1 × 1000
+I_mA = abs(ADC_raw - ADC_zero_raw) / 4095 × 3.3 / 0.1 × 1000
 ```
 
-零点电压 `MOTOR_CURRENT_ZERO_V = 0.0V`（假设 IPROPI 在零电流时输出 0V）。实际运放可能有偏移（几 mV），导致零点电流不为零。
+上电静止阶段会对四路 IPROPI 分别采样 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次，平均得到每路 raw 零点。实际运放偏移会被运行时零点抵消；若校准期间电机转动或负载电流不为零，零点会被错误写入运行时状态。
 
 ### 4. EMA 数字滤波
 
@@ -69,7 +69,7 @@ I_filtered(k) = 0.25 × I_raw(k) + 0.75 × I_filtered(k−1)
 
 ### 5. ADC 校准
 
-`ADC_MONITOR_CALIBRATION_ENABLED = 1U`：`AdcMonitor_Init()` 中调用 `HAL_ADCEx_Calibration_Start()` 执行片上自校准（偏移校准），提高绝对精度。
+`ADC_MONITOR_CALIBRATION_ENABLED = 1U`：启用运行时电流零点校准。F407 当前实现不依赖片上 ADC 自校准；电池电压绝对精度仍需要万用表或可调电源作为外部基准。
 
 ## 实验设备
 
@@ -135,10 +135,10 @@ plt.savefig('lab11_vbat_calib.png', dpi=150)
 
 ```bash
 s
-# ADC m1=5mA raw=1250 m2=-10mA raw=1220 ...
+# ADC vbat=12400mV raw=2700 m1=5mA raw=1250 z=1249 ... cal=256/256 valid=1
 ```
 
-**预期**：静止时电流应接近 0mA（±30mA）。若某路偏移明显（如 > 50mA），说明 IPROPI 有零点偏移，需在 `chassis_config.h` 中调整 `MOTOR_CURRENT_ZERO_V`。
+**预期**：`cal=256/256 valid=1` 后，静止时电流应接近 0mA（±30mA）。若某路偏移明显（如 > 50mA），先确认校准期间电机没有动作，再检查该路 IPROPI 和 `z=` raw 零点。
 
 记录零点偏移：
 
@@ -230,7 +230,7 @@ plt.savefig('lab11_discharge.png', dpi=150)
 
 1. 电阻分压公式中 `ADC_MONITOR_BATTERY_DIVIDER = (47k+10k)/10k = 5.7`。如果 47kΩ 电阻实际为 46.5kΩ (±1% 误差)，电池电压读数会偏大还是偏小？偏多少？
 
-2. 电流零点 `MOTOR_CURRENT_ZERO_V = 0.0V` 假设零电流时 IPROPI 输出 0V。如果实际有 +10mV 偏移，对电流读数的影响是多少？这会造成过流保护误触发还是漏触发？
+2. 如果上电零点校准期间某一路实际带有 +10mV 对应的负载电流，这个错误零点对后续电流读数有什么影响？会造成过流保护误触发还是漏触发？
 
 3. ADC 量化台阶 = 3.3V / 4095 ≈ 0.806mV。这意味着电流分辨率 ≈ 0.806mV / 0.1Ω ≈ 8.06mA/LSB。如果要提高电流测量分辨率到 1mA，有哪些方法？（提示：过采样平均、外部放大器、更高分辨率 ADC）
 
@@ -242,7 +242,7 @@ plt.savefig('lab11_discharge.png', dpi=150)
 
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
-| `vbat` 显示为 0 | 分压电阻开路或 ADC 通道配置错误 | 万用表检查 PB0 电压；确认 `.ioc` ADC 通道配置 |
-| 电流始终为 0 | IPROPI 引脚未连接或 ADC 校准失败 | 检查 PA4/PA5/PA7/PB1 接线 |
+| `vbat` 显示为 0 | 分压电阻开路或 ADC 通道配置错误 | 万用表检查 PC4 电压；确认 `.ioc` ADC 通道配置 |
+| 电流始终为 0 | IPROPI 引脚未连接或 ADC 零点未完成 | 检查 PC0/PC1/PC2/PC3 接线和 `cal=` 进度 |
 | 电流读数噪声大 | EMA α 过小或 50Hz 工频干扰 | 增大 `MOTOR_CURRENT_FILTER_ALPHA` |
 | 电压读数与实际偏差大 | 分压电阻精度不足 | 用万用表实测阻值，更新配置宏 |

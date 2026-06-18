@@ -13,7 +13,7 @@
 | 编码器 | 增量式 × 4 (TIM2/3/4/5 四倍频) | 速度反馈 |
 | IMU | BMI270 (SPI, 6 轴) | 姿态估计 |
 | 巡线 | HiWonder 八路红外 (UART4) | 黑线检测 |
-| 电压/电流 | ADC1 DMA 5 通道 (PB0/PB1/PA4/PA5/PA7) | 电池与电流监测 |
+| 电压/电流 | ADC1 DMA 5 通道 (PC0-PC4) | 电池与电流监测 |
 | 显示 | SSD1306 OLED 128×64 (I2C1) | 状态显示 |
 | 无线 | ESP12F (USART2, WiFi) | 远程控制 |
 | 手柄 | PS2 (GPIO bit-bang) | 遥操作 |
