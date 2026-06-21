@@ -9,11 +9,11 @@
 | 电机 | 侧别 | IN1 (前进 PWM) | IN2 (后退 PWM) | nFAULT |
 | --- | --- | --- | --- | --- |
 | M1 | 左侧 | TIM1 CH1 / PE9 | TIM8 CH1 / PC6 | PA2 |
-| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PD14 |
-| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PA3 |
+| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PA3 |
+| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PD14 |
 | M4 | 右侧 | TIM1 CH4 / PE14 | TIM8 CH4 / PC9 | PD15 |
 
-> 注意：CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名；运行时在 BSP 映射层修正 M2/M3 的 nFAULT、编码器和电流归属，不改变引脚复用。
+> 注意：CubeMX 生成文件中的 GPIO label 与上表一致（`main.h`），BSP 层直接消费这些标签。
 
 ### 1.2 PWM 与保护信号
 
@@ -45,8 +45,8 @@
 | 电机 | 定时器 | 通道引脚 | 模式 | 滤波 | Period |
 | --- | --- | --- | --- | --- | --- |
 | M1 | TIM2 | PA15 CH1, PB3 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
-| M2 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
-| M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
+| M2 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
+| M3 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
 | M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
 
 **配置参数**（`App/chassis/chassis_config.h`）：
@@ -65,15 +65,15 @@
 
 ## 3. ADC 采样
 
-ADC1 配置为 12-bit 分辨率、连续扫描模式、软件触发、DMA2 Stream0 循环传输。
+ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、DMA2 Stream0 循环传输。TIM8 PWM 保持 10 kHz，并通过重复计数器每 10 个 PWM 周期产生一次更新事件，使 ADC 采样频率固定为 1 kHz，避免连续转换产生中断风暴。
 
 ### 3.1 通道分配
 
 | Rank | ADC 通道 | 引脚 | 信号 | 采样时间 |
 | --- | --- | --- | --- | --- |
 | 1 | ADC1_IN10 | PC0 | M1 电流 | 84 cycles |
-| 2 | ADC1_IN11 | PC1 | M3 电流 | 84 cycles |
-| 3 | ADC1_IN12 | PC2 | M2 电流 | 84 cycles |
+| 2 | ADC1_IN11 | PC1 | M2 电流 | 84 cycles |
+| 3 | ADC1_IN12 | PC2 | M3 电流 | 84 cycles |
 | 4 | ADC1_IN13 | PC3 | M4 电流 | 84 cycles |
 | 5 | ADC1_IN14 | PC4 | VBAT 电池电压 | 84 cycles |
 

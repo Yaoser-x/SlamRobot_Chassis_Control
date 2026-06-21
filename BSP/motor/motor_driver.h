@@ -32,6 +32,12 @@ typedef struct
 {
   uint8_t fault_active[MOTOR_ID_COUNT];
   uint8_t sleep_enabled;
+  uint8_t tim1_moe_active;
+  uint8_t tim1_break_flag;
+  uint8_t tim8_moe_active;
+  uint8_t tim8_break_flag;
+  uint32_t tim1_break_count;
+  uint32_t tim8_break_count;
 } motor_driver_state_t;
 
 void MotorDriver_Init(void);

@@ -3,7 +3,9 @@
 #include "stm32f4xx.h"
 
 #define RESET_TRACE_MAGIC   0x52545243UL
-#define RESET_TRACE_VERSION 3UL
+#define RESET_TRACE_VERSION 4UL
+#define RESET_TRACE_BASIC_FRAME_WORDS 8U
+#define RESET_TRACE_FP_FRAME_WORDS    18U
 
 _Static_assert((sizeof(reset_trace_record_t) % sizeof(uint32_t)) == 0,
                "reset trace record must stay word aligned");
@@ -11,6 +13,16 @@ _Static_assert((sizeof(reset_trace_record_t) % sizeof(uint32_t)) == 0,
 static volatile reset_trace_record_t reset_trace_live __attribute__((section(".noinit.reset_trace")));
 static reset_trace_record_t reset_trace_boot;
 static uint8_t reset_trace_boot_captured;
+
+static uint8_t ResetTrace_StackFrameReadable(const uint32_t *stack)
+{
+  uintptr_t start = (uintptr_t)stack;
+  uintptr_t end = start + (RESET_TRACE_BASIC_FRAME_WORDS * sizeof(uint32_t));
+  uint8_t in_sram = (start >= 0x20000000UL && end <= 0x20020000UL) ? 1U : 0U;
+  uint8_t in_ccm = (start >= 0x10000000UL && end <= 0x10010000UL) ? 1U : 0U;
+
+  return (in_sram != 0U || in_ccm != 0U) ? 1U : 0U;
+}
 
 static uint32_t ResetTrace_EnterCritical(void)
 {
@@ -193,6 +205,7 @@ void ResetTrace_CaptureFaultStack(reset_trace_kind_t kind,
 {
   uint32_t primask = ResetTrace_EnterCritical();
   reset_trace_task_t task = RESET_TRACE_TASK_NONE;
+  const uint32_t *basic_frame = stack;
 
   if (reset_trace_live.magic == RESET_TRACE_MAGIC &&
       reset_trace_live.version == RESET_TRACE_VERSION)
@@ -212,15 +225,29 @@ void ResetTrace_CaptureFaultStack(reset_trace_kind_t kind,
   reset_trace_live.mmfar = ((SCB->CFSR & SCB_CFSR_MMARVALID_Msk) != 0UL) ? SCB->MMFAR : 0U;
   reset_trace_live.exc_return = exc_return;
   reset_trace_live.stack_ptr = (uint32_t)stack;
+  reset_trace_live.msp = __get_MSP();
+  reset_trace_live.psp = __get_PSP();
+  reset_trace_live.control = __get_CONTROL();
+  reset_trace_live.fpccr = FPU->FPCCR;
+  reset_trace_live.dma2_lisr = DMA2->LISR;
+  reset_trace_live.dma2_stream0_cr = DMA2_Stream0->CR;
+  reset_trace_live.dma2_stream0_ndtr = DMA2_Stream0->NDTR;
+  reset_trace_live.dma2_stream0_fcr = DMA2_Stream0->FCR;
+  reset_trace_live.adc1_sr = ADC1->SR;
+  reset_trace_live.adc1_cr2 = ADC1->CR2;
   reset_trace_live.detail0 = 0U;
   reset_trace_live.detail1 = 0U;
   reset_trace_live.detail2 = 0U;
   reset_trace_live.detail3 = 0U;
-  if (stack != 0)
+  if ((exc_return & (1UL << 4U)) == 0U && stack != 0)
   {
-    reset_trace_live.stacked_lr = stack[5];
-    reset_trace_live.stacked_pc = stack[6];
-    reset_trace_live.stacked_xpsr = stack[7];
+    basic_frame = &stack[RESET_TRACE_FP_FRAME_WORDS];
+  }
+  if (ResetTrace_StackFrameReadable(basic_frame) != 0U)
+  {
+    reset_trace_live.stacked_lr = basic_frame[5];
+    reset_trace_live.stacked_pc = basic_frame[6];
+    reset_trace_live.stacked_xpsr = basic_frame[7];
   }
   else
   {

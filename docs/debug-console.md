@@ -134,7 +134,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ### 5.1 状态查询
 
-- **`status` / `s`**：单次输出所有子系统快照（6 行），含编码器速度与计数、底盘目标/实际速度与 PWM、ADC 电压电流（含零点校准进度）、IMU 状态与欧拉角、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
+- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度）、IMU 状态与欧拉角、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
 
 `ENC` 行末的 `hw=a,b,c,d` 是按逻辑 M1~M4 排列的原始定时器计数，用于区分“定时器未收到脉冲”和“逻辑计数未更新”。V2.0 映射为 M1=TIM2、M2=TIM4、M3=TIM3、M4=TIM5；CubeMX 中 M2/M3 的旧 label 不代表运行时逻辑顺序。
 - **`rtos`**：FreeRTOS 运行时状态，除 heap/栈外还包括 USART3 TX drop 和 ESP12F TX drop 计数

@@ -32,6 +32,40 @@ static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
 static motor_runtime_t motor_runtime[MOTOR_ID_COUNT];
 static motor_driver_state_t motor_state;
 
+static void MotorDriver_UpdateBreakStatus(void)
+{
+  uint8_t tim1_break_flag = (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
+  uint8_t tim8_break_flag = (__HAL_TIM_GET_FLAG(&htim8, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
+  uint8_t tim1_moe_active = ((htim1.Instance->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
+  uint8_t tim8_moe_active = ((htim8.Instance->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
+  uint32_t primask;
+
+  if (tim1_break_flag != 0U)
+  {
+    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+  }
+  if (tim8_break_flag != 0U)
+  {
+    __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  motor_state.tim1_moe_active = tim1_moe_active;
+  motor_state.tim1_break_flag = tim1_break_flag;
+  motor_state.tim8_moe_active = tim8_moe_active;
+  motor_state.tim8_break_flag = tim8_break_flag;
+  if (tim1_break_flag != 0U)
+  {
+    motor_state.tim1_break_count++;
+  }
+  if (tim8_break_flag != 0U)
+  {
+    motor_state.tim8_break_count++;
+  }
+  __set_PRIMASK(primask);
+}
+
 static uint8_t MotorDriver_IsValidMotor(motor_id_t motor)
 {
   return ((uint32_t)motor < MOTOR_ID_COUNT) ? 1U : 0U;
@@ -100,6 +134,8 @@ void MotorDriver_Init(void)
     MotorDriver_StartPwm(&motor_hw[i]);
     MotorDriver_SetRaw(&motor_hw[i], 0U, 0U);
   }
+  __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+  __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
   MotorDriver_UpdateFaults();
 }
 
@@ -271,6 +307,7 @@ void MotorDriver_UpdateFaults(void)
   uint8_t fault_active[MOTOR_ID_COUNT];
   uint32_t primask;
 
+  MotorDriver_UpdateBreakStatus();
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)

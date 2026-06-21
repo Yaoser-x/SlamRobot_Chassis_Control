@@ -126,7 +126,7 @@ static void DebugConsole_PrintResetTrace(void)
   uint8_t valid = ResetTrace_GetBootRecord(&trace);
 
   (void)snprintf(tx, sizeof(tx),
-                 "RESETTRACE valid=%u kind=%lu reason=%lu task=%lu line=%lu cfsr=0x%08lX hfsr=0x%08lX bfar=0x%08lX mmfar=0x%08lX pc=0x%08lX lr=0x%08lX xpsr=0x%08lX exc=0x%08lX sp=0x%08lX d0=0x%08lX d1=0x%08lX d2=0x%08lX d3=0x%08lX safety=%lu motor=%lu ps2=%lu esp=%lu debug=%lu source=%lu estop=%lu fault=%lu\r\n",
+                 "RESETTRACE valid=%u kind=%lu reason=%lu task=%lu line=%lu cfsr=0x%08lX hfsr=0x%08lX bfar=0x%08lX mmfar=0x%08lX pc=0x%08lX lr=0x%08lX xpsr=0x%08lX exc=0x%08lX sp=0x%08lX msp=0x%08lX psp=0x%08lX ctrl=0x%08lX fpccr=0x%08lX dma_lisr=0x%08lX dma_cr=0x%08lX dma_ndtr=%lu dma_fcr=0x%08lX adc_sr=0x%08lX adc_cr2=0x%08lX d0=0x%08lX d1=0x%08lX d2=0x%08lX d3=0x%08lX safety=%lu motor=%lu ps2=%lu esp=%lu debug=%lu source=%lu estop=%lu fault=%lu\r\n",
                  valid,
                  (unsigned long)trace.kind,
                  (unsigned long)trace.reason,
@@ -141,6 +141,16 @@ static void DebugConsole_PrintResetTrace(void)
                  (unsigned long)trace.stacked_xpsr,
                  (unsigned long)trace.exc_return,
                  (unsigned long)trace.stack_ptr,
+                 (unsigned long)trace.msp,
+                 (unsigned long)trace.psp,
+                 (unsigned long)trace.control,
+                 (unsigned long)trace.fpccr,
+                 (unsigned long)trace.dma2_lisr,
+                 (unsigned long)trace.dma2_stream0_cr,
+                 (unsigned long)trace.dma2_stream0_ndtr,
+                 (unsigned long)trace.dma2_stream0_fcr,
+                 (unsigned long)trace.adc1_sr,
+                 (unsigned long)trace.adc1_cr2,
                  (unsigned long)trace.detail0,
                  (unsigned long)trace.detail1,
                  (unsigned long)trace.detail2,
@@ -516,6 +526,16 @@ static void DebugConsole_PrintStatus(void)
                  chassis_state.output_enabled,
                  ControlManager_IsEmergencyStop(),
                  ControlManager_IsFaultStop());
+  DebugConsole_Write(tx);
+
+  (void)snprintf(tx, sizeof(tx),
+                 "BREAK tim1 moe=%u bif=%u count=%lu tim8 moe=%u bif=%u count=%lu\r\n",
+                 motor_state.tim1_moe_active,
+                 motor_state.tim1_break_flag,
+                 (unsigned long)motor_state.tim1_break_count,
+                 motor_state.tim8_moe_active,
+                 motor_state.tim8_break_flag,
+                 (unsigned long)motor_state.tim8_break_count);
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
