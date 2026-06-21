@@ -9,11 +9,11 @@
 | 电机 | 侧别 | IN1 (前进 PWM) | IN2 (后退 PWM) | nFAULT |
 | --- | --- | --- | --- | --- |
 | M1 | 左侧 | TIM1 CH1 / PE9 | TIM8 CH1 / PC6 | PA2 |
-| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PA3 |
-| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PD14 |
+| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PD14 |
+| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PA3 |
 | M4 | 右侧 | TIM1 CH4 / PE14 | TIM8 CH4 / PC9 | PD15 |
 
-> 注意：CubeMX 生成文件中的 GPIO label 与上表一致（`main.h`），BSP 层直接消费这些标签。
+> 注意：CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名；运行时在 BSP 映射层修正 M2/M3 的 nFAULT、编码器和电流归属，不改变引脚复用。
 
 ### 1.2 PWM 与保护信号
 
@@ -24,6 +24,8 @@
 | TIM1_BKIN | PE15 | Break 使能，低有效 | TIM1 硬件刹车 |
 | TIM8_BKIN | PA6 | Break 使能，低有效 | TIM8 硬件刹车 |
 | DRV_SLEEP_ALL | PE7 | 高电平唤醒 | DRV8874 全局 nSLEEP 控制 |
+
+TIM1/TIM8 均启用 `AutomaticOutput`。BKIN 拉低时硬件立即清除对应定时器 MOE；BKIN 释放后，下一更新事件自动恢复 MOE。`status` 的 `BREAK` 行输出当前 MOE、最近一次采集观察到的 BIF 和启动以来累计观察次数。
 
 ### 1.3 H-Bridge 控制逻辑
 
@@ -45,8 +47,8 @@
 | 电机 | 定时器 | 通道引脚 | 模式 | 滤波 | Period |
 | --- | --- | --- | --- | --- | --- |
 | M1 | TIM2 | PA15 CH1, PB3 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
-| M2 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
-| M3 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
+| M2 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
+| M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
 | M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
 
 **配置参数**（`App/chassis/chassis_config.h`）：
@@ -72,8 +74,8 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | Rank | ADC 通道 | 引脚 | 信号 | 采样时间 |
 | --- | --- | --- | --- | --- |
 | 1 | ADC1_IN10 | PC0 | M1 电流 | 84 cycles |
-| 2 | ADC1_IN11 | PC1 | M2 电流 | 84 cycles |
-| 3 | ADC1_IN12 | PC2 | M3 电流 | 84 cycles |
+| 2 | ADC1_IN11 | PC1 | M3 电流 | 84 cycles |
+| 3 | ADC1_IN12 | PC2 | M2 电流 | 84 cycles |
 | 4 | ADC1_IN13 | PC3 | M4 电流 | 84 cycles |
 | 5 | ADC1_IN14 | PC4 | VBAT 电池电压 | 84 cycles |
 
@@ -342,11 +344,11 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 
 ## 10. Reset Trace 崩溃追踪
 
-掉电不丢失的崩溃诊断系统，记录故障类型、堆栈帧、任务心跳和控制状态。
+跨复位保留的崩溃诊断系统，记录故障类型、堆栈帧、任务心跳、控制状态和关键外设寄存器。
 
 ### 10.1 存储机制
 
-`reset_trace_record_t` 结构体（120 字节）存放在链接脚本定义的 `.noinit` RAM 段（`STM32F407XX_FLASH.ld`），该段在启动时不清零，掉电后内容保留。记录通过 XOR-shift checksum 自校验。
+`reset_trace_record_t` v4 结构体（156 字节）存放在链接脚本定义的 `.noinit` RAM 段（`STM32F407XX_FLASH.ld`），该段在启动时不清零，可跨软件复位、看门狗复位和故障复位保留；断电后 RAM 内容不保证保留。记录通过 XOR-shift checksum 自校验。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -358,7 +360,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 
 | 捕获点 | 记录内容 | 电机禁用 |
 | --- | --- | --- |
-| `HardFault_Handler` | 裸函数提取堆栈帧 (PC/LR/XPSR/SP)、CFSR/HFSR/BFAR/MMFAR | 是 |
+| `HardFault_Handler` | 裸函数提取 PC/LR/XPSR/SP、MSP/PSP、CONTROL、FPCCR、CFSR/HFSR/BFAR/MMFAR、DMA2 Stream0 和 ADC1 寄存器 | 是 |
 | `NMI_Handler` | NMI 标志 | 是 |
 | `MemManage_Handler` | CFSR MemManage 位 | 是 |
 | `BusFault_Handler` | CFSR BusFault 位、BFAR | 是 |

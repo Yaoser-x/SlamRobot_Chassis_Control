@@ -137,6 +137,8 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 - **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度）、IMU 状态与欧拉角、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
 
 `ENC` 行末的 `hw=a,b,c,d` 是按逻辑 M1~M4 排列的原始定时器计数，用于区分“定时器未收到脉冲”和“逻辑计数未更新”。V2.0 映射为 M1=TIM2、M2=TIM4、M3=TIM3、M4=TIM5；CubeMX 中 M2/M3 的旧 label 不代表运行时逻辑顺序。
+
+`BREAK tim1 moe=... bif=... count=... tim8 ...` 中，`moe` 表示当前主输出是否启用，`bif` 表示本次采集是否观察到 Break 标志，`count` 是启动以来累计观察次数。BIF 在采集后清除，因此瞬态故障应结合 `count` 判断。
 - **`rtos`**：FreeRTOS 运行时状态，除 heap/栈外还包括 USART3 TX drop 和 ESP12F TX drop 计数
 - **`header`**：打印全字段 CSV 标题行（调试用，正常由 `log 1` 自动输出）
 
@@ -169,7 +171,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ```
 RESET csr=0x0C000000 bor=0 por=0 pin=0 sftr=0 iwdg=0 wwdg=0 lpwr=0
-RESETTRACE valid=1 kind=2 reason=0 task=2 line=0 cfsr=0x00000082 hfsr=0x40000000 bfar=0x00000000 mmfar=0x00000000 pc=0x0800ABCD lr=0x08001234 xpsr=0x61000000 exc=0xFFFFFFEC sp=0x2001FF00 d0=0 d1=0 d2=0 d3=0 safety=12345 motor=12340 ps2=12300 esp=12200 debug=12100 source=2 estop=0 fault=0
+RESETTRACE valid=1 kind=2 reason=0 task=2 line=0 cfsr=0x00000082 hfsr=0x40000000 bfar=0x00000000 mmfar=0x00000000 pc=0x0800ABCD lr=0x08001234 xpsr=0x61000000 exc=0xFFFFFFEC sp=0x2001FF00 msp=0x2001FF00 psp=0x2001F000 ctrl=0x00000002 fpccr=0x00000000 dma_lisr=0x00000000 dma_cr=0x00000000 dma_ndtr=5 dma_fcr=0x00000021 adc_sr=0x00000000 adc_cr2=0x16000303 d0=0 d1=0 d2=0 d3=0 safety=12345 motor=12340 ps2=12300 esp=12200 debug=12100 source=2 estop=0 fault=0
 ```
 
 **复位源字段**（`RESET` 行）：
@@ -199,10 +201,14 @@ RESETTRACE valid=1 kind=2 reason=0 task=2 line=0 cfsr=0x00000082 hfsr=0x40000000
 | `pc/lr/xpsr` | 崩溃时堆栈上的 PC/LR/XPSR（HardFault 专用） |
 | `exc` | EXC_RETURN 值 |
 | `sp` | 崩溃时的栈指针 |
+| `msp/psp` | 崩溃时主栈和进程栈指针 |
+| `ctrl/fpccr` | CONTROL 与 FPU 上下文控制寄存器 |
+| `dma_lisr/dma_cr/dma_ndtr/dma_fcr` | DMA2 Stream0 状态和剩余传输计数 |
+| `adc_sr/adc_cr2` | ADC1 状态和控制寄存器 |
 | `safety/motor/ps2/esp/debug` | 各任务最后一次心跳 tick（ms） |
 | `source/estop/fault` | 崩溃时的控制源/ESTOP/fault-stop 状态 |
 
-**原理**：`reset_trace_record_t` 存放在 `.noinit` RAM 段（链接脚本 `STM32F407XX_FLASH.ld` 定义），掉电不清零。正常关机时记录被清除；崩溃时 HardFault 裸函数提取堆栈帧写入记录，下次上电启动时读取并打印。
+**原理**：`reset_trace_record_t` 存放在 `.noinit` RAM 段（链接脚本 `STM32F407XX_FLASH.ld` 定义），启动代码不清零，因此记录可跨软件复位、看门狗复位和故障复位保留，但断电后不保证保留。首次读取时固件将记录复制为本次启动快照并清空 live 区，供下一次故障记录使用。
 
 ### 5.6 I2C 扫描 (`i2cscan`)
 

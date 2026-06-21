@@ -2,7 +2,7 @@
 
 基于 STM32F407VET6 的四轮左右差速底盘控制固件。构建系统采用 STM32CubeMX + FreeRTOS + CMake + Ninja + GNU Arm Embedded Toolchain。
 
-> **当前状态**：V2.0 已在 CubeMX 外设骨架上接入 V1.0 验证控制链。左侧 M1+M2、右侧 M3+M4 差速布局。电机驱动 DRV8874 H-bridge。IMU 为 Bosch BMI270。无线模块为板载 ESP12F。巡线使用 HiWonder 八路传感器。
+> **当前状态**：V2.0 已接入完整底盘控制链，默认两驱启用 M1（左侧）和 M3（右侧），可通过布局配置切换为四驱或自定义组合。电机驱动为 DRV8874 H-bridge，IMU 为 Bosch BMI270，无线模块为板载 ESP12F，巡线使用 HiWonder 八路传感器。
 
 ## 快速开始
 
@@ -28,10 +28,10 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **CubeMX** | STM32Cube FW_F4 V1.28.3, `.ioc` 配置 |
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
-| **底盘布局** | 四轮差速, M1+M2 左侧 / M3+M4 右侧, 可通过 `CHASSIS_Mx_ENABLED` + `CHASSIS_Mx_SIDE` 配置 |
-| **构建验证** | Debug — RAM 78,760 B (60%) / FLASH 125,120 B (24%) — Host 测试 3/3 通过 — CI 双 preset |
+| **底盘布局** | 默认两驱 M1+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
+| **构建验证** | Debug — RAM 78,848 B (60%) / FLASH 126,172 B (24%) — Host 测试 3/3 通过 — CI 双 preset |
 
-> V2.0 实板 M3 已按板上验证同步：PWM=`PE13/PC8`，nFAULT=`PA3`，编码器=`TIM3 PB4/PB5`，电流采样=`PC1`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名，运行时在 BSP 映射层修正归属。
+> V2.0 实板逻辑映射以 BSP 为准：M2 使用 PWM=`PE11/PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC2`；M3 使用 PWM=`PE13/PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC1`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 
 ## 目录结构
 

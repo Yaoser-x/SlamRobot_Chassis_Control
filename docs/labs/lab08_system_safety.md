@@ -13,7 +13,7 @@
 ```
 ┌─────────────────────────────────┐
 │ Level 1: 硬件 Break             │  TIM1/8 BKIN (PE15/PA6)
-│  低电平 → 硬件切断 PWM (H桥高阻) │  独立于软件，不可被固件绕过
+│  低电平 → 硬件切断 PWM (H桥高阻) │  释放后下一更新事件恢复 MOE
 ├─────────────────────────────────┤
 │ Level 2: 软件 ESTOP             │  SYSTEM_ERROR_ESTOP (bit 5)
 │  清空全部控制源 → 拒绝所有新命令  │  estop 1/0 命令 + 上位机帧
@@ -27,6 +27,8 @@
 ```
 
 ### 2. 错误标志位定义
+
+TIM1/TIM8 均启用 Automatic Output。BKIN 低电平会立即清除对应定时器 MOE；BKIN 恢复后，下一更新事件自动恢复 MOE。该硬件事件当前不会自动设置软件 ESTOP，需通过 `status` 的 `BREAK tim1/tim8 moe/bif/count` 诊断。
 
 `system_monitor.h` 的 9 个 error flag：
 
@@ -100,6 +102,15 @@ motor 0 0
 ```
 
 **关键验证**：ESTOP 激活期间，**所有**控制源（DEBUG/PS2/LINE/ESP/上位机）都被拒绝。
+
+### 步骤 1.1：Break 状态观察
+
+```bash
+s
+# BREAK tim1 moe=1 bif=0 count=0 tim8 moe=1 bif=0 count=0
+```
+
+正常情况下两组 `moe=1` 且 `count` 不持续增长。若教师使用安全夹具短暂拉低 BKIN，预期对应 `count` 增加、PWM 立即关闭；释放后 MOE 在下一更新事件恢复。禁止直接用裸导线短接带电引脚。
 
 ### 步骤 2：DRV 故障模拟
 

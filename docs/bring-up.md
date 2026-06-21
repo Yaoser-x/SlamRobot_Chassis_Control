@@ -33,6 +33,7 @@
 
 - **编码器**：已启用电机的 `count` 和 `delta` 正常显示（架空轮时可为零）；`speed_valid` 状态正常。`hw=` 依次为逻辑 M1~M4 的原始定时器计数
 - **底盘**：`req`/`target`/`actual` 均为零（无运动命令），`out=0`，`estop=0 fault=0`
+- **Break**：正常空闲时 `tim1/tim8 moe=1`；`bif` 通常为 0，`count` 不应持续增长。若 `moe=0` 或计数增长，检查 PE15/PA6 和对应 DRV nFAULT/BKIN 路径
 - **ADC**：`vbat` 显示电池电压（典型 11–12.6V）；四路电流接近零（架空轮无负载时）
 - **IMU**（若已初始化）：`enabled`/`online` 状态正确；`chip=0x24`；加速度/陀螺/欧拉角有合理数值
 - **系统**：`source=0`，`errors=0x00000000`，`drv_fault=0,0,0,0`
@@ -96,6 +97,8 @@ motor 0 0
 ## 步骤 6：ADC 校准
 
 **命令**：`status`
+
+ADC1 由 TIM8 TRGO 以 1kHz 触发五通道 DMA 扫描，safetyTask 每 20ms 读取最新快照并更新滤波、零点和保护状态。
 
 **确认项**：
 - `vbat` 与万用表测量值一致，偏差 < 0.2V；`raw` 为 VBAT ADC 原始值

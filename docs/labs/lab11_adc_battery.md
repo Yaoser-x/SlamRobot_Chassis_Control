@@ -10,7 +10,7 @@
 
 ### 1. ADC 采样架构
 
-STM32F407 ADC1 以 DMA 模式循环采样 5 个通道：
+STM32F407 ADC1 由 TIM8 TRGO 以 1kHz 触发，每次扫描 5 个通道，并通过 DMA2 Stream0 循环写入缓冲区：
 
 | 通道 | ADC 引脚 | 信号 | 物理意义 |
 |------|---------|------|----------|
@@ -28,7 +28,8 @@ STM32F407 ADC1 以 DMA 模式循环采样 5 个通道：
 |------|--------|
 | ADC 参考电压 | 3.3V |
 | ADC 分辨率 | 12-bit (0~4095) |
-| 采样周期 | 20ms (safetyTask) |
+| ADC 硬件触发周期 | 1ms（TIM8 TRGO） |
+| 监控与滤波更新周期 | 20ms（safetyTask） |
 
 ### 2. 电池电压换算——电阻分压
 
@@ -67,7 +68,7 @@ I_mA = abs(ADC_raw - ADC_zero_raw) / 4095 × 3.3 / 0.1 × 1000
 I_filtered(k) = 0.25 × I_raw(k) + 0.75 × I_filtered(k−1)
 ```
 
-滤波效果：抑制 ADC 量化噪声（±3 LSB ≈ ±2.4mV ≈ ±24mA），但引入 ~40ms 的阶跃响应延迟（4 个样本 @ 100Hz）。
+滤波效果：抑制 ADC 量化噪声（±3 LSB ≈ ±2.4mV ≈ ±24mA）。虽然 ADC 硬件以 1kHz 采样，EMA 在 safetyTask 中以 50Hz 更新；按约 4 次监控更新估算，阶跃响应延迟约为 80ms。
 
 ### 5. ADC 校准
 

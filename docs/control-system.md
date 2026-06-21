@@ -53,6 +53,7 @@
 | **ESTOP (紧急停止)** | `estop 1` 命令 | 清空全部控制源命令，拒绝所有新命令 |
 | **fault-stop (故障停止)** | 任一路 DRV8874 `nFAULT` 低有效 | 清空全部命令、停止 PWM 输出、拉低 DRV_SLEEP_ALL |
 | **过流锁存** | 电机电流 > `MOTOR_CURRENT_LIMIT_A` 并持续 `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` 次 | 触发 fault-stop，锁存 error flag |
+| **硬件 Break** | TIM1_BKIN PE15 或 TIM8_BKIN PA6 被拉低 | 硬件立即清除对应定时器 MOE；信号释放后 Automatic Output 在下一更新事件恢复 MOE |
 | **RTOS 异常** | `configASSERT` / 栈溢出 / malloc 失败 / 任务创建失败 | 拉低 `DRV_SLEEP_ALL`，进入 fatal loop（不自动复位，保留故障现场） |
 
 ### 3.2 命令拒绝规则
@@ -142,7 +143,7 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 
 **常用两驱**：`CHASSIS_M2_ENABLED=0U, CHASSIS_M4_ENABLED=0U`（仅 M1+M3）或 `CHASSIS_M1_ENABLED=0U, CHASSIS_M3_ENABLED=0U`（仅 M2+M4）。
 
-**V2.0 实板 M3 映射**：逻辑 M3 属于右侧，PWM 使用 `TIM1_CH3/TIM8_CH3` (`PE13/PC8`)，nFAULT 使用 `PD14`，编码器使用 `TIM4 PD12/PD13`，电流采样使用 `PC2`。M2（默认禁用）使用 `TIM1_CH2/TIM8_CH2` (`PE11/PC7`)，nFAULT `PA3`，编码器 `TIM3 PB4/PB5`，电流 `PC1`。
+**V2.0 实板 M2/M3 映射**：逻辑 M2 使用 PWM `TIM1_CH2/TIM8_CH2` (`PE11/PC7`)、nFAULT `PD14`、编码器 `TIM4 PD12/PD13`、电流采样 `PC2`；逻辑 M3 使用 PWM `TIM1_CH3/TIM8_CH3` (`PE13/PC8`)、nFAULT `PA3`、编码器 `TIM3 PB4/PB5`、电流采样 `PC1`。CubeMX 生成文件保留旧 M2/M3 标签，BSP 层负责逻辑归属。
 
 **安全约束**：左右两侧必须各至少启用一路电机，否则 `ChassisLayout` 拒绝运动输出。
 

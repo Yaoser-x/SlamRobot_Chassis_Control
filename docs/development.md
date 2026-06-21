@@ -74,14 +74,14 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 | --- | --- |
 | Debug | `build/Debug/F407_V2.0.elf`, `build/Debug/F407_V2.0.map` |
 | Release | `build/Release/F407_V2.0.elf`, `build/Release/F407_V2.0.map` |
-| Host 测试 | `build/host-tests-ninja/test_f407_v2[.exe]` |
+| Host 测试 | `build/host-tests-ninja/test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]` |
 
 ### 2.4 当前构建验证
 
 ```
-Debug:  RAM  70,904 B / 128 KB (54.10%)
-        FLASH 107,596 B / 512 KB (20.52%)
-        Host 测试 2/2 通过
+Debug:  RAM  78,848 B / 128 KB (60.16%)
+        FLASH 126,172 B / 512 KB (24.07%)
+        Host 测试 3/3 通过
 ```
 
 ---

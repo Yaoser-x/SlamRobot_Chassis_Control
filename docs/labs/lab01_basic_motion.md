@@ -57,7 +57,7 @@ M1/M2 = 左侧 (MOTOR_SIDE_LEFT)
 M3/M4 = 右侧 (MOTOR_SIDE_RIGHT)
 ```
 
-> V2.0 当前常用两驱默认启用 M1+M3，M2/M4 禁用；因此 `right 300` 在默认配置下只驱动逻辑 M3。实板 M3 的 PWM 为 `PE13/PC8`，nFAULT 为 `PA3`，编码器为 `PB4/PB5`。
+> V2.0 当前常用两驱默认启用 M1+M3，M2/M4 禁用；因此 `right 300` 在默认配置下只驱动逻辑 M3。实板 M3 的 PWM 为 `PE13/PC8`，nFAULT 为 `PA3`，编码器为 `TIM3 PB4/PB5`，电流采样为 `PC1`。
 
 ## 实验设备
 
