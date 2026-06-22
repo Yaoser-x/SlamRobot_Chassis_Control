@@ -33,6 +33,7 @@
 #define DEBUG_CONSOLE_TX_LINE_SIZE   768U
 #define DEBUG_CONSOLE_TASK_PERIOD_MS 10U
 #define DEBUG_CONSOLE_LOG_PERIOD_MS  500U
+#define DEBUG_CONSOLE_TX_TIMEOUT_MS  100U
 
 static char rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t rx_len;
@@ -47,6 +48,7 @@ static volatile uint16_t rx_head;
 static volatile uint16_t rx_tail;
 static uint32_t boot_reset_flags;
 static uint8_t boot_reset_flags_captured;
+static uint32_t rx_overflow_count;
 
 extern osThreadId_t defaultTaskHandle;
 extern osThreadId_t safetyTaskHandle;
@@ -64,7 +66,10 @@ static void DebugConsole_Write(const char *text)
 {
   if (text != 0)
   {
-    (void)HAL_UART_Transmit(&huart1, (uint8_t *)text, (uint16_t)strlen(text), 50U);
+    (void)HAL_UART_Transmit(&huart1,
+                            (uint8_t *)text,
+                            (uint16_t)strlen(text),
+                            DEBUG_CONSOLE_TX_TIMEOUT_MS);
   }
 }
 
@@ -407,14 +412,17 @@ static void DebugConsole_PrintRtosStatus(void)
   char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
   upper_uart_state_t upper_state;
   esp12f_comm_state_t esp_state;
+  uint32_t heap_free = (uint32_t)xPortGetFreeHeapSize();
+  uint32_t heap_min = (uint32_t)xPortGetMinimumEverFreeHeapSize();
 
   UpperUart_GetState(&upper_state);
   Esp12fComm_GetState(&esp_state);
 
   (void)snprintf(tx, sizeof(tx),
-                 "RTOS heap_free=%luB heap_min=%luB tick=%lu\r\n",
-                 (unsigned long)xPortGetFreeHeapSize(),
-                 (unsigned long)xPortGetMinimumEverFreeHeapSize(),
+                 "RTOS heap_free=%luB heap_min=%luB heap_used=%luB tick=%lu\r\n",
+                 (unsigned long)heap_free,
+                 (unsigned long)heap_min,
+                 (unsigned long)((uint32_t)configTOTAL_HEAP_SIZE - heap_free),
                  (unsigned long)osKernelGetTickCount());
   DebugConsole_Write(tx);
 
@@ -431,11 +439,12 @@ static void DebugConsole_PrintRtosStatus(void)
   DebugConsole_PrintTaskStatus("oled", oledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_OLED));
 
   (void)snprintf(tx, sizeof(tx),
-                 "RTOS comm upper_tx=%lu upper_drop=%lu esp_tx=%lu esp_drop=%lu\r\n",
+                 "RTOS comm upper_tx=%lu upper_drop=%lu esp_tx=%lu esp_drop=%lu dbg_rx_ovf=%lu\r\n",
                  (unsigned long)upper_state.tx_frames,
                  (unsigned long)upper_state.tx_busy_drops,
                  (unsigned long)esp_state.tx_frames,
-                 (unsigned long)esp_state.tx_busy_drops);
+                 (unsigned long)esp_state.tx_busy_drops,
+                 (unsigned long)rx_overflow_count);
   DebugConsole_Write(tx);
 }
 
@@ -1089,6 +1098,7 @@ void Usart1DebugConsole_Init(void)
   debug_velocity_cmd = (chassis_cmd_t){0};
   rx_head = 0U;
   rx_tail = 0U;
+  rx_overflow_count = 0U;
   HAL_NVIC_SetPriority(USART1_IRQn, 7, 0);
   HAL_NVIC_EnableIRQ(USART1_IRQn);
   Usart1DebugConsole_RestartRx();
@@ -1123,6 +1133,10 @@ void Usart1DebugConsole_OnRxCplt(void)
   {
     rx_ring[rx_head] = rx_byte;
     rx_head = next_head;
+  }
+  else
+  {
+    rx_overflow_count++;
   }
   (void)HAL_UART_Receive_IT(&huart1, &rx_byte, 1U);
 }

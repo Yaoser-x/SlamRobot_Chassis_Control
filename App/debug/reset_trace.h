@@ -74,6 +74,7 @@ typedef struct
 } reset_trace_record_t;
 
 void ResetTrace_TaskHeartbeat(reset_trace_task_t task, uint32_t tick_ms);
+uint32_t ResetTrace_GetTaskHeartbeat(reset_trace_task_t task);
 void ResetTrace_UpdateControl(uint8_t source, uint8_t estop, uint8_t fault);
 void ResetTrace_Capture(reset_trace_kind_t kind, uint32_t reason, uint32_t line);
 void ResetTrace_CaptureWithTask(reset_trace_kind_t kind,

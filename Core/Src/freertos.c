@@ -98,7 +98,7 @@ const osThreadAttr_t defaultTask_attributes = {
 osThreadId_t safetyTaskHandle;
 const osThreadAttr_t safetyTask_attributes = {
   .name = "safetyTask",
-  .stack_size = 256 * 4,
+  .stack_size = 384 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
 /* Definitions for motorTask */
@@ -147,12 +147,12 @@ static reset_trace_task_t FreeRtos_TaskFromName(const char *name);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
-void StartTask02(void *argument);
-void StartTask03(void *argument);
-void StartTask04(void *argument);
-void StartTask05(void *argument);
-void StartTask06(void *argument);
-void StartTask07(void *argument);
+void StartTask02(void *argument);  /* safetyTask — 状态聚合/看门狗 */
+void StartTask03(void *argument);  /* motorTask — 电机控制链 */
+void StartTask04(void *argument);  /* rpiCommTask — USART3 上位机协议 */
+void StartTask05(void *argument);  /* imuTask — BMI270 采样 */
+void StartTask06(void *argument);  /* lineTask — 巡线传感器 */
+void StartTask07(void *argument);  /* espTask — ESP12F 协议 */
 void Task_Usart1DebugConsole(void *argument);
 void Task_Ps2(void *argument);
 void Task_Led(void *argument);

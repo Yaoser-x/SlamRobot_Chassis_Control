@@ -61,7 +61,16 @@ void Task_Safety(void *argument)
                              ControlManager_IsEmergencyStop(),
                              ControlManager_IsFaultStop());
     ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_SAFETY, now_ms);
-    HAL_IWDG_Refresh(&hiwdg);
+
+    /* 看门狗守卫：仅当电机任务心跳在 200ms 内更新时才喂狗。
+       电机任务挂死 → 心跳过期 → IWDG 超时复位。 */
+    {
+      uint32_t motor_hb = ResetTrace_GetTaskHeartbeat(RESET_TRACE_TASK_MOTOR);
+      if (motor_hb != 0U && (now_ms - motor_hb) <= 200U)
+      {
+        HAL_IWDG_Refresh(&hiwdg);
+      }
+    }
     ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_SAFETY, &next_wake, CHASSIS_ADC_PERIOD_MS);
   }
 }

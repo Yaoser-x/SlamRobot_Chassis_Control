@@ -229,7 +229,7 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 | 文件 | 层级 | 职责 |
 | --- | --- | --- |
 | `BSP/line/line_uart.c` | BSP 驱动 | DMA 循环缓冲管理、二进制帧状态机解析（帧头检测、校验和验证、8 通道模拟量与状态位提取）、传感器初始化与周期查询 |
-| `BSP/line/line_control.c` | BSP 控制 | 加权平均线位置计算 → P 控制器 (`angular_z = LINE_KP × error`) → 通过 `ControlManager_SetCommand` 提交至 `CONTROL_SOURCE_LINE` |
+| `App/control/line_control.c` | App 控制 | 加权平均线位置计算 → P 控制器 (`angular_z = LINE_KP × error`) → 通过 `ControlManager_SetCommand` 提交至 `CONTROL_SOURCE_LINE` |
 
 ### 8.4 控制参数
 
@@ -280,7 +280,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | 文件 | 层级 | 职责 |
 | --- | --- | --- |
 | `BSP/oled/ssd1306.c` | BSP 驱动 | I2C 命令/数据写入、framebuffer 管理（128×8 pages）、像素/字符/矩形/进度条绘制、整屏刷新（page-mode 批量写入，8 次 I2C 事务） |
-| `BSP/oled/oled_ui.c` | BSP 控制 | 三阶段 UI 状态机、自检执行（I2C/IMU/ADC/Motor/Encoder/UART/ESP12F）、模块在线状态聚合、错误码闪烁 |
+| `App/display/oled_ui.c` | App 显示 | 三阶段 UI 状态机、自检执行（I2C/IMU/ADC/Motor/Encoder/UART/ESP12F）、模块在线状态聚合、错误码闪烁 |
 | `BSP/oled/oled_font_data.c` | 字体数据 | 8×16 ASCII、12×12/16×16 中文字体位图数据 |
 
 ### 9.3 UI 三阶段

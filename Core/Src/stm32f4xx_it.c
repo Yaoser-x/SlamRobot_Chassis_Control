@@ -53,6 +53,7 @@ extern DMA_HandleTypeDef hdma_adc1;
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
 static void HardFault_HandlerC(uint32_t *stack, uint32_t exc_return) __attribute__((used, noreturn));
+static void Fault_HandlerC(uint32_t *stack, uint32_t exc_return, reset_trace_kind_t kind) __attribute__((used, noreturn));
 static uint32_t AdcDmaGuardReason(void);
 static void AdcDmaGuardStop(uint32_t reason);
 
@@ -68,6 +69,15 @@ static void Fault_DisableMotorDriver(void)
 static void HardFault_HandlerC(uint32_t *stack, uint32_t exc_return)
 {
   ResetTrace_CaptureFaultStack(RESET_TRACE_KIND_HARDFAULT, stack, exc_return);
+  Fault_DisableMotorDriver();
+  while (1)
+  {
+  }
+}
+
+static void Fault_HandlerC(uint32_t *stack, uint32_t exc_return, reset_trace_kind_t kind)
+{
+  ResetTrace_CaptureFaultStack(kind, stack, exc_return);
   Fault_DisableMotorDriver();
   while (1)
   {
@@ -168,52 +178,64 @@ __attribute__((naked)) void HardFault_Handler(void)
 /**
   * @brief This function handles Memory management fault.
   */
-void MemManage_Handler(void)
+__attribute__((naked)) void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-  ResetTrace_Capture(RESET_TRACE_KIND_MEMMANAGE, 0U, 0U);
-  Fault_DisableMotorDriver();
-
+  __asm volatile
+  (
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "mov r1, lr      \n"
+    "mov r2, %0      \n"
+    "b Fault_HandlerC \n"
+    :
+    : "i" (RESET_TRACE_KIND_MEMMANAGE)
+  );
   /* USER CODE END MemoryManagement_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_MemoryManagement_IRQn 0 */
-    /* USER CODE END W1_MemoryManagement_IRQn 0 */
-  }
 }
 
 /**
   * @brief This function handles Pre-fetch fault, memory access fault.
   */
-void BusFault_Handler(void)
+__attribute__((naked)) void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-  ResetTrace_Capture(RESET_TRACE_KIND_BUSFAULT, 0U, 0U);
-  Fault_DisableMotorDriver();
-
+  __asm volatile
+  (
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "mov r1, lr      \n"
+    "mov r2, %0      \n"
+    "b Fault_HandlerC \n"
+    :
+    : "i" (RESET_TRACE_KIND_BUSFAULT)
+  );
   /* USER CODE END BusFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_BusFault_IRQn 0 */
-    /* USER CODE END W1_BusFault_IRQn 0 */
-  }
 }
 
 /**
   * @brief This function handles Undefined instruction or illegal state.
   */
-void UsageFault_Handler(void)
+__attribute__((naked)) void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-  ResetTrace_Capture(RESET_TRACE_KIND_USAGEFAULT, 0U, 0U);
-  Fault_DisableMotorDriver();
-
+  __asm volatile
+  (
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "mov r1, lr      \n"
+    "mov r2, %0      \n"
+    "b Fault_HandlerC \n"
+    :
+    : "i" (RESET_TRACE_KIND_USAGEFAULT)
+  );
   /* USER CODE END UsageFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_UsageFault_IRQn 0 */
-    /* USER CODE END W1_UsageFault_IRQn 0 */
-  }
 }
 
 /**
@@ -341,14 +363,14 @@ void DMA2_Stream0_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA2_Stream0_IRQn 0 */
   uint32_t guard_reason = AdcDmaGuardReason();
-
-  /* USER CODE END DMA2_Stream0_IRQn 0 */
   if (guard_reason != 0U)
   {
     AdcDmaGuardStop(guard_reason);
     return;
   }
   HAL_DMA_IRQHandler(&hdma_adc1);
+
+  /* USER CODE END DMA2_Stream0_IRQn 0 */
   /* USER CODE BEGIN DMA2_Stream0_IRQn 1 */
 
   /* USER CODE END DMA2_Stream0_IRQn 1 */

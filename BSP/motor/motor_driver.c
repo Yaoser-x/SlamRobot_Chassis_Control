@@ -1,6 +1,6 @@
 #include "motor_driver.h"
 
-#include "chassis_config.h"
+#include "bsp_config.h"
 #include "chassis_layout.h"
 #include "main.h"
 #include "tim.h"

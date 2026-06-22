@@ -1,6 +1,5 @@
 #include "line_uart.h"
 
-#include "chassis_config.h"
 #include "cmsis_os2.h"
 #include "usart.h"
 
@@ -212,7 +211,6 @@ uint8_t LineUart_GetSensorData(line_sensor_data_t *data)
   if (data != 0)
   {
     *data = line_sensor_data;
-    line_sensor_data.valid = 0U;
     return data->valid;
   }
   return 0U;

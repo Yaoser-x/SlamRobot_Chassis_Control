@@ -45,32 +45,33 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis/chassis_control.c
-    App/chassis/chassis_layout.c
     App/chassis/chassis_math.c
     App/chassis/chassis_task_timing.c
     App/chassis/chassis_tasks.c
     App/control/control_manager.c
+    App/control/line_control.c
+    App/control/ps2_control.c
     App/debug/reset_trace.c
     App/debug/usart1_debug_console.c
+    App/display/oled_ui.c
     App/monitor/system_monitor.c
+    App/protocol/esp12f_comm.c
     App/protocol/upper_protocol.c
     App/protocol/upper_uart.c
     App/protocol/uart_callbacks.c
     BSP/adc/adc_monitor.c
+    BSP/chassis_layout.c
     BSP/encoder/encoder_driver.c
     BSP/encoder/encoder_math.c
-    BSP/esp12f/esp12f_comm.c
     BSP/esp12f/esp12f_flash_bridge.c
     BSP/imu/imu_bmi270.c
     BSP/imu/imu_bmi270_config.c
     BSP/led/led_status.c
     BSP/line/line_uart.c
-    BSP/line/line_control.c
     BSP/motor/motor_driver.c
     BSP/pid/pid_controller.c
-    BSP/ps2/ps2_control.c
+    BSP/ps2/ps2_hw.c
     BSP/oled/ssd1306.c
-    BSP/oled/oled_ui.c
     BSP/oled/oled_font_data.c
 )
 
@@ -79,8 +80,10 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis
     App/control
     App/debug
+    App/display
     App/monitor
     App/protocol
+    BSP
     BSP/adc
     BSP/encoder
     BSP/esp12f

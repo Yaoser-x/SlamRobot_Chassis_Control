@@ -26,7 +26,7 @@
     
   .syntax unified
   .cpu cortex-m4
-  .fpu softvfp
+  .fpu fpv4-sp-d16
   .thumb
 
 .global  g_pfnVectors
@@ -80,6 +80,23 @@ LoopCopyDataInit:
   cmp r4, r1
   bcc CopyDataInit
   
+/* Copy the CCMRAM segment initializers from flash to CCMRAM */
+  ldr r0, =_sccmram
+  ldr r1, =_eccmram
+  ldr r2, =_siccmram
+  movs r3, #0
+  b LoopCopyCcmramInit
+
+CopyCcmramInit:
+  ldr r4, [r2, r3]
+  str r4, [r0, r3]
+  adds r3, r3, #4
+
+LoopCopyCcmramInit:
+  adds r4, r0, r3
+  cmp r4, r1
+  bcc CopyCcmramInit
+
 /* Zero fill the bss segment. */
   ldr r2, =_sbss
   ldr r4, =_ebss

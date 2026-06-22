@@ -5,7 +5,7 @@
 #include "control_manager.h"
 #include "line_uart.h"
 
-static uint8_t g_line_enabled;
+static volatile uint8_t g_line_enabled;
 
 static void LineControl_SubmitCommand(float linear_x, float angular_z)
 {
@@ -56,11 +56,12 @@ void LineControl_Update(void)
   (void)LineUart_GetSensorData(&sensor);
   now_ms = osKernelGetTickCount();
 
-  /* 传感器超时检测 */
-  if (sensor.valid == 0U)
+  /* 传感器超时检测：基于时间戳判断数据新鲜度 */
+  if (sensor.valid == 0U ||
+      (sensor.timestamp_ms > 0U &&
+       (now_ms - sensor.timestamp_ms) > LINE_SENSOR_TIMEOUT_MS))
   {
-    if (sensor.timestamp_ms > 0U &&
-        (now_ms - sensor.timestamp_ms) > LINE_SENSOR_TIMEOUT_MS)
+    if (sensor.timestamp_ms > 0U)
     {
       ControlManager_ClearSource(CONTROL_SOURCE_LINE);
     }

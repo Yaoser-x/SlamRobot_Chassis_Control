@@ -21,7 +21,7 @@ typedef enum
   UPPER_RX_WAIT_BODY
 } upper_rx_state_t;
 
-static uint8_t upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE];
+static uint8_t upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE] __attribute__((aligned(4)));
 static uint16_t upper_rx_read_pos;
 static upper_rx_state_t upper_rx_state;
 static uint8_t upper_frame_buf[UPPER_PROTOCOL_MAX_PAYLOAD + 3U];
@@ -32,6 +32,9 @@ static uint8_t upper_status_payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN];
 static uint32_t upper_last_status_ms;
 static uint32_t upper_last_rx_timestamp_ms;
 static upper_uart_state_t upper_state;
+static uint8_t upper_parser_idle_cycles;
+
+#define UPPER_PARSER_TIMEOUT_CYCLES  20U  /* 20 × 5ms = 100ms 无字节则重置解析器 */
 
 static void UpperUart_ResetParser(void)
 {
@@ -109,6 +112,10 @@ static void UpperUart_ProcessByte(uint8_t byte)
           /* Record RX timestamp for OLED module online detection */
           upper_last_rx_timestamp_ms = osKernelGetTickCount();
         }
+        else
+        {
+          upper_state.rx_checksum_errors++;
+        }
         UpperUart_ResetParser();
       }
       break;
@@ -134,6 +141,23 @@ static void UpperUart_PollRx(void)
     write_pos = 0U;
   }
 
+  if (upper_rx_read_pos == write_pos)
+  {
+    /* 无新字节：若解析器处于中间状态，超时后重置 */
+    if (upper_rx_state != UPPER_RX_WAIT_HEAD0)
+    {
+      upper_parser_idle_cycles++;
+      if (upper_parser_idle_cycles >= UPPER_PARSER_TIMEOUT_CYCLES)
+      {
+        upper_state.rx_timeout_resets++;
+        UpperUart_ResetParser();
+        upper_parser_idle_cycles = 0U;
+      }
+    }
+    return;
+  }
+
+  upper_parser_idle_cycles = 0U;
   while (upper_rx_read_pos != write_pos)
   {
     UpperUart_ProcessByte(upper_rx_dma_buffer[upper_rx_read_pos]);
@@ -259,6 +283,15 @@ void UpperUart_GetState(upper_uart_state_t *state)
   {
     *state = upper_state;
   }
+}
+
+void UpperUart_OnUartError(void)
+{
+  upper_state.uart_errors++;
+  upper_rx_read_pos = 0U;
+  upper_parser_idle_cycles = 0U;
+  UpperUart_ResetParser();
+  (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
 }
 
 uint32_t UpperUart_GetLastRxTimestamp(void)

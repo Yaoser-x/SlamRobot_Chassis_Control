@@ -53,6 +53,7 @@ static uint32_t Esp12fFlashBridge_GetIdleMsLocked(void)
   return (uint32_t)elapsed_ms;
 }
 
+/* BridgeRing_ 前缀：本文件内部环形缓冲区操作，与模块级命名空间隔离 */
 static void BridgeRing_Clear(bridge_ring_t *ring)
 {
   uint32_t primask = __get_PRIMASK();

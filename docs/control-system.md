@@ -34,13 +34,13 @@
 `ControlManager_GetCommand()` 按优先级数组 `{UPPER, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
 
 1. 检查源命令的 `enable` 标志
-2. 验证 `timestamp_ms` 是否在 `CHASSIS_CMD_TIMEOUT_MS`（500ms）内
+2. 按控制源验证命令年龄：UPPER/PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
 3. 命中即返回，不再检查更低优先级源
 4. 若所有源均未命中，返回空命令（`enable=0`），底盘停止
 
 ### 2.2 源过期机制
 
-每个控制源需在 500ms 内刷新命令（更新 `timestamp_ms`）。超时未刷新的命令槽自动失效，仲裁循环跳过该源。
+每个控制源需在各自超时窗口内刷新命令（更新 `timestamp_ms`）。超时未刷新的命令槽自动失效，仲裁循环跳过该源。
 
 ---
 
@@ -66,7 +66,7 @@
 - 命令 `enable == 0` → 清空该源槽位
 - 运动学无效（轮半径/轴距 ≤ 0）且角速度非零 → 拒绝角速度，直线仍允许
 
-clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）。
+clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s），`angular_z` 钳位到 `±CHASSIS_MAX_ANGULAR_RPS`（10 rad/s）。
 
 ### 3.3 巡线特有安全行为
 
@@ -83,7 +83,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 | 任务 | 入口函数 | 优先级 | 周期 | 调度方式 | 栈大小 | 核心职责 |
 | --- | --- | --- | --- | --- | --- | --- |
-| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 256W (1024B) | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳 |
+| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 384W (1536B) | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳和 motorTask 心跳守卫 |
 | **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `EncoderDriver_Update` + `ChassisControl_Step`：编码器刷新、差速+PID+PWM |
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUart_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | 10ms | `osDelayUntil` | 512W (2048B) | `ImuBmi270_Update`：100 Hz 采样、校准、姿态估计 |
@@ -114,14 +114,14 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 `rtos` 命令输出：
 
 ```
-RTOS heap_free=XXXXXB heap_min=XXXXXB tick=XXXXX
+RTOS heap_free=XXXXXB heap_min=XXXXXB heap_used=XXXXXB tick=XXXXX
 RTOS safety    state=X stack_free=XXXXB missed=X
 ...
 RTOS oled      state=X stack_free=XXXXB missed=X
 RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 ```
 
-- **`heap_free`**：当前 FreeRTOS heap 可用字节；**`heap_min`**：历史最低值
+- **`heap_free`**：当前 FreeRTOS heap 可用字节；**`heap_min`**：历史最低值；**`heap_used`**：当前已分配字节
 - **`stack_free`**：各任务剩余栈空间（`uxTaskGetStackHighWaterMark`）。持续低于 128–256B 应增大任务栈
 - **`missed`**：周期任务执行耗时超过目标唤醒点的累计次数。空载时核心任务 `missed` 不应持续增长
 - **`upper_drop` / `esp_drop`**：USART TX 繁忙导致状态帧跳过的次数

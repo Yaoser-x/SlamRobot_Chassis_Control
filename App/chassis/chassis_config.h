@@ -1,62 +1,24 @@
 #ifndef CHASSIS_CONFIG_H
 #define CHASSIS_CONFIG_H
 
+/**
+ * @file chassis_config.h
+ * @brief 底盘控制算法与任务配置。
+ *
+ * 硬件常量（电机布局、编码器、PWM、ADC）见 BSP/bsp_config.h。
+ * 本文件仅包含 App 层的控制算法、任务周期、协议和调参常量。
+ *
+ * @note OLED 配置暂留此文件（历史原因）；待 OLED 驱动稳定后
+ *       可迁移至 BSP/bsp_config.h 或 App/display/ 独立头文件。
+ */
+
+#include "bsp_config.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define CHASSIS_MOTOR_COUNT                 4U
-
-/* 电机布局编译期配置。
- *
- * 命令链路:
- *   PS2/RPI/ESP/debug -> linear_x/angular_z -> left_mps/right_mps -> enabled motors.
- *
- * CHASSIS_Mx_ENABLED:
- *   1U: 启用该路电机；参与目标分配、PID、编码器、电流、故障检测。
- *   0U: 禁用该路电机；目标/PWM/PID/编码器/电流固定为 0，nFAULT/过流/编码器异常不触发整车停机。
- *
- * CHASSIS_Mx_SIDE:
- *   MOTOR_SIDE_LEFT:  接收 left_mps。
- *   MOTOR_SIDE_RIGHT: 接收 right_mps。
- *
- * 默认两驱:
- *   M1 = 左侧，M3 = 右侧，M2/M4 禁用。
- *   V2.0 实板 M3: PWM=PE13/PC8，nFAULT=PA3，ENC=PB4/PB5，IPROPI=PC1。
- *
- * 常用两驱:
- *   M1+M3: CHASSIS_M2_ENABLED=0U，CHASSIS_M4_ENABLED=0U。
- *   M2+M4: CHASSIS_M1_ENABLED=0U，CHASSIS_M3_ENABLED=0U。
- *
- * 安全规则:
- *   左右两侧必须各至少启用一路电机；否则拒绝运动输出。
- */
-#ifndef CHASSIS_M1_ENABLED
-#define CHASSIS_M1_ENABLED                  1U
-#endif
-#ifndef CHASSIS_M2_ENABLED
-#define CHASSIS_M2_ENABLED                  0U
-#endif
-#ifndef CHASSIS_M3_ENABLED
-#define CHASSIS_M3_ENABLED                  1U
-#endif
-#ifndef CHASSIS_M4_ENABLED
-#define CHASSIS_M4_ENABLED                  0U
-#endif
-
-#ifndef CHASSIS_M1_SIDE
-#define CHASSIS_M1_SIDE                     MOTOR_SIDE_LEFT
-#endif
-#ifndef CHASSIS_M2_SIDE
-#define CHASSIS_M2_SIDE                     MOTOR_SIDE_LEFT
-#endif
-#ifndef CHASSIS_M3_SIDE
-#define CHASSIS_M3_SIDE                     MOTOR_SIDE_RIGHT
-#endif
-#ifndef CHASSIS_M4_SIDE
-#define CHASSIS_M4_SIDE                     MOTOR_SIDE_RIGHT
-#endif
-
+/* 任务周期 */
 #define CHASSIS_CONTROL_PERIOD_MS           10U
 #define CHASSIS_ENCODER_PERIOD_MS           10U
 #define CHASSIS_ADC_PERIOD_MS               20U
@@ -77,16 +39,14 @@ extern "C" {
 #define UPPER_UART_STATUS_PERIOD_MS         50U
 #define ESP12F_STATUS_PERIOD_MS             100U
 
-#define CHASSIS_CMD_TIMEOUT_MS              500U
-#define CHASSIS_PWM_MAX_PERMILLE            900
-#define CHASSIS_PWM_DEADBAND_PERMILLE       0
-#define MOTOR_DIRECTION_CHANGE_COAST_CYCLES 2U
-#define DRV8874_WAKE_DELAY_MS               2U
+#define CHASSIS_CMD_TIMEOUT_MS              500U  /* 默认超时；control_manager 已按源独立配置 */
 
 #define CHASSIS_MAX_LINEAR_MPS              0.5f
+#define CHASSIS_MAX_ANGULAR_RPS             10.0f
 #define CHASSIS_OPENLOOP_FULL_MPS           0.5f
 #define CHASSIS_ANGULAR_EPSILON_RPS         0.0001f
 
+/* PS2 手柄调参 */
 #define PS2_LINEAR_MAX_MPS                  CHASSIS_MAX_LINEAR_MPS
 #define PS2_ANGULAR_MAX_RPS                 5.0f
 #define PS2_DPAD_LINEAR_MPS                 CHASSIS_MAX_LINEAR_MPS
@@ -103,53 +63,11 @@ extern "C" {
 #define PS2_MACRO_R2_MASK                   0x02U
 #define PS2_LINE_TOGGLE_MASK                0x10U
 
+/* 速度斜坡 */
 #define CHASSIS_SPEED_RAMP_MPS2             1.0f
 #define CHASSIS_ANGULAR_RAMP_RPS2           10.0f
 
-#define CHASSIS_WHEEL_RADIUS_M              0.035f
-#define CHASSIS_WHEEL_BASE_M                0.178f
-#define CHASSIS_MIN_ENCODER_DT_MS           1U
-#define CHASSIS_MAX_ENCODER_DT_MS           100U
-
-#define CHASSIS_ENCODER_BASE_PPR            11.0f
-#define CHASSIS_ENCODER_QUADRATURE_MULT     4.0f
-#define CHASSIS_MOTOR_GEAR_RATIO            56.0f
-
-/* 方向符号配置。
- *
- * CHASSIS_Mx_MOTOR_DIR:
- *   1 / -1。PWM 方向修正。底盘正输出必须对应车辆前进。
- *   用 USART1 的 m1/m2/m3/m4 F/R 验证桥臂原始方向。
- *
- * CHASSIS_Mx_ENCODER_DIR:
- *   1 / -1。编码器速度方向修正。车辆前进时 status 中 mm/s 应为正。
- *   用低速正转配合 status 验证。
- */
-#define CHASSIS_M1_MOTOR_DIR                -1
-#define CHASSIS_M2_MOTOR_DIR                1
-#define CHASSIS_M3_MOTOR_DIR                1
-#define CHASSIS_M4_MOTOR_DIR                1
-#define CHASSIS_M1_ENCODER_DIR              1
-#define CHASSIS_M2_ENCODER_DIR              1
-#define CHASSIS_M3_ENCODER_DIR              -1
-#define CHASSIS_M4_ENCODER_DIR              -1
-
-#define ADC_MONITOR_CHANNEL_COUNT           5U
-#define ADC_MONITOR_VREF_V                  3.3f
-#define ADC_MONITOR_RESOLUTION_COUNTS       4095.0f
-#define ADC_MONITOR_BATTERY_R_UPPER_OHM     47000.0f
-#define ADC_MONITOR_BATTERY_R_LOWER_OHM     10000.0f
-#define ADC_MONITOR_BATTERY_DIVIDER         ((ADC_MONITOR_BATTERY_R_UPPER_OHM + ADC_MONITOR_BATTERY_R_LOWER_OHM) / ADC_MONITOR_BATTERY_R_LOWER_OHM)
-#define ADC_MONITOR_BATTERY_FILTER_ALPHA    0.10f
-#define ADC_MONITOR_CURRENT_ZERO_SAMPLES    256U
-#define MOTOR_CURRENT_SHUNT_OHM             0.1f
-#define MOTOR_CURRENT_ZERO_V                0.0f
-#define MOTOR_CURRENT_VOLTS_PER_AMP         0.1f
-#define MOTOR_CURRENT_FILTER_ALPHA          0.25f
-#define MOTOR_CURRENT_LIMIT_A               0.8f
-#define MOTOR_OVERCURRENT_DEBOUNCE_COUNT    5U
-#define ADC_MONITOR_CALIBRATION_ENABLED     1U
-
+/* PID 控制 */
 #define CHASSIS_PID_ENABLED                 1U
 #define CHASSIS_PID_CORRECTION_LIMIT        500.0f
 #define CHASSIS_PID_STOP_EPSILON_MPS        0.005f
@@ -172,10 +90,9 @@ extern "C" {
 #define CHASSIS_PID_KD_M4                   0.0f
 #define CHASSIS_PID_INTEGRAL_LIMIT          1.5f
 
+/* 电池监控 */
 #define BATTERY_LOW_WARN_V                  10.5f
 #define BATTERY_LOW_MONITOR_ENABLED         0U
-#define MOTOR_RATED_CURRENT_A               0.65f
-#define MOTOR_STALL_CURRENT_A               2.4f
 
 /* OLED SSD1306 配置 */
 #define OLED_I2C_ADDR                   0x3CU  /* 7-bit addr; HAL <<1 = 0x78 */

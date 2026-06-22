@@ -1,0 +1,15 @@
+PROJECT_NAME           = "F407_V2.0 Chassis Firmware"
+PROJECT_BRIEF          = "STM32F407VET6 四轮差速底盘控制固件"
+OUTPUT_DIRECTORY       = docs/doxygen
+INPUT                  = App BSP
+RECURSIVE              = YES
+EXTRACT_STATIC         = YES
+FILE_PATTERNS          = *.c *.h
+SOURCE_BROWSER         = YES
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+GENERATE_TREEVIEW      = YES
+HAVE_DOT               = NO
+OPTIMIZE_OUTPUT_FOR_C  = YES
+MARKDOWN_SUPPORT       = YES
+JAVADOC_AUTOBRIEF      = YES

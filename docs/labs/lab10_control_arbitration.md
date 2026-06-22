@@ -25,14 +25,14 @@ UPPER (USART3/RPI)  >  PS2 手柄  >  ESP12F (WiFi)  >  LINE (巡线)  >  DEBUG 
 for each source in [UPPER, PS2, ESP12F, LINE, DEBUG]:
     cmd = slot[source]
     if cmd.enable == 1:
-        if (now_ms - cmd.timestamp_ms) < 500ms:   ← 超时检查
+        if (now_ms - cmd.timestamp_ms) <= timeout[source]:
             return cmd                             ← 命中，忽略更低优先级
 return empty_cmd                                   ← 全部未命中 → 停止
 ```
 
 ### 3. 超时退让
 
-每个控制源的命令携带 `timestamp_ms`（发送时刻的 tick）。若当前时间距 timestamp 超过 `CHASSIS_CMD_TIMEOUT_MS = 500ms`，该命令槽自动失效——仲裁跳过此源，不会永久锁死。
+每个控制源的命令携带 `timestamp_ms`（发送时刻的 tick）。代码按源使用独立超时：UPPER/PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms。命令超过对应窗口后自动失效，仲裁跳过此源，不会永久锁死。
 
 ```
 场景: PS2 手柄突然断开
@@ -186,7 +186,7 @@ for src in range(6):
 
 ## 思考题
 
-1. 为什么需要 500ms 超时？如果设为 50ms 或 5s，分别会出现什么问题？
+1. 为什么通信控制源使用 500ms、LINE 使用 50ms、DEBUG 使用 2000ms？如果所有源统一设为 50ms 或 5s，分别会出现什么问题？
 
 2. 上位机 (UPPER) 优先级最高。假设上位机崩溃并持续发送 `vel 500 0`，操作员能否用手柄或 `estop` 命令阻止底盘？如果可以，是通过什么机制？
 

@@ -36,12 +36,22 @@ jobs:
             ninja-build \
             gcc-arm-none-eabi \
             libnewlib-arm-none-eabi
+          echo "--- Toolchain versions ---"
+          arm-none-eabi-gcc --version | head -1
+          cmake --version | head -1
+          ninja --version
 
       - name: Configure ${{ matrix.preset }}
         run: cmake --preset ${{ matrix.preset }}
 
       - name: Build ${{ matrix.preset }}
         run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Generate ${{ matrix.preset }} hex/bin
+        run: |
+          ELF="build/${{ matrix.preset }}/F407_V2.0.elf"
+          arm-none-eabi-objcopy -O ihex "$ELF" "build/${{ matrix.preset }}/F407_V2.0.hex"
+          arm-none-eabi-objcopy -O binary "$ELF" "build/${{ matrix.preset }}/F407_V2.0.bin"
 
       - name: Memory report ${{ matrix.preset }}
         run: |
@@ -58,4 +68,6 @@ jobs:
           if-no-files-found: error
           path: |
             build/${{ matrix.preset }}/F407_V2.0.elf
+            build/${{ matrix.preset }}/F407_V2.0.hex
+            build/${{ matrix.preset }}/F407_V2.0.bin
             build/${{ matrix.preset }}/F407_V2.0.map

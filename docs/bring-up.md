@@ -98,7 +98,7 @@ motor 0 0
 
 **命令**：`status`
 
-ADC1 由 TIM8 TRGO 以 1kHz 触发五通道 DMA 扫描，safetyTask 每 20ms 读取最新快照并更新滤波、零点和保护状态。
+ADC1 由 TIM8 TRGO 以 1kHz 触发五通道 DMA 扫描，safetyTask 每 20ms 读取最新快照并更新滤波、零点和保护状态。零点累计 256 次约需 5.12 秒，完成前电流保护尚未生效，禁止执行运动测试。
 
 **确认项**：
 - `vbat` 与万用表测量值一致，偏差 < 0.2V；`raw` 为 VBAT ADC 原始值

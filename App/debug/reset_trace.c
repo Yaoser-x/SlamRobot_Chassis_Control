@@ -117,6 +117,36 @@ void ResetTrace_TaskHeartbeat(reset_trace_task_t task, uint32_t tick_ms)
   ResetTrace_ExitCritical(primask);
 }
 
+uint32_t ResetTrace_GetTaskHeartbeat(reset_trace_task_t task)
+{
+  uint32_t primask = ResetTrace_EnterCritical();
+  task = ResetTrace_NormalizeTask(task);
+  uint32_t heartbeat = 0U;
+
+  switch (task)
+  {
+    case RESET_TRACE_TASK_SAFETY:
+      heartbeat = reset_trace_live.heartbeat_safety;
+      break;
+    case RESET_TRACE_TASK_MOTOR:
+      heartbeat = reset_trace_live.heartbeat_motor;
+      break;
+    case RESET_TRACE_TASK_PS2:
+      heartbeat = reset_trace_live.heartbeat_ps2;
+      break;
+    case RESET_TRACE_TASK_ESP:
+      heartbeat = reset_trace_live.heartbeat_esp;
+      break;
+    case RESET_TRACE_TASK_DEBUG:
+      heartbeat = reset_trace_live.heartbeat_debug;
+      break;
+    default:
+      break;
+  }
+  ResetTrace_ExitCritical(primask);
+  return heartbeat;
+}
+
 void ResetTrace_UpdateControl(uint8_t source, uint8_t estop, uint8_t fault)
 {
   uint32_t primask = ResetTrace_EnterCritical();

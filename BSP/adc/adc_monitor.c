@@ -1,7 +1,7 @@
 #include "adc_monitor.h"
 
 #include "adc.h"
-#include "chassis_config.h"
+#include "bsp_config.h"
 #include "chassis_layout.h"
 
 static uint16_t adc_dma_buffer[ADC_MONITOR_CHANNEL_COUNT];

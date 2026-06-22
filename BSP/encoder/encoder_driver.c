@@ -1,6 +1,6 @@
 #include "encoder_driver.h"
 
-#include "chassis_config.h"
+#include "bsp_config.h"
 #include "chassis_layout.h"
 #include "encoder_math.h"
 #include "tim.h"

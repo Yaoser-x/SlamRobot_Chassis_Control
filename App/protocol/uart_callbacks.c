@@ -1,5 +1,6 @@
 #include "esp12f_comm.h"
 #include "esp12f_flash_bridge.h"
+#include "upper_uart.h"
 #include "usart1_debug_console.h"
 #include "usart.h"
 
@@ -40,6 +41,10 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   else if (huart == &huart2)
   {
     Esp12fComm_OnUartError();
+  }
+  else if (huart == &huart3)
+  {
+    UpperUart_OnUartError();
   }
 }
 

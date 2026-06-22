@@ -3,13 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "ssd1306.h"
+#include "chassis_config.h"
 #include "i2c.h"
 #include <string.h>
-
-/* Fallback if chassis_config.h not yet updated */
-#ifndef OLED_I2C_ADDR
-#define OLED_I2C_ADDR 0x3CU  /* 7-bit addr; HAL <<1 = 0x78 */
-#endif
 
 static uint8_t framebuffer[SSD1306_WIDTH * SSD1306_PAGES];
 

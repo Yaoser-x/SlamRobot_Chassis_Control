@@ -8,6 +8,16 @@ static chassis_cmd_t source_cmds[CONTROL_SOURCE_LINE + 1U];
 static uint8_t emergency_stop;
 static uint8_t fault_stop;
 
+/* 按源独立超时 (ms)：UPPER/PS2/ESP12F/LINE/DEBUG */
+static const uint32_t source_timeout_ms[CONTROL_SOURCE_LINE + 1U] = {
+  [CONTROL_SOURCE_NONE]   = 0U,
+  [CONTROL_SOURCE_UPPER]  = 500U,
+  [CONTROL_SOURCE_PS2]    = 500U,
+  [CONTROL_SOURCE_ESP12F] = 500U,
+  [CONTROL_SOURCE_LINE]   = 50U,
+  [CONTROL_SOURCE_DEBUG]  = 2000U,
+};
+
 static uint8_t ControlManager_IsFiniteFloat(float value)
 {
   const float max_float = 3.402823466e+38f;
@@ -104,6 +114,7 @@ control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
     }
 
     sanitized.linear_x = ControlManager_ClampFloat(sanitized.linear_x, CHASSIS_MAX_LINEAR_MPS);
+    sanitized.angular_z = ControlManager_ClampFloat(sanitized.angular_z, CHASSIS_MAX_ANGULAR_RPS);
     if (ControlManager_KinematicsValid() == 0U &&
         ControlManager_AbsFloat(sanitized.angular_z) > CHASSIS_ANGULAR_EPSILON_RPS)
     {
@@ -181,7 +192,7 @@ uint8_t ControlManager_GetCommand(chassis_cmd_t *cmd, uint32_t now_ms)
 
     if (snapshot.enable != 0U &&
         snapshot.source != CONTROL_SOURCE_NONE &&
-        age_ms <= CHASSIS_CMD_TIMEOUT_MS)
+        age_ms <= source_timeout_ms[snapshot.source])
     {
       if (cmd != 0)
       {

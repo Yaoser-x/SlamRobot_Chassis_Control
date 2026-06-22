@@ -22,7 +22,7 @@ typedef enum
   ESP12F_RX_WAIT_BODY
 } esp12f_rx_state_t;
 
-static volatile uint8_t esp12f_rx_ring[ESP12F_RX_RING_SIZE];
+static volatile uint8_t esp12f_rx_ring[ESP12F_RX_RING_SIZE] __attribute__((aligned(4)));
 static volatile uint16_t esp12f_rx_head;
 static volatile uint16_t esp12f_rx_tail;
 static uint8_t esp12f_rx_byte;

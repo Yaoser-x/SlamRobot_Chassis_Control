@@ -54,8 +54,6 @@ uint8_t ImuBmi270_SetEnabled(uint8_t enabled);
 uint8_t ImuBmi270_ProbeNow(void);
 uint8_t ImuBmi270_ConfigNow(void);
 uint8_t ImuBmi270_Update(void);
-uint8_t ImuBmi270_ReadReg(uint8_t reg, uint8_t *value);
-uint8_t ImuBmi270_WriteReg(uint8_t reg, uint8_t value);
 uint8_t ImuBmi270_Diagnose(imu_bmi270_diag_t *diag);
 uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms);
 void ImuBmi270_ClearCalibration(void);
