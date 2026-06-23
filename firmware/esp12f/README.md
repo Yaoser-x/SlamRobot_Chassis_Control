@@ -2,11 +2,11 @@
 
 ## 文件说明
 
-- `F407_ESP12F.ino` — ESP8266 Arduino 固件，实现 WiFi 桥接 + 网页遥控
+- `F407_ESP12F.ino` — ESP8266 Arduino 固件，实现固定 AP + 网页遥控
 
 ## 功能特性
 
-- **AP+STA 智能切换**：上电先尝试连接已保存的 WiFi 路由器（12s 超时），失败自动开热点
+- **固定 AP 模式**：上电直接创建 `F407_Chassis` 热点，控制地址固定为 `192.168.4.1`
 - **WebSocket 实时遥控**：手机网页虚拟摇杆控制底盘速度，实时遥测回显
 - **upper_protocol 帧协议**：与 STM32F407 USART2 通信，CRC-8/Dallas 校验
 - **安全保护**：WebSocket 断开 → 自动停车；500ms 无指令 → 速度归零
@@ -30,9 +30,18 @@
 | Reset Method | **None**（不依赖 DTR/RTS） |
 | Crystal Frequency | 26 MHz |
 
-4. **不需要安装额外库**：`ESP8266WiFi`、`ESP8266WebServer`、`WebSocketsServer`、`EEPROM` 均为 ESP8266 核心自带。
+4. **不需要安装额外库**：`ESP8266WiFi`、`ESP8266WebServer`、`WebSocketsServer` 均为 ESP8266 核心自带。
 
 ## 编译
+
+网页源码保留在 `F407_ESP12F.ino` 的 `HTML_PAGE` 块中。修改页面后，先重新生成
+gzip 资源并验证：
+
+```powershell
+python F407_ESP12F/tools/check_ap_only.py
+python F407_ESP12F/tools/generate_html_gz.py
+python F407_ESP12F/tools/check_html_gz.py
+```
 
 打开 `F407_ESP12F.ino`，点击 Arduino IDE **✓ 验证**（编译），确认编译成功无错误。
 
@@ -61,18 +70,12 @@
 
 ## 使用
 
-### AP 模式（出厂默认）
+### 固定 AP 模式
 
-1. ESP12F 上电后未找到已保存 WiFi → 自动开热点
+1. ESP12F 上电后直接创建热点
 2. 手机/PC 连接 WiFi：**`F407_Chassis`**，密码：**`12345678`**
 3. 浏览器打开 **`http://192.168.4.1`**
 4. 虚拟摇杆操控底盘
-
-### STA 模式（连接路由器）
-
-1. 首次使用 STA 模式，需在网页控制界面发送配置指令。
-   或者修改代码中的默认 SSID/密码（搜索 `sta_configured` 相关逻辑）。
-2. 网页中可使用配置功能保存 WiFi 信息到 EEPROM。
 
 ### 控制界面
 
@@ -109,7 +112,6 @@ AT+GMR
 ```cpp
 #define AP_SSID           "F407_Chassis"   // AP 热点名称
 #define AP_PASS           "12345678"        // AP 密码
-#define STA_TIMEOUT_MS    12000             // STA 连接超时
 #define MAX_LINEAR_MPS    0.5f              // 最大线速度
 #define MAX_ANGULAR_RPS   1.0f              // 最大角速度
 ```

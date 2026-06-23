@@ -306,7 +306,13 @@ void DMA1_Stream2_IRQHandler(void)
 void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
-
+  /*
+   * USART2 uses interrupt-driven TX/RX only. Keep stale or corrupted DMA
+   * state from sending HAL_UART_IRQHandler() into an invalid DMA abort path.
+   */
+  CLEAR_BIT(huart2.Instance->CR3, USART_CR3_DMAR | USART_CR3_DMAT);
+  huart2.hdmarx = 0;
+  huart2.hdmatx = 0;
   /* USER CODE END USART2_IRQn 0 */
   HAL_UART_IRQHandler(&huart2);
   /* USER CODE BEGIN USART2_IRQn 1 */

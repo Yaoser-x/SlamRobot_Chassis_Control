@@ -22,6 +22,7 @@ static const encoder_hw_t encoder_hw[MOTOR_ID_COUNT] = {
 
 static encoder_state_t encoder_state;
 static uint32_t last_count[MOTOR_ID_COUNT];
+static encoder_speed_window_t speed_window[MOTOR_ID_COUNT];
 static uint32_t last_update_ms;
 static uint8_t has_last_update;
 
@@ -42,6 +43,7 @@ void EncoderDriver_Init(void)
     (void)HAL_TIM_Encoder_Start(encoder_hw[i].htim, TIM_CHANNEL_ALL);
     __HAL_TIM_SET_COUNTER(encoder_hw[i].htim, 0U);
     last_count[i] = 0U;
+    EncoderMath_SpeedWindowReset(&speed_window[i]);
   }
   encoder_state = (encoder_state_t){0};
   last_update_ms = 0U;
@@ -53,7 +55,6 @@ void EncoderDriver_Update(uint32_t now_ms)
   uint32_t now_count[MOTOR_ID_COUNT];
   int32_t delta[MOTOR_ID_COUNT];
   uint32_t dt_ms = now_ms - last_update_ms;
-  float dt_s = (float)dt_ms / 1000.0f;
   float counts_per_rev = EncoderDriver_GetCountsPerRev();
   float meters_per_rev = TWO_PI_F * CHASSIS_WHEEL_RADIUS_M;
   uint32_t primask;
@@ -95,6 +96,7 @@ void EncoderDriver_Update(uint32_t now_ms)
       encoder_state.delta[i] = 0;
       encoder_state.speed_mps[i] = 0.0f;
       encoder_state.speed_valid[i] = 0U;
+      EncoderMath_SpeedWindowReset(&speed_window[i]);
       continue;
     }
 
@@ -109,11 +111,15 @@ void EncoderDriver_Update(uint32_t now_ms)
     {
       encoder_state.speed_mps[i] = 0.0f;
       encoder_state.speed_valid[i] = 0U;
+      EncoderMath_SpeedWindowReset(&speed_window[i]);
       valid_all = 0U;
     }
     else
     {
-      encoder_state.speed_mps[i] = ((float)delta[i] / counts_per_rev) * meters_per_rev / dt_s;
+      EncoderMath_SpeedWindowPush(&speed_window[i], delta[i], dt_ms);
+      encoder_state.speed_mps[i] = ((float)speed_window[i].delta_sum / counts_per_rev) *
+                                   meters_per_rev /
+                                   ((float)speed_window[i].dt_sum_ms / 1000.0f);
       encoder_state.speed_valid[i] = 1U;
     }
 

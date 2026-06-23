@@ -94,6 +94,7 @@ extern "C" {
 /* 编码器采样时序 */
 #define CHASSIS_MIN_ENCODER_DT_MS           1U
 #define CHASSIS_MAX_ENCODER_DT_MS           100U
+#define CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES 5U
 
 /* ADC 监控参数 */
 #define ADC_MONITOR_CHANNEL_COUNT           5U

@@ -2,7 +2,7 @@
  * F407_ESP12F.ino — ESP8266 WiFi 桥接固件（Arduino IDE）
  *
  * 功能：
- *   - AP+STA 智能切换：优先连接已知路由器，失败自动开热点
+ *   - 固定 AP：上电创建 F407_Chassis 热点
  *   - WebSocket 实时遥控 + 遥测回传
  *   - 手机网页操控界面（虚拟摇杆 + 速度/方向控制）
  *   - upper_protocol 帧协议与 STM32F407 USART2 通信
@@ -19,26 +19,18 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <WebSocketsServer.h>
-#include <EEPROM.h>
+
+#include "html_page_gz.h"
 
 // ============================================================================
 // 1. 配置常量
 // ============================================================================
 
 #define UART_BAUD         115200
-#define STA_TIMEOUT_MS    12000   // STA 连接超时（12s）
-#define STA_RECONNECT_INTERVAL_MS 10000
 #define AP_SSID           "F407_Chassis"
 #define AP_PASS           "12345678"
 #define WEB_SOCKET_PORT   81
 #define HTTP_PORT         80
-#define EEPROM_SIZE       128
-#define EEPROM_MAGIC      0xA5
-#define EEPROM_MAGIC_ADDR 0
-#define EEPROM_SSID_ADDR  4
-#define EEPROM_PASS_ADDR  36      // EEPROM_SSID_ADDR + MAX_SSID_LEN
-#define MAX_SSID_LEN      32
-#define MAX_PASS_LEN      64
 
 // 底盘控制范围
 #define MAX_LINEAR_MPS    0.5f    // 最大线速度 m/s
@@ -267,92 +259,20 @@ static bool feedRxByte(uint8_t b) {
 }
 
 // ============================================================================
-// 5. WiFi 管理（AP+STA 智能切换）
+// 5. WiFi 管理（固定 AP）
 // ============================================================================
 
-static char sta_ssid[MAX_SSID_LEN + 1] = "";
-static char sta_pass[MAX_PASS_LEN + 1] = "";
-static bool sta_configured = false;
-static bool wifi_connected = false;
 static String my_ip;
-static unsigned long g_last_sta_retry_ms = 0;
-
-static void eepromLoad() {
-  EEPROM.begin(EEPROM_SIZE);
-  if (EEPROM.read(EEPROM_MAGIC_ADDR) == EEPROM_MAGIC) {
-    for (int i = 0; i < MAX_SSID_LEN; i++) sta_ssid[i] = EEPROM.read(EEPROM_SSID_ADDR + i);
-    for (int i = 0; i < MAX_PASS_LEN; i++) sta_pass[i] = EEPROM.read(EEPROM_PASS_ADDR + i);
-    sta_ssid[MAX_SSID_LEN] = '\0';
-    sta_pass[MAX_PASS_LEN] = '\0';
-    if (strlen(sta_ssid) > 0) sta_configured = true;
-  }
-  EEPROM.end();
-}
-
-static void eepromSave(const char *ssid, const char *pass) {
-  EEPROM.begin(EEPROM_SIZE);
-  EEPROM.write(EEPROM_MAGIC_ADDR, EEPROM_MAGIC);
-  for (int i = 0; i < MAX_SSID_LEN; i++) EEPROM.write(EEPROM_SSID_ADDR + i, ssid[i] ? ssid[i] : 0);
-  for (int i = 0; i < MAX_PASS_LEN; i++) EEPROM.write(EEPROM_PASS_ADDR + i, pass[i] ? pass[i] : 0);
-  EEPROM.commit();
-  EEPROM.end();
-}
 
 static void wifiStartAP() {
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
   my_ip = WiFi.softAPIP().toString();
-  wifi_connected = true;
-}
-
-static void wifiBeginSta() {
-  if (sta_configured) {
-    if (strlen(sta_pass) > 0) {
-      WiFi.begin(sta_ssid, sta_pass);
-    } else {
-      WiFi.begin(sta_ssid);
-    }
-    g_last_sta_retry_ms = millis();
-  }
 }
 
 static void wifiInit() {
-  eepromLoad();
   WiFi.persistent(false);
   wifiStartAP();
-
-  if (sta_configured) {
-    wifiBeginSta();
-
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - start) < STA_TIMEOUT_MS) {
-      delay(500);
-      // 喂 UART 收帧，不丢 STM32 数据
-      while (Serial.available()) {
-        uint8_t b = Serial.read();
-        feedRxByte(b);
-      }
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      my_ip = WiFi.localIP().toString();
-      wifi_connected = true;
-    }
-  }
-}
-
-static void wifiMaintain() {
-  if (!sta_configured) return;
-  if (WiFi.status() == WL_CONNECTED) {
-    my_ip = WiFi.localIP().toString();
-    wifi_connected = true;
-    return;
-  }
-  wifi_connected = true;
-  if (millis() - g_last_sta_retry_ms >= STA_RECONNECT_INTERVAL_MS) {
-    WiFi.mode(WIFI_AP_STA);
-    wifiBeginSta();
-  }
 }
 
 static float jsonFloatValue(const String &cmd, const char *key, float fallback) {
@@ -454,21 +374,6 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
       uint16_t len = buildLineCtrlFrame(v, buf, sizeof(buf));
       if (len) sendToSTM32(buf, len);
     }
-    else if (cmd.startsWith("{\"cmd\":\"config\"")) {
-      // {"cmd":"config","ssid":"xxx","pass":"yyy"}
-      int ssidIdx = cmd.indexOf("\"ssid\":\"");
-      int passIdx = cmd.indexOf("\"pass\":\"");
-      if (ssidIdx > 0 && passIdx > 0) {
-        String ssid = cmd.substring(ssidIdx + 8);
-        ssid = ssid.substring(0, ssid.indexOf('"'));
-        String pass = cmd.substring(passIdx + 8);
-        pass = pass.substring(0, pass.indexOf('"'));
-        ssid.toCharArray(sta_ssid, MAX_SSID_LEN + 1);
-        pass.toCharArray(sta_pass, MAX_PASS_LEN + 1);
-        eepromSave(sta_ssid, sta_pass);
-        ws.sendTXT(num, "{\"msg\":\"WiFi 配置已保存，重启后生效。\"}");
-      }
-    }
     break;
   }
   default: break;
@@ -479,6 +384,7 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
 // 7. Web 控制页面（PROGMEM，需在 handleRoot 之前定义）
 // ============================================================================
 
+#if 0  // 页面源码保留用于生成 html_page_gz.h，运行时不再占用 Flash 两份空间
 static const char HTML_PAGE[] PROGMEM = R"raw(
 <!DOCTYPE html>
 <html lang="zh">
@@ -488,7 +394,7 @@ static const char HTML_PAGE[] PROGMEM = R"raw(
 <title>F407 底盘控制</title>
 <style>
 :root{--bg:#F6F8FB;--surface:#FFFFFF;--elev:#FFFFFF;--primary:#2563EB;--primary-soft:#DBEAFE;--accent:#0F766E;--ok:#059669;--warn:#D97706;--danger:#DC2626;--text:#111827;--muted:#4B5563;--border:#E5E7EB;--track:#EEF2F7;--shadow:0 10px 24px rgba(15,23,42,.08)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;user-select:none;-webkit-user-select:none}button,input{font:inherit}.app{min-height:100vh;display:flex;flex-direction:column;padding:10px 12px calc(12px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}.top{min-height:44px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:rgba(255,255,255,.88);border:1px solid var(--border);border-radius:8px;padding:6px 8px;gap:8px;box-shadow:var(--shadow);font-size:12px}.conn{display:flex;align-items:center;gap:6px;min-width:0;font-weight:700}.dot{width:8px;height:8px;border-radius:50%;background:var(--danger)}.connected .dot{background:var(--ok)}.ap{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.right{display:flex;align-items:center;justify-content:flex-end;gap:8px}.mono{font-family:"SF Mono","Cascadia Code",Consolas,monospace}.icon{width:32px;height:32px;border:1px solid transparent;background:transparent;color:var(--muted);display:grid;place-items:center;border-radius:8px}.icon:active{background:var(--track);border-color:var(--border)}main{display:grid;gap:10px;padding-top:10px}.dash{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .2s}.stale .dash{opacity:.55}.panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;box-shadow:var(--shadow)}.battery{display:grid;place-items:center;position:relative;min-height:92px}.battery svg{width:126px;height:72px}.battery .read{position:absolute;top:34px;text-align:center}.big{font-size:18px;font-weight:800}.small{font-size:11px;color:var(--muted)}.mode{display:grid;align-content:center;gap:8px}.mode-pill{display:inline-flex;align-items:center;justify-content:center;min-height:30px;border-radius:8px;background:var(--primary-soft);color:var(--primary);font-weight:800}.motors{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.motor{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:8px;padding:9px 10px}.motor:nth-child(n+3){border-left-color:var(--accent)}.motor.fault{border-left-color:var(--danger);background:#FEF2F2;animation:pulse .5s infinite alternate}.mh{display:flex;justify-content:space-between;font-size:11px;font-weight:800;color:var(--muted)}.kv{display:grid;grid-template-columns:42px 1fr 22px;gap:6px;margin-top:5px;align-items:baseline}.kv label{font-size:10px;color:var(--muted)}.kv span{font-size:15px;font-weight:800}.kv b{font-size:10px;color:var(--muted)}.flash{color:var(--primary);transition:color .25s}.error{grid-column:1/-1;display:none;border-left:3px solid var(--danger);background:#FEF2F2;color:var(--danger);border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700}.error.show{display:block}.control{display:grid;gap:10px}.joy{height:210px;max-width:380px;width:100%;margin:0 auto;position:relative;background:linear-gradient(180deg,#FFFFFF,#F8FAFC);border:1px solid var(--border);border-radius:8px;overflow:hidden;touch-action:none;box-shadow:var(--shadow)}.joy:before,.joy:after{content:"";position:absolute;background:var(--border)}.joy:before{left:50%;top:0;width:1px;height:100%}.joy:after{left:0;top:50%;width:100%;height:1px}.joy.locked:after{content:"急停已锁定";display:grid;place-items:center;background:rgba(255,255,255,.86);inset:0;width:auto;height:auto;color:var(--danger);font-weight:900;z-index:3}.thumb{width:52px;height:52px;border-radius:50%;position:absolute;left:calc(50% - 26px);top:calc(50% - 26px);background:var(--primary);box-shadow:0 10px 22px rgba(37,99,235,.28),inset 0 0 0 7px rgba(255,255,255,.28);z-index:2;transition:left .2s ease-out,top .2s ease-out}.dragging .thumb{transition:none}.slider{display:grid;grid-template-columns:auto 1fr 48px;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700}.slider input{width:100%;accent-color:var(--primary)}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid var(--border);padding-top:10px;margin-top:10px}.btn{height:42px;border:0;border-radius:8px;color:white;font-weight:800}.stop{grid-column:1/-1;height:48px;background:var(--danger)}.estop{background:var(--warn)}.estop.active{background:var(--danger);animation:pulse .7s infinite alternate}.line{background:#E5E7EB;color:#374151}.line.active{background:var(--ok);color:white}.btn:active{transform:scale(.98)}.btn:disabled{opacity:.45}.drawer{position:fixed;inset:0;pointer-events:none;z-index:10}.drawer.open{pointer-events:auto}.shade{position:absolute;inset:0;background:rgba(17,24,39,.35);opacity:0;transition:opacity .25s}.drawer.open .shade{opacity:1}.sheet{position:absolute;right:0;top:0;height:100%;width:min(320px,88vw);background:var(--elev);border-left:1px solid var(--border);padding:14px;transform:translateX(100%);transition:transform .25s ease-out;display:grid;align-content:start;gap:12px;box-shadow:-12px 0 32px rgba(15,23,42,.12)}.drawer.open .sheet{transform:translateX(0)}.sheet-head{display:flex;align-items:center;justify-content:space-between}.field{display:grid;gap:5px}.field label{font-size:11px;color:var(--muted);font-weight:700}.field input{height:42px;border-radius:8px;border:1px solid var(--border);background:#F9FAFB;color:var(--text);padding:0 10px}.save{height:42px;border:0;border-radius:8px;background:var(--primary);color:white;font-weight:800}.save:disabled{opacity:.4}.info{border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--muted);font-size:12px;background:#F9FAFB}.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--text);border-radius:8px;padding:8px 12px;color:white;display:none;z-index:12;box-shadow:var(--shadow)}.toast.show{display:block}@keyframes pulse{from{box-shadow:0 0 0 rgba(220,38,38,0)}to{box-shadow:0 0 0 4px rgba(220,38,38,.18)}}@media (min-width:700px){.app{max-width:760px}.dash{grid-template-columns:180px 1fr}.motors{grid-column:auto;grid-template-columns:1fr 1fr}.error{grid-column:1/-1}.control{grid-template-columns:1fr 260px;align-items:start}.joy{max-width:none}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;user-select:none;-webkit-user-select:none}button,input{font:inherit}.app{min-height:100vh;display:flex;flex-direction:column;padding:10px 12px calc(12px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}.top{min-height:44px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:rgba(255,255,255,.88);border:1px solid var(--border);border-radius:8px;padding:6px 8px;gap:8px;box-shadow:var(--shadow);font-size:12px}.conn{display:flex;align-items:center;gap:6px;min-width:0;font-weight:700}.dot{width:8px;height:8px;border-radius:50%;background:var(--danger)}.connected .dot{background:var(--ok)}.ap{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.right{display:flex;align-items:center;justify-content:flex-end;gap:8px}.mono{font-family:"SF Mono","Cascadia Code",Consolas,monospace}main{display:grid;gap:10px;padding-top:10px}.dash{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .2s}.stale .dash{opacity:.55}.panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;box-shadow:var(--shadow)}.battery{display:grid;place-items:center;position:relative;min-height:92px}.battery svg{width:126px;height:72px}.battery .read{position:absolute;top:34px;text-align:center}.big{font-size:18px;font-weight:800}.small{font-size:11px;color:var(--muted)}.mode{display:grid;align-content:center;gap:8px}.mode-pill{display:inline-flex;align-items:center;justify-content:center;min-height:30px;border-radius:8px;background:var(--primary-soft);color:var(--primary);font-weight:800}.motors{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.motor{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:8px;padding:9px 10px}.motor:nth-child(n+3){border-left-color:var(--accent)}.motor.fault{border-left-color:var(--danger);background:#FEF2F2;animation:pulse .5s infinite alternate}.mh{display:flex;justify-content:space-between;font-size:11px;font-weight:800;color:var(--muted)}.kv{display:grid;grid-template-columns:42px 1fr 22px;gap:6px;margin-top:5px;align-items:baseline}.kv label{font-size:10px;color:var(--muted)}.kv span{font-size:15px;font-weight:800}.kv b{font-size:10px;color:var(--muted)}.flash{color:var(--primary);transition:color .25s}.error{grid-column:1/-1;display:none;border-left:3px solid var(--danger);background:#FEF2F2;color:var(--danger);border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700}.error.show{display:block}.control{display:grid;gap:10px}.joy{height:210px;max-width:380px;width:100%;margin:0 auto;position:relative;background:linear-gradient(180deg,#FFFFFF,#F8FAFC);border:1px solid var(--border);border-radius:8px;overflow:hidden;touch-action:none;box-shadow:var(--shadow)}.joy:before,.joy:after{content:"";position:absolute;background:var(--border)}.joy:before{left:50%;top:0;width:1px;height:100%}.joy:after{left:0;top:50%;width:100%;height:1px}.joy.locked:after{content:"急停已锁定";display:grid;place-items:center;background:rgba(255,255,255,.86);inset:0;width:auto;height:auto;color:var(--danger);font-weight:900;z-index:3}.thumb{width:52px;height:52px;border-radius:50%;position:absolute;left:calc(50% - 26px);top:calc(50% - 26px);background:var(--primary);box-shadow:0 10px 22px rgba(37,99,235,.28),inset 0 0 0 7px rgba(255,255,255,.28);z-index:2;transition:left .2s ease-out,top .2s ease-out}.dragging .thumb{transition:none}.slider{display:grid;grid-template-columns:auto 1fr 48px;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700}.slider input{width:100%;accent-color:var(--primary)}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid var(--border);padding-top:10px;margin-top:10px}.btn{height:42px;border:0;border-radius:8px;color:white;font-weight:800}.stop{grid-column:1/-1;height:48px;background:var(--danger)}.estop{background:var(--warn)}.estop.active{background:var(--danger);animation:pulse .7s infinite alternate}.line{background:#E5E7EB;color:#374151}.line.active{background:var(--ok);color:white}.btn:active{transform:scale(.98)}.btn:disabled{opacity:.45}@keyframes pulse{from{box-shadow:0 0 0 rgba(220,38,38,0)}to{box-shadow:0 0 0 4px rgba(220,38,38,.18)}}@media (min-width:700px){.app{max-width:760px}.dash{grid-template-columns:180px 1fr}.motors{grid-column:auto;grid-template-columns:1fr 1fr}.error{grid-column:1/-1}.control{grid-template-columns:1fr 260px;align-items:start}.joy{max-width:none}}
 </style>
 </head>
 <body>
@@ -496,7 +402,7 @@ static const char HTML_PAGE[] PROGMEM = R"raw(
   <div class="top" id="top">
     <div class="conn"><span class="dot"></span><span id="connText">重连中...</span></div>
     <div class="ap" id="apName">F407_Chassis</div>
-    <div class="right"><span class="mono" id="batTop">--.-V</span><button class="icon" id="openSettings" aria-label="网络设置"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.8 1.8 0 0 0-2.1.2 1.8 1.8 0 0 0-.8 1.8V22H9.3v-.3a1.8 1.8 0 0 0-.8-1.8 1.8 1.8 0 0 0-2.1-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.2H3V10h.2a1.7 1.7 0 0 0 1.4-1.2 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.8 1.8 0 0 0 2.1-.2 1.8 1.8 0 0 0 .8-1.8V1h5.4v.3a1.8 1.8 0 0 0 .8 1.8 1.8 1.8 0 0 0 2.1.2l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 20.8 10h.2v3.8h-.2A1.7 1.7 0 0 0 19.4 15Z"/></svg></button></div>
+    <div class="right"><span class="mono" id="batTop">--.-V</span></div>
   </div>
   <main>
     <section class="dash">
@@ -522,8 +428,6 @@ static const char HTML_PAGE[] PROGMEM = R"raw(
     </section>
   </main>
 </div>
-<div class="drawer" id="drawer"><div class="shade" id="shade"></div><div class="sheet"><div class="sheet-head"><strong>网络设置</strong><button class="icon" id="closeSettings" aria-label="关闭"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><div class="field"><label>WiFi 名称</label><input id="ssid" maxlength="32" autocomplete="off"></div><div class="field"><label>WiFi 密码</label><input id="pass" maxlength="64" type="password"></div><button class="save" id="saveWifi" disabled>保存配置</button><div class="info">IP: <span id="ipInfo">-</span><br>WebSocket: <span id="wsInfo">离线</span></div></div></div>
-<div class="toast" id="toast" aria-live="polite"></div>
 <script>
 var ws,active=false,spdScale=.6,lastSend=0,lastData=0,lx=0,az=0,estop=false,lineOn=false;
 var srcNames=['无','上位机','手柄','ESP12F','调试','巡线'];
@@ -531,8 +435,7 @@ var joy=document.getElementById('joy'),thumb=document.getElementById('thumb');
 function el(id){return document.getElementById(id)}
 function text(id,v){var n=el(id),s=String(v);if(n.textContent!==s){n.textContent=s;n.classList.add('flash');setTimeout(function(){n.classList.remove('flash')},260)}}
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
-function toast(msg){var t=el('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2200)}
-function connect(){var ip=location.hostname;ws=new WebSocket('ws://'+ip+':81');ws.onopen=function(){el('top').classList.add('connected');text('connText','已连接');text('ipInfo',ip);text('wsInfo','在线')};ws.onclose=function(){el('top').classList.remove('connected');el('drawer').classList.remove('open');text('connText','重连中...');text('wsInfo','离线');setTimeout(connect,2000)};ws.onerror=function(){try{ws.close()}catch(e){}};ws.onmessage=function(e){try{var d=JSON.parse(e.data);if(d.msg){toast(d.msg);setTimeout(function(){el('drawer').classList.remove('open')},2000);return}update(d)}catch(_){}}}
+function connect(){var ip=location.hostname;ws=new WebSocket('ws://'+ip+':81');ws.onopen=function(){el('top').classList.add('connected');text('connText','已连接')};ws.onclose=function(){el('top').classList.remove('connected');text('connText','重连中...');setTimeout(connect,2000)};ws.onerror=function(){try{ws.close()}catch(e){}};ws.onmessage=function(e){try{update(JSON.parse(e.data))}catch(_){}}}
 function hex(v){return('00000000'+(v>>>0).toString(16).toUpperCase()).slice(-8)}
 function update(d){lastData=Date.now();el('app').classList.remove('stale');var bat=d.bat||0,pct=Math.max(0,Math.min(100,Math.round((bat-10.5)/(12.6-10.5)*100)));text('proto',d.pv);text('batTop',bat.toFixed(1)+'V');text('batMain',bat.toFixed(1)+'V');text('batPct',pct+'%');el('batArc').style.strokeDashoffset=100-pct;el('batArc').style.stroke=bat<10.5?'var(--danger)':(bat<11.5?'var(--warn)':'var(--ok)');text('mode',srcNames[d.src]||String(d.src));text('fresh','实时');estop=!!(d.flags&1);lineOn=!!(d.flags&4);el('joy').classList.toggle('locked',estop);el('btnEstop').classList.toggle('active',estop);text('btnEstop',estop?'解除急停':'急停');el('btnLine').classList.toggle('active',lineOn);text('btnLine',lineOn?'巡线开':'巡线关');el('btnStop').disabled=estop;el('btnLine').disabled=estop;var err=d.err>>>0,lat=d.lat>>>0;el('errBar').classList.toggle('show',err!==0||lat!==0);text('errBar','错误 0x'+hex(err)+'  锁存 0x'+hex(lat));for(var i=0;i<4;i++){var en=!!(d.mask&(1<<i)),valid=!!(d.valid&(1<<i)),fault=!!(err&(1<<(i+1)));el('m'+i).classList.toggle('fault',fault);text('v'+i,en?(valid?'正常':'超时'):'关闭');text('s'+i,(d.spd[i]||0).toFixed(2));text('e'+i,d.enc[i]||0);text('c'+i,(d.cur[i]||0).toFixed(2));text('p'+i,d.pwm[i]||0)}}
 function resetJoy(){active=false;joy.classList.remove('dragging');thumb.style.left='calc(50% - 26px)';thumb.style.top='calc(50% - 26px)';lx=0;az=0;send({cmd:'vel',lx:0,az:0});send({cmd:'stop'})}
@@ -544,17 +447,13 @@ el('btnStop').onclick=function(){resetJoy()};
 el('btnEstop').onclick=function(){send({cmd:'estop',v:estop?0:1})};
 el('btnLine').onclick=function(){if(!estop)send({cmd:'line',v:lineOn?0:1})};
 el('spdScale').oninput=function(){spdScale=parseInt(this.value,10)/100;text('spdVal',this.value+'%')};
-el('openSettings').onclick=function(){el('drawer').classList.add('open')};
-el('closeSettings').onclick=el('shade').onclick=function(){el('drawer').classList.remove('open')};
-function wifiValid(){el('saveWifi').disabled=!el('ssid').value}
-el('ssid').oninput=wifiValid;el('pass').oninput=wifiValid;
-el('saveWifi').onclick=function(){send({cmd:'config',ssid:el('ssid').value,pass:el('pass').value});toast('正在保存网络配置')};
 setInterval(function(){if(Date.now()-lastData>300){el('app').classList.add('stale');text('fresh','超时')}},150);
 connect();
 </script>
 </body>
 </html>
 )raw";
+#endif
 
 // 推送遥测 JSON 到 WebSocket 客户端
 static void pushTelemetry() {
@@ -600,8 +499,12 @@ static void pushTelemetry() {
 
 // HTTP 路由：首页
 static void handleRoot() {
-  http.sendHeader("Cache-Control", "no-cache");
-  http.send_P(200, "text/html", HTML_PAGE);
+  http.sendHeader("Cache-Control", "no-store");
+  http.sendHeader("Content-Encoding", "gzip");
+  http.send_P(200,
+              "text/html; charset=utf-8",
+              reinterpret_cast<PGM_P>(HTML_PAGE_GZ),
+              HTML_PAGE_GZ_LEN);
 }
 
 // HTTP 路由：状态 JSON（方便调试）
@@ -609,13 +512,13 @@ static void handleStatus() {
   char json[256];
   snprintf(json, sizeof(json),
     "{\"pv\":%u,\"bat\":%.2f,\"err\":%lu,\"lat\":%lu,\"src\":%u,"
-    "\"wifi\":\"%s\",\"sta_cfg\":%d,\"ws\":%d}",
+    "\"wifi\":\"%s\",\"ws\":%d}",
     g_status.protocol_version,
     (float)g_status.battery_mv / 1000.0f,
     (unsigned long)g_status.error_flags,
     (unsigned long)g_status.latched_error_flags,
     g_status.control_source,
-    my_ip.c_str(), sta_configured, g_ws_connected);
+    my_ip.c_str(), g_ws_connected);
   http.send(200, "application/json", json);
 }
 
@@ -628,7 +531,7 @@ void setup() {
   // ESP12F 的 UART0 TX/RX 默认在 GPIO1/GPIO3，与 STM32 USART2 交叉连接
   // 如需调试输出，可通过 Serial1 (GPIO2) 或禁用调试
 
-  // WiFi 初始化（AP+STA 智能切换）
+  // WiFi 初始化（固定 AP）
   wifiInit();
 
   // HTTP 服务器
@@ -681,7 +584,6 @@ void loop() {
   }
 
   // --- HTTP / WebSocket 事件 ---
-  wifiMaintain();
   http.handleClient();
   ws.loop();
 

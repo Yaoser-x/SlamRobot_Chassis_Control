@@ -76,19 +76,19 @@ extern "C" {
 #define CHASSIS_PID_FEEDBACK_MIN_SPEED_MPS  0.01f
 #define CHASSIS_PID_FEEDBACK_LOSS_COUNT     50U
 
-#define CHASSIS_PID_KP_M1                   1200.0f
-#define CHASSIS_PID_KI_M1                   0.0f
-#define CHASSIS_PID_KD_M1                   0.0f
-#define CHASSIS_PID_KP_M2                   1200.0f
+#define CHASSIS_PID_KP_M1                   100.0f
+#define CHASSIS_PID_KI_M1                   50.0f
+#define CHASSIS_PID_KD_M1                   10.0f
+#define CHASSIS_PID_KP_M2                   500.0f
 #define CHASSIS_PID_KI_M2                   0.0f
 #define CHASSIS_PID_KD_M2                   0.0f
-#define CHASSIS_PID_KP_M3                   1400.0f
-#define CHASSIS_PID_KI_M3                   0.0f
-#define CHASSIS_PID_KD_M3                   0.0f
-#define CHASSIS_PID_KP_M4                   1400.0f
+#define CHASSIS_PID_KP_M3                   100.0f
+#define CHASSIS_PID_KI_M3                   50.0f
+#define CHASSIS_PID_KD_M3                   10.0f
+#define CHASSIS_PID_KP_M4                   500.0f
 #define CHASSIS_PID_KI_M4                   0.0f
 #define CHASSIS_PID_KD_M4                   0.0f
-#define CHASSIS_PID_INTEGRAL_LIMIT          1.5f
+#define CHASSIS_PID_INTEGRAL_LIMIT          5.0f
 
 /* 电池监控 */
 #define BATTERY_LOW_WARN_V                  10.5f

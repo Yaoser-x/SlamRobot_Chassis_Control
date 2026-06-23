@@ -7,6 +7,7 @@
 #include "cmsis_os2.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
+#include "encoder_math.h"
 #include "esp12f_comm.h"
 #include "esp12f_flash_bridge.h"
 #include "imu_bmi270.h"
@@ -49,6 +50,9 @@ static volatile uint16_t rx_tail;
 static uint32_t boot_reset_flags;
 static uint8_t boot_reset_flags_captured;
 static uint32_t rx_overflow_count;
+static int32_t motor_log_last_count[MOTOR_ID_COUNT];
+static uint32_t motor_log_last_ms;
+static uint8_t motor_log_baseline_valid;
 
 extern osThreadId_t defaultTaskHandle;
 extern osThreadId_t safetyTaskHandle;
@@ -207,6 +211,40 @@ static const char *const log_field_headers[LOG_FLD_COUNT] = {
   "esp_rx,esp_tx"
 };
 
+static void DebugConsole_ResetMotorLogBaseline(void)
+{
+  motor_log_baseline_valid = 0U;
+  motor_log_last_ms = 0U;
+}
+
+static void DebugConsole_GetMotorLogSpeed(uint32_t now_ms,
+                                          const encoder_state_t *state,
+                                          float speed_mps[MOTOR_ID_COUNT])
+{
+  uint32_t dt_ms = now_ms - motor_log_last_ms;
+  float counts_per_rev = EncoderDriver_GetCountsPerRev();
+
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (motor_log_baseline_valid != 0U)
+    {
+      speed_mps[i] = EncoderMath_CountDeltaSpeedMps(
+        state->count[i] - motor_log_last_count[i],
+        dt_ms,
+        counts_per_rev,
+        CHASSIS_WHEEL_RADIUS_M);
+    }
+    else
+    {
+      speed_mps[i] = 0.0f;
+    }
+    motor_log_last_count[i] = state->count[i];
+  }
+
+  motor_log_last_ms = now_ms;
+  motor_log_baseline_valid = 1U;
+}
+
 static void DebugConsole_PrintFilteredHeader(void)
 {
   char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
@@ -222,7 +260,10 @@ static void DebugConsole_PrintFilteredHeader(void)
   DebugConsole_Write(tx);
 }
 
-static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t field)
+static size_t DebugConsole_WriteFieldData(char *tx,
+                                          size_t pos,
+                                          log_field_id_t field,
+                                          uint32_t now_ms)
 {
   adc_monitor_state_t adc;
   encoder_state_t enc;
@@ -232,6 +273,7 @@ static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t f
   ps2_control_state_t ps2;
   line_uart_state_t line;
   esp12f_comm_state_t esp;
+  float motor_log_speed_mps[MOTOR_ID_COUNT];
 
   /* 惰性获取：仅需要的字段才获取状态快照 */
   switch (field)
@@ -239,12 +281,13 @@ static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t f
     case LOG_FLD_MOTOR:
       EncoderDriver_GetState(&enc);
       ChassisControl_GetState(&cs);
+      DebugConsole_GetMotorLogSpeed(now_ms, &enc, motor_log_speed_mps);
       pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
         "%ld,%ld,%ld,%ld,%d,%d,%d,%d",
-        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M1]),
-        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M2]),
-        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M3]),
-        (long)DebugConsole_Milli(enc.speed_mps[MOTOR_ID_M4]),
+        (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M1]),
+        (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M2]),
+        (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M3]),
+        (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M4]),
         cs.motor_output_permille[MOTOR_ID_M1],
         cs.motor_output_permille[MOTOR_ID_M2],
         cs.motor_output_permille[MOTOR_ID_M3],
@@ -327,7 +370,10 @@ static void DebugConsole_PrintFilteredLogFrame(uint32_t now_ms)
   for (i = 0U; i < log_filter_count; ++i)
   {
     tx[pos++] = ',';
-    pos = DebugConsole_WriteFieldData(tx, pos, (log_field_id_t)log_filter_order[i]);
+    pos = DebugConsole_WriteFieldData(tx,
+                                      pos,
+                                      (log_field_id_t)log_filter_order[i],
+                                      now_ms);
   }
   pos += (size_t)snprintf(tx + pos, sizeof(tx) - pos, "\r\n");
   DebugConsole_Write(tx);
@@ -380,7 +426,7 @@ static void DebugConsole_PrintHelp(void)
     "clearfault             clear latched overcurrent/driver faults\r\n"
     "line/line on/off       line sensor raw data / toggle control\r\n"
     "imutest/imudiag/imuinit/imucal [n]/imucalclear/imu 0|1\r\n"
-    "espreset/espboot 0|1\r\n"
+    "espreset/espboot 0|1/espisolate\r\n"
     "espflash on|off|status bridge USART1 to ESP12F (download mode)\r\n"
     "espat on|off          bridge USART1 to ESP12F (normal/AT mode)\r\n"
     "i2cscan               scan I2C1 bus for devices\r\n"
@@ -618,9 +664,11 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
   ps2_control_state_t ps2_state;
   line_uart_state_t line_state;
   esp12f_comm_state_t esp_state;
+  float motor_log_speed_mps[MOTOR_ID_COUNT];
 
   AdcMonitor_GetState(&adc_state);
   EncoderDriver_GetState(&encoder_state);
+  DebugConsole_GetMotorLogSpeed(now_ms, &encoder_state, motor_log_speed_mps);
   ChassisControl_GetState(&chassis_state);
   SystemMonitor_GetState(&monitor_state);
   ImuBmi270_GetState(&imu_state);
@@ -631,10 +679,10 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
   (void)snprintf(tx, sizeof(tx),
                  "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld\r\n",
                  (unsigned long)now_ms,
-                 (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M1]),
-                 (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M2]),
-                 (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M3]),
-                 (long)DebugConsole_Milli(encoder_state.speed_mps[MOTOR_ID_M4]),
+                 (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M1]),
+                 (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M2]),
+                 (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M3]),
+                 (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M4]),
                  chassis_state.motor_output_permille[MOTOR_ID_M1],
                  chassis_state.motor_output_permille[MOTOR_ID_M2],
                  chassis_state.motor_output_permille[MOTOR_ID_M3],
@@ -739,10 +787,12 @@ static void DebugConsole_HandleLine(char *line)
       {
         stream_mode = 0U;
         log_filter_count = 0U;
+        DebugConsole_ResetMotorLogBaseline();
         DebugConsole_Write("log off\r\n");
       }
       else
       {
+        DebugConsole_ResetMotorLogBaseline();
         token = strtok(0, " \t");
         if (token == 0)
         {
@@ -965,6 +1015,11 @@ static void DebugConsole_HandleLine(char *line)
     Esp12fComm_ResetModule();
     DebugConsole_Write("esp12f reset\r\n");
   }
+  else if (strcmp(line, "espisolate") == 0)
+  {
+    Esp12fComm_Isolate();
+    DebugConsole_Write("esp12f isolated until board reset\r\n");
+  }
   else if (sscanf(line, "espboot %d", &value) == 1)
   {
     Esp12fComm_SetDownloadMode((value != 0) ? 1U : 0U);
@@ -1099,6 +1154,7 @@ void Usart1DebugConsole_Init(void)
   rx_head = 0U;
   rx_tail = 0U;
   rx_overflow_count = 0U;
+  DebugConsole_ResetMotorLogBaseline();
   HAL_NVIC_SetPriority(USART1_IRQn, 7, 0);
   HAL_NVIC_EnableIRQ(USART1_IRQn);
   Usart1DebugConsole_RestartRx();

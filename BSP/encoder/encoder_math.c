@@ -1,5 +1,7 @@
 #include "encoder_math.h"
 
+#define TWO_PI_F 6.28318530718f
+
 int32_t EncoderMath_DiffCount(uint32_t now, uint32_t last, uint32_t period)
 {
   if (period <= 0xFFFFU)
@@ -7,4 +9,61 @@ int32_t EncoderMath_DiffCount(uint32_t now, uint32_t last, uint32_t period)
     return (int32_t)(int16_t)((uint16_t)now - (uint16_t)last);
   }
   return (int32_t)(now - last);
+}
+
+float EncoderMath_CountDeltaSpeedMps(int32_t delta,
+                                     uint32_t dt_ms,
+                                     float counts_per_rev,
+                                     float wheel_radius_m)
+{
+  if (dt_ms == 0U || counts_per_rev <= 0.0f || wheel_radius_m <= 0.0f)
+  {
+    return 0.0f;
+  }
+
+  return ((float)delta / counts_per_rev) *
+         (TWO_PI_F * wheel_radius_m) /
+         ((float)dt_ms / 1000.0f);
+}
+
+void EncoderMath_SpeedWindowReset(encoder_speed_window_t *window)
+{
+  if (window == 0)
+  {
+    return;
+  }
+
+  for (uint32_t i = 0U; i < CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES; ++i)
+  {
+    window->delta_history[i] = 0;
+    window->dt_history_ms[i] = 0U;
+  }
+  window->delta_sum = 0;
+  window->dt_sum_ms = 0U;
+  window->next_index = 0U;
+  window->sample_count = 0U;
+}
+
+void EncoderMath_SpeedWindowPush(encoder_speed_window_t *window, int32_t delta, uint32_t dt_ms)
+{
+  uint8_t index;
+
+  if (window == 0)
+  {
+    return;
+  }
+
+  index = window->next_index;
+  window->delta_sum -= window->delta_history[index];
+  window->dt_sum_ms -= window->dt_history_ms[index];
+  window->delta_history[index] = delta;
+  window->dt_history_ms[index] = dt_ms;
+  window->delta_sum += delta;
+  window->dt_sum_ms += dt_ms;
+
+  window->next_index = (uint8_t)((index + 1U) % CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES);
+  if (window->sample_count < CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES)
+  {
+    window->sample_count++;
+  }
 }

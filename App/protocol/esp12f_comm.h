@@ -23,6 +23,7 @@ void Esp12fComm_Init(void);
 void Esp12fComm_RestartRx(void);
 void Esp12fComm_Update(void);
 void Esp12fComm_ResetModule(void);
+void Esp12fComm_Isolate(void);
 void Esp12fComm_SetDownloadMode(uint8_t enabled);
 void Esp12fComm_OnRxCplt(void);
 void Esp12fComm_OnUartError(void);

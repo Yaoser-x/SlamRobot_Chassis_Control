@@ -64,7 +64,7 @@ log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
 
 | 字段名 | 输出列 | 列数 | 数据来源 |
 | --- | --- | --- | --- |
-| `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | `EncoderDriver_GetState` + `ChassisControl_GetState` |
+| `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisControl_GetState` |
 | `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `AdcMonitor_GetState` |
 | `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg` | 14 | `ImuBmi270_GetState` |
 | `errors` | `errors` | 1 | `SystemMonitor_GetState` |

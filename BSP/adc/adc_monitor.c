@@ -110,7 +110,13 @@ void AdcMonitor_Init(void)
   battery_filter_initialized = 0U;
   current_zero_valid = 0U;
   current_zero_sample_count = 0U;
-  (void)HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_dma_buffer, ADC_MONITOR_CHANNEL_COUNT);
+  if (HAL_ADC_Start_DMA(&hadc1,
+                        (uint32_t *)adc_dma_buffer,
+                        ADC_MONITOR_CHANNEL_COUNT) == HAL_OK)
+  {
+    /* Diagnostic isolation: keep DMA sampling, bypass HT/TC callbacks. */
+    __HAL_DMA_DISABLE_IT(hadc1.DMA_Handle, DMA_IT_HT | DMA_IT_TC);
+  }
 }
 
 void AdcMonitor_Update(void)

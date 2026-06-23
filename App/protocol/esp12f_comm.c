@@ -34,6 +34,7 @@ static uint8_t esp12f_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint8_t esp12f_status_payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN];
 static uint32_t esp12f_last_status_ms;
 static esp12f_comm_state_t esp12f_state;
+static uint8_t esp12f_isolated;
 
 static void Esp12fComm_ResetParser(void)
 {
@@ -216,6 +217,7 @@ static void Esp12fComm_SendStatus(uint32_t now_ms)
 
 void Esp12fComm_Init(void)
 {
+  esp12f_isolated = 0U;
   esp12f_rx_head = 0U;
   esp12f_rx_tail = 0U;
   esp12f_last_status_ms = 0U;
@@ -237,6 +239,11 @@ void Esp12fComm_Update(void)
 {
   uint32_t now_ms = osKernelGetTickCount();
 
+  if (esp12f_isolated != 0U)
+  {
+    return;
+  }
+
   if (Esp12fFlashBridge_IsActive() != 0U)
   {
     return;
@@ -251,6 +258,18 @@ void Esp12fComm_ResetModule(void)
   HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_RESET);
   HAL_Delay(5U);
   HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_SET);
+}
+
+void Esp12fComm_Isolate(void)
+{
+  esp12f_isolated = 1U;
+  HAL_NVIC_DisableIRQ(USART2_IRQn);
+  CLEAR_BIT(huart2.Instance->CR3, USART_CR3_DMAR);
+  huart2.hdmarx = 0;
+  (void)HAL_UART_Abort(&huart2);
+  HAL_NVIC_ClearPendingIRQ(USART2_IRQn);
+  HAL_GPIO_WritePin(ESP_RST_GPIO_Port, ESP_RST_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(ESP_EN_GPIO_Port, ESP_EN_Pin, GPIO_PIN_RESET);
 }
 
 void Esp12fComm_SetDownloadMode(uint8_t enabled)
