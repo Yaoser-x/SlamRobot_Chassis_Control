@@ -71,3 +71,44 @@ jobs:
             build/${{ matrix.preset }}/F407_V2.0.hex
             build/${{ matrix.preset }}/F407_V2.0.bin
             build/${{ matrix.preset }}/F407_V2.0.map
+
+  host-tests:
+    name: Host Tests
+    runs-on: ubuntu-24.04
+    needs: []
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build
+          echo "--- Toolchain versions ---"
+          cmake --version | head -1
+          ninja --version
+
+      - name: Configure host tests
+        run: cmake -S tests/host -B build/host-tests-ninja -G Ninja
+
+      - name: Build host tests
+        run: cmake --build build/host-tests-ninja
+
+      - name: Run host tests
+        run: ctest --test-dir build/host-tests-ninja --output-on-failure
+
+      - name: Host test summary
+        if: always()
+        run: |
+          echo "### Host Tests" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f build/host-tests-ninja/Testing/TAG ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            ctest --test-dir build/host-tests-ninja --output-on-failure 2>&1 \
+              | tee -a "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No test results found (build likely failed)." >> "$GITHUB_STEP_SUMMARY"
+          fi
