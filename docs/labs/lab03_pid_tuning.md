@@ -36,7 +36,7 @@ vel V [W]  ──→  ControlManager  ──→  ChassisControl_Step (10ms)
                   ├─ 速度斜坡: 1.0 m/s² 平滑过渡
                   ├─ PID 速度环: 独立四路 PI(D)
                   ├─ 电流限幅: 0.8A 上限
-                  └─ PWM 输出: TIM1/TIM8, permille ±900
+                  └─ 电机输出: TIM1 EN/PWM + GPIO PH/DIR, permille ±900
 ```
 
 ### 3. 阶跃响应评价指标

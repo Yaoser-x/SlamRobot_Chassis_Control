@@ -72,16 +72,16 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 
 | 预设 | 产物路径 |
 | --- | --- |
-| Debug | `build/Debug/F407_V2.0.elf`, `build/Debug/F407_V2.0.map` |
-| Release | `build/Release/F407_V2.0.elf`, `build/Release/F407_V2.0.map` |
+| Debug | `build/Debug/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
+| Release | `build/Release/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
 | Host 测试 | `build/host-tests-ninja/test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]` |
 
 ### 2.4 当前构建验证
 
 ```
-Debug:  RAM  78,848 B / 128 KB (60.16%)
-        FLASH 126,172 B / 512 KB (24.07%)
-        Host 测试 3/3 通过
+Debug:  RAM  ~79 KB / 128 KB (~60%)
+        FLASH ~128 KB / 512 KB (~24%)
+        Host 测试 3/3 通过 (CI host-tests)
 ```
 
 ---
@@ -97,9 +97,11 @@ Debug:  RAM  78,848 B / 128 KB (60.16%)
 | 步骤 | 操作 |
 | --- | --- |
 | 环境 | `ubuntu-24.04` |
-| 依赖 | `cmake`、`ninja-build`、`gcc-arm-none-eabi`、`libnewlib-arm-none-eabi` |
+| 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc` |
 | 构建 | 矩阵构建 Debug + Release preset |
-| 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf` + `.map`） |
+| 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
+| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（3 个 target），通过后输出测试摘要 |
+| 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
 

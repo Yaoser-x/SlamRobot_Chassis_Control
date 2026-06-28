@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis/chassis_control.c
     App/chassis/chassis_math.c
+    App/chassis/chassis_output_slew.c
     App/chassis/chassis_task_timing.c
     App/chassis/chassis_tasks.c
     App/control/control_manager.c
@@ -69,6 +70,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/led/led_status.c
     BSP/line/line_uart.c
     BSP/motor/motor_driver.c
+    BSP/motor/motor_output_logic.c
     BSP/pid/pid_controller.c
     BSP/ps2/ps2_hw.c
     BSP/oled/ssd1306.c

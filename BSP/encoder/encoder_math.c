@@ -2,6 +2,11 @@
 
 #define TWO_PI_F 6.28318530718f
 
+static float EncoderMath_AbsF(float value)
+{
+  return (value < 0.0f) ? -value : value;
+}
+
 int32_t EncoderMath_DiffCount(uint32_t now, uint32_t last, uint32_t period)
 {
   if (period <= 0xFFFFU)
@@ -66,4 +71,42 @@ void EncoderMath_SpeedWindowPush(encoder_speed_window_t *window, int32_t delta, 
   {
     window->sample_count++;
   }
+}
+
+uint8_t EncoderMath_DeltaAccepted(int32_t delta,
+                                  const encoder_speed_window_t *window,
+                                  uint32_t dt_ms,
+                                  float counts_per_rev,
+                                  float wheel_radius_m,
+                                  float max_abs_mps,
+                                  float spike_reject_mps,
+                                  uint8_t min_samples)
+{
+  float current_speed;
+  float history_speed;
+
+  if (dt_ms == 0U || counts_per_rev <= 0.0f || wheel_radius_m <= 0.0f)
+  {
+    return 0U;
+  }
+
+  current_speed = EncoderMath_CountDeltaSpeedMps(delta, dt_ms, counts_per_rev, wheel_radius_m);
+  if (max_abs_mps > 0.0f && EncoderMath_AbsF(current_speed) > max_abs_mps)
+  {
+    return 0U;
+  }
+
+  if (window == 0 ||
+      spike_reject_mps <= 0.0f ||
+      window->sample_count < min_samples ||
+      window->dt_sum_ms == 0U)
+  {
+    return 1U;
+  }
+
+  history_speed = EncoderMath_CountDeltaSpeedMps(window->delta_sum,
+                                                 window->dt_sum_ms,
+                                                 counts_per_rev,
+                                                 wheel_radius_m);
+  return (EncoderMath_AbsF(current_speed - history_speed) <= spike_reject_mps) ? 1U : 0U;
 }

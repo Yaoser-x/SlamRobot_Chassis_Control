@@ -19,7 +19,7 @@
 │  清空全部控制源 → 拒绝所有新命令  │  estop 1/0 命令 + 上位机帧
 ├─────────────────────────────────┤
 │ Level 3: fault-stop             │  SYSTEM_ERROR_FAULT_STOP (bit 6)
-│  清空全部命令 + 停PWM + Sleep    │  DRV nFAULT/过流 → clearfault
+│  清空全部命令 + EN=0 低侧制动    │  DRV nFAULT/过流 → clearfault
 ├─────────────────────────────────┤
 │ Level 4: 过流保护 + DRV 故障     │  bits 1-4 (过流) + bit 8 (DRV)
 │  逐路监控 + 去抖 + 锁存          │  clearfault（条件满足才清除）
@@ -52,8 +52,8 @@ TIM1/TIM8 均启用 Automatic Output。BKIN 低电平会立即清除对应定时
 M1 电流 > 0.8A → 去抖 5 次 → SYSTEM_ERROR_M1_OVERCURRENT
     → latched → SYSTEM_ERROR_FAULT_STOP
     → ControlManager_SetFaultStop(1)
-    → 清空全部控制源 + 停止 PWM + 拉低 DRV_SLEEP_ALL
-    → 全部电机惯性滑行
+    → 清空全部控制源 + EN=0 停止输出
+    → 全部电机进入 PH/EN 低侧慢衰减制动
 ```
 
 ### 4. clearfault 条件清除

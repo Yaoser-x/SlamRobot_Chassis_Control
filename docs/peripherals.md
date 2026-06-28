@@ -2,16 +2,16 @@
 
 ## 1. 电机 PWM 与 DRV8874 H-Bridge
 
-四路电机采用 DRV8874 H-bridge 驱动，每路两个 PWM 通道（IN1/IN2）控制方向和转速。TIM1/TIM8 各提供 4 个 PWM 通道。
+四路电机采用 DRV8874 H-bridge 驱动，PMODE 配置为 PH/EN。TIM1 的 IN1 作为 EN/PWM 控速，PC6-PC9 作为 GPIO 输出 PH/IN2 方向电平。
 
 ### 1.1 电机引脚分配
 
-| 电机 | 侧别 | IN1 (前进 PWM) | IN2 (后退 PWM) | nFAULT |
+| 电机 | 侧别 | EN/IN1 (PWM) | PH/IN2 (DIR) | nFAULT |
 | --- | --- | --- | --- | --- |
-| M1 | 左侧 | TIM1 CH1 / PE9 | TIM8 CH1 / PC6 | PA2 |
-| M2 | 左侧 | TIM1 CH2 / PE11 | TIM8 CH2 / PC7 | PD14 |
-| M3 | 右侧 | TIM1 CH3 / PE13 | TIM8 CH3 / PC8 | PA3 |
-| M4 | 右侧 | TIM1 CH4 / PE14 | TIM8 CH4 / PC9 | PD15 |
+| M1 | 左侧 | TIM1 CH1 / PE9 | GPIO / PC6 | PA2 |
+| M2 | 左侧 | TIM1 CH2 / PE11 | GPIO / PC7 | PD14 |
+| M3 | 右侧 | TIM1 CH3 / PE13 | GPIO / PC8 | PA3 |
+| M4 | 右侧 | TIM1 CH4 / PE14 | GPIO / PC9 | PD15 |
 
 > 注意：CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名；运行时在 BSP 映射层修正 M2/M3 的 nFAULT、编码器和电流归属，不改变引脚复用。
 
@@ -19,24 +19,23 @@
 
 | 资源 | 引脚 | 关键配置 | 用途 |
 | --- | --- | --- | --- |
-| TIM1 | PE9/PE11/PE13/PE14 | Period `8399`, Mode `PWM1`, Initial Pulse `0` | 四路 IN1 前进 PWM |
-| TIM8 | PC6/PC7/PC8/PC9 | Period `8399`, Mode `PWM1`, Initial Pulse `0` | 四路 IN2 后退 PWM |
+| TIM1 | PE9/PE11/PE13/PE14 | Period `8399`, Mode `PWM1`, Initial Pulse `0` | 四路 EN/IN1 速度 PWM |
+| GPIOC | PC6/PC7/PC8/PC9 | Push-pull output, default low | 四路 PH/IN2 方向电平 |
 | TIM1_BKIN | PE15 | Break 使能，低有效 | TIM1 硬件刹车 |
-| TIM8_BKIN | PA6 | Break 使能，低有效 | TIM8 硬件刹车 |
+| TIM8_BKIN | PA6 | Break 使能，低有效 | TIM8 Break 诊断输入；不再控制 PH GPIO |
 | DRV_SLEEP_ALL | PE7 | 高电平唤醒 | DRV8874 全局 nSLEEP 控制 |
 
-TIM1/TIM8 均启用 `AutomaticOutput`。BKIN 拉低时硬件立即清除对应定时器 MOE；BKIN 释放后，下一更新事件自动恢复 MOE。`status` 的 `BREAK` 行输出当前 MOE、最近一次采集观察到的 BIF 和启动以来累计观察次数。
+TIM1/TIM8 均启用 `AutomaticOutput`。TIM1_BKIN 拉低时硬件立即清除 TIM1 MOE，切断 EN/PWM；TIM8_BKIN 仍可在 `status` 的 `BREAK` 行诊断 BIF/MOE，但 PH/IN2 已由 GPIO 软件写入，不再受 TIM8 输出通道控制。
 
 ### 1.3 H-Bridge 控制逻辑
 
-| 状态 | IN1 PWM | IN2 PWM | 说明 |
+| 状态 | EN/IN1 PWM | PH/IN2 电平 | 说明 |
 | --- | --- | --- | --- |
-| 前进 | `+duty` | `0` | IN1 占空比控制转速，IN2 低电平 |
-| 后退 | `0` | `+duty` | IN2 占空比控制转速，IN1 低电平 |
-| 滑行 | `0` | `0` | 两路均拉低，电机惯性转动 |
-| 刹车 | `100%` | `100%` | 两路均拉高，H 桥短路制动 |
+| 前进 | `+duty` | GPIO 高 | EN 占空比控制转速，PH 高电平 |
+| 后退 | `+duty` | GPIO 低 | EN 占空比控制转速，PH 低电平 |
+| 停止 | `0` | GPIO 低 | DRV8874 PH/EN 的低侧慢衰减制动；普通停机不表示高阻滑行 |
 
-**故障保护**：任一路 `nFAULT` 拉低（低有效）→ 锁存 fault-stop → 清空全部运动命令 → 拉低 DRV_SLEEP_ALL → 停止 PWM 输出。`clearfault` 命令清除软件锁存，但若硬件 `nFAULT` 仍为低则下一轮 safetyTask 重新锁存。
+**故障保护**：任一路 `nFAULT` 拉低（低有效）→ 锁存 fault-stop → 清空全部运动命令 → EN=0 停止输出并进入低侧慢衰减制动。`clearfault` 命令清除软件锁存，但若硬件 `nFAULT` 仍为低则下一轮 safetyTask 重新锁存。
 
 ---
 
@@ -46,10 +45,10 @@ TIM1/TIM8 均启用 `AutomaticOutput`。BKIN 拉低时硬件立即清除对应�
 
 | 电机 | 定时器 | 通道引脚 | 模式 | 滤波 | Period |
 | --- | --- | --- | --- | --- | --- |
-| M1 | TIM2 | PA15 CH1, PB3 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
-| M2 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `8` | `65535` |
-| M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `8` | `65535` |
-| M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `8` | `0xFFFFFFFF` |
+| M1 | TIM2 | PA15 CH1, PB3 CH2 | Encoder TI12 | IC filter `15` | `0xFFFFFFFF` |
+| M2 | TIM4 | PD12 CH1, PD13 CH2 | Encoder TI12 | IC filter `15` | `65535` |
+| M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `15` | `65535` |
+| M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `15` | `0xFFFFFFFF` |
 
 **配置参数**（`App/chassis/chassis_config.h`）：
 
@@ -67,7 +66,7 @@ TIM1/TIM8 均启用 `AutomaticOutput`。BKIN 拉低时硬件立即清除对应�
 
 ## 3. ADC 采样
 
-ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、DMA2 Stream0 循环传输。TIM8 PWM 保持 10 kHz，并通过重复计数器每 10 个 PWM 周期产生一次更新事件，使 ADC 采样频率固定为 1 kHz，避免连续转换产生中断风暴。
+ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、DMA2 Stream0 循环传输。TIM8 作为 ADC 触发定时器运行，计数周期为 20 kHz 等效节拍（168MHz / 8400），通过重复计数器（RepetitionCounter=9）每 10 个更新周期产生一次 TRGO，使 ADC 采样频率固定为 2 kHz，避免连续转换产生中断风暴。
 
 ### 3.1 通道分配
 
@@ -173,7 +172,7 @@ I2C1 总线上挂载 SSD1306 128×64 单色 OLED 显示屏（7-bit 地址 `0x3C`
 | PS2_DO (CMD) | PE3 | Output | 高 | 命令线（STM32 → 手柄） |
 | PS2_DI (DAT) | PE2 | Input, Pull-up | — | 数据线（手柄 → STM32） |
 | PS2_CS | PE4 | Output | 高 | 片选（低有效） |
-| PS2_CLK | PE5 | Output | 高 | 时钟（~250 kHz） |
+| PS2_CLK | PE5 | Output | 高 | 时钟（~33 kHz，半周期 10μs） |
 | TEST_LED | PE6 | Output | — | 状态指示灯 |
 
 **控制语义**：
@@ -256,7 +255,7 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 
 ### 8.6 调试命令
 
-参见 [调试命令台 — line 命令](debug-console.md#line-命令)。
+参见 [调试命令台 — line 命令](debug-console.md#4-巡线调试命令-line)。
 
 ---
 

@@ -84,7 +84,7 @@ Lab 01 → Lab 02 → Lab 03 → Lab 05 → Lab 06 → Lab 08
 | | `line` | 巡线传感器原始数据 |
 | 运动 | `motor L R` | 左右侧开环 permille（-900~900） |
 | | `left P` / `right P` | 单侧开环 |
-| | `m1 F R` ~ `m4 F R` | 单路电机 IN1/IN2 permille |
+| | `m1 F R` ~ `m4 F R` | 单路电机 EN/PH raw 测试，输出按 `F-R` 解析 |
 | | `vel V [W]` | 闭环速度控制 V(mm/s) W(mrad/s) |
 | | `stop` | 停止全部运动 |
 | 安全 | `estop 0\|1` | 清除/设置紧急停止 |

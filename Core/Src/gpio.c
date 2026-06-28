@@ -62,6 +62,9 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, ESP_EN_Pin|ESP_RST_Pin|IMU_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, M1_IN2_Pin|M2_IN2_Pin|M3_IN2_Pin|M4_IN2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(ESP_IO0_GPIO_Port, ESP_IO0_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : PS2_DI_Pin PS2_CS_Pin PS2_CLK_Pin TEST_LED_Pin
@@ -91,6 +94,13 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : M1_IN2_Pin M2_IN2_Pin M3_IN2_Pin M4_IN2_Pin */
+  GPIO_InitStruct.Pin = M1_IN2_Pin|M2_IN2_Pin|M3_IN2_Pin|M4_IN2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : M3_FAULT_Pin M4_FAULT_Pin */
   GPIO_InitStruct.Pin = M3_FAULT_Pin|M4_FAULT_Pin;

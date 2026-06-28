@@ -3,6 +3,7 @@
 #include "adc.h"
 #include "bsp_config.h"
 #include "chassis_layout.h"
+#include "tim.h"
 
 static uint16_t adc_dma_buffer[ADC_MONITOR_CHANNEL_COUNT];
 static volatile uint16_t adc_sample_snapshot[ADC_MONITOR_CHANNEL_COUNT];
@@ -116,6 +117,7 @@ void AdcMonitor_Init(void)
   {
     /* Diagnostic isolation: keep DMA sampling, bypass HT/TC callbacks. */
     __HAL_DMA_DISABLE_IT(hadc1.DMA_Handle, DMA_IT_HT | DMA_IT_TC);
+    (void)HAL_TIM_Base_Start(&htim8);
   }
 }
 

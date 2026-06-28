@@ -79,6 +79,7 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
    | 参数 | 推荐值 |
    | --- | --- |
    | Board | Generic ESP8266 Module |
+   | Crystal Frequency | **26 MHz** |
    | Upload Speed | **115200** |
    | Flash Mode | **DOUT**（若模组 Flash 确认支持 DIO/QIO 再切换） |
    | Flash Size | 按模组实际 Flash 容量选择 |

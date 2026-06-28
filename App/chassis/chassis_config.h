@@ -66,6 +66,7 @@ extern "C" {
 /* 速度斜坡 */
 #define CHASSIS_SPEED_RAMP_MPS2             1.0f
 #define CHASSIS_ANGULAR_RAMP_RPS2           10.0f
+#define CHASSIS_OUTPUT_SLEW_STEP_PER_CYCLE  5
 
 /* PID 控制 */
 #define CHASSIS_PID_ENABLED                 1U
@@ -76,19 +77,19 @@ extern "C" {
 #define CHASSIS_PID_FEEDBACK_MIN_SPEED_MPS  0.01f
 #define CHASSIS_PID_FEEDBACK_LOSS_COUNT     50U
 
-#define CHASSIS_PID_KP_M1                   100.0f
-#define CHASSIS_PID_KI_M1                   50.0f
-#define CHASSIS_PID_KD_M1                   10.0f
-#define CHASSIS_PID_KP_M2                   500.0f
-#define CHASSIS_PID_KI_M2                   0.0f
-#define CHASSIS_PID_KD_M2                   0.0f
-#define CHASSIS_PID_KP_M3                   100.0f
-#define CHASSIS_PID_KI_M3                   50.0f
-#define CHASSIS_PID_KD_M3                   10.0f
-#define CHASSIS_PID_KP_M4                   500.0f
+#define CHASSIS_PID_KP_M1                   50.0f
+#define CHASSIS_PID_KI_M1                   8.0f
+#define CHASSIS_PID_KD_M1                   0.05f
+#define CHASSIS_PID_KP_M2                   1000.0f
+#define CHASSIS_PID_KI_M2                   800.0f
+#define CHASSIS_PID_KD_M2                   0.15f
+#define CHASSIS_PID_KP_M3                   1200.0f
+#define CHASSIS_PID_KI_M3                   1000.0f
+#define CHASSIS_PID_KD_M3                   0.18f
+#define CHASSIS_PID_KP_M4                   100.0f
 #define CHASSIS_PID_KI_M4                   0.0f
 #define CHASSIS_PID_KD_M4                   0.0f
-#define CHASSIS_PID_INTEGRAL_LIMIT          5.0f
+#define CHASSIS_PID_INTEGRAL_LIMIT          60.0f
 
 /* 电池监控 */
 #define BATTERY_LOW_WARN_V                  10.5f

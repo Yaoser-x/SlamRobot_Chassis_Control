@@ -8,9 +8,9 @@
          → ChassisLayout         电机启用/侧别/方向查表
          → 差速模型              linear_x / angular_z → left_mps / right_mps
          → 速度斜坡              按 CHASSIS_SPEED_RAMP_MPS2 平滑过渡
-         → PID 速度环            独立四路 PI(D) 控制器
+         → PID 速度环            独立四路 PID 控制器 (M1-M3 PID, M4 纯 P)
          → permille 输出          限幅到 CHASSIS_PWM_MAX_PERMILLE
-         → MotorDriver           TIM1/TIM8 PWM 输出
+         → MotorDriver           TIM1 EN/PWM + GPIO PH/DIR 输出
 ```
 
 ---
@@ -51,9 +51,9 @@
 | 状态 | 触发条件 | 行为 |
 | --- | --- | --- |
 | **ESTOP (紧急停止)** | `estop 1` 命令 | 清空全部控制源命令，拒绝所有新命令 |
-| **fault-stop (故障停止)** | 任一路 DRV8874 `nFAULT` 低有效 | 清空全部命令、停止 PWM 输出、拉低 DRV_SLEEP_ALL |
-| **过流锁存** | 电机电流 > `MOTOR_CURRENT_LIMIT_A` 并持续 `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` 次 | 触发 fault-stop，锁存 error flag |
-| **硬件 Break** | TIM1_BKIN PE15 或 TIM8_BKIN PA6 被拉低 | 硬件立即清除对应定时器 MOE；信号释放后 Automatic Output 在下一更新事件恢复 MOE |
+| **fault-stop (故障停止)** | 任一路 DRV8874 `nFAULT` 低有效 | 清空全部命令、EN=0 停止输出并进入 PH/EN 低侧慢衰减制动；注：**不**拉低 DRV_SLEEP_ALL（仅 fatal loop 和 HardFault 才会拉低 SLEEP） |
+| **过流锁存** | 电机电流 > `MOTOR_STALL_CURRENT_A`（2.4A）并持续 `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` 次（5 次 @ 20ms = 100ms） | 触发 fault-stop，锁存 error flag。注意与动态限流 `MOTOR_CURRENT_LIMIT_A`（0.8A）的区别：动态限流做 PWM 软限制（不触发 fault-stop），过流锁存才是 fault-stop 触发源 |
+| **硬件 Break** | TIM1_BKIN PE15 或 TIM8_BKIN PA6 被拉低 | 硬件立即清除对应定时器 MOE，切断 PWM；信号释放后 Automatic Output 在下一更新事件自动恢复 MOE。**当前未实现软件 ESTOP 回调**（`HAL_TIMEx_BreakCallback` 缺失，Break 不触发软件 ESTOP 标志） |
 | **RTOS 异常** | `configASSERT` / 栈溢出 / malloc 失败 / 任务创建失败 | 拉低 `DRV_SLEEP_ALL`，进入 fatal loop（不自动复位，保留故障现场） |
 
 ### 3.2 命令拒绝规则
@@ -139,11 +139,11 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 | `CHASSIS_Mx_MOTOR_DIR` | `1` / `-1` | PWM 方向修正。`1`=正输出对应前进，`-1`=反向 |
 | `CHASSIS_Mx_ENCODER_DIR` | `1` / `-1` | 编码器方向修正。前进时 `status` 速度应为正值 |
 
-**默认布局**（两驱）：M1 左侧，M3 右侧（M2/M4 禁用），M1/M2 encoder dir `+1`，M3/M4 encoder dir `-1`。
+**默认布局**（两驱）：M2 左侧，M3 右侧（M1/M4 禁用），M1/M2 encoder dir `+1`，M3/M4 encoder dir `-1`。（V2.0 实板默认：`CHASSIS_M1_ENABLED=0U, CHASSIS_M2_ENABLED=1U, CHASSIS_M3_ENABLED=1U, CHASSIS_M4_ENABLED=0U`。）
 
-**常用两驱**：`CHASSIS_M2_ENABLED=0U, CHASSIS_M4_ENABLED=0U`（仅 M1+M3）或 `CHASSIS_M1_ENABLED=0U, CHASSIS_M3_ENABLED=0U`（仅 M2+M4）。
+**常用两驱**：`CHASSIS_M2_ENABLED=0U, CHASSIS_M4_ENABLED=0U`（仅 M1+M3）或 `CHASSIS_M1_ENABLED=0U, CHASSIS_M3_ENABLED=0U`（仅 M2+M4）或 `CHASSIS_M1_ENABLED=1U, CHASSIS_M4_ENABLED=0U`（仅 M1+M3 变体）。
 
-**V2.0 实板 M2/M3 映射**：逻辑 M2 使用 PWM `TIM1_CH2/TIM8_CH2` (`PE11/PC7`)、nFAULT `PD14`、编码器 `TIM4 PD12/PD13`、电流采样 `PC2`；逻辑 M3 使用 PWM `TIM1_CH3/TIM8_CH3` (`PE13/PC8`)、nFAULT `PA3`、编码器 `TIM3 PB4/PB5`、电流采样 `PC1`。CubeMX 生成文件保留旧 M2/M3 标签，BSP 层负责逻辑归属。
+**V2.0 实板 M2/M3 映射**：逻辑 M2 使用 EN/PWM `TIM1_CH2 PE11`、PH/GPIO `PC7`、nFAULT `PD14`、编码器 `TIM4 PD12/PD13`、电流采样 `PC2`；逻辑 M3 使用 EN/PWM `TIM1_CH3 PE13`、PH/GPIO `PC8`、nFAULT `PA3`、编码器 `TIM3 PB4/PB5`、电流采样 `PC1`。CubeMX 生成文件保留旧 M2/M3 标签，BSP 层负责逻辑归属。
 
 **安全约束**：左右两侧必须各至少启用一路电机，否则 `ChassisLayout` 拒绝运动输出。
 

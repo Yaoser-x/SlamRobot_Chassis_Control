@@ -7,6 +7,8 @@
  * Minimal HAL stubs sufficient to compile adc_monitor.c on a host machine.
  * Values match STM32F4 HAL headers but the structs are stripped down.  */
 
+#ifndef HOST_HAL_STATUS_TYPEDEF
+#define HOST_HAL_STATUS_TYPEDEF
 typedef enum
 {
   HAL_OK       = 0x00U,
@@ -14,6 +16,7 @@ typedef enum
   HAL_BUSY     = 0x02U,
   HAL_TIMEOUT  = 0x03U
 } HAL_StatusTypeDef;
+#endif
 
 #define HAL_MAX_DELAY  0xFFFFFFFFU
 

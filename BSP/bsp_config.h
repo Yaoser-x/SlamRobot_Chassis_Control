@@ -26,17 +26,18 @@ extern "C" {
  *   MOTOR_SIDE_RIGHT: 接收 right_mps。
  *
  * 默认两驱:
- *   M1 = 左侧，M3 = 右侧，M2/M4 禁用。
- *   V2.0 实板 M3: PWM=PE13/PC8，nFAULT=PA3，ENC=PB4/PB5，IPROPI=PC1。
+ *   M2 = 左侧，M3 = 右侧，M1/M4 禁用。
+ *   V2.0 实板 M2: EN/PWM=PE11，PH/GPIO=PC7，nFAULT=PD14，ENC=PD12/PD13，IPROPI=PC2。
+ *   V2.0 实板 M3: EN/PWM=PE13，PH/GPIO=PC8，nFAULT=PA3，ENC=PB4/PB5，IPROPI=PC1。
  *
  * 安全规则:
  *   左右两侧必须各至少启用一路电机；否则拒绝运动输出。
  */
 #ifndef CHASSIS_M1_ENABLED
-#define CHASSIS_M1_ENABLED                  1U
+#define CHASSIS_M1_ENABLED                  0U
 #endif
 #ifndef CHASSIS_M2_ENABLED
-#define CHASSIS_M2_ENABLED                  0U
+#define CHASSIS_M2_ENABLED                  1U
 #endif
 #ifndef CHASSIS_M3_ENABLED
 #define CHASSIS_M3_ENABLED                  1U
@@ -67,7 +68,7 @@ extern "C" {
  *   1 / -1。编码器速度方向修正。车辆前进时 status 中 mm/s 应为正。
  */
 #define CHASSIS_M1_MOTOR_DIR                -1
-#define CHASSIS_M2_MOTOR_DIR                1
+#define CHASSIS_M2_MOTOR_DIR                -1
 #define CHASSIS_M3_MOTOR_DIR                1
 #define CHASSIS_M4_MOTOR_DIR                1
 #define CHASSIS_M1_ENCODER_DIR              1
@@ -77,8 +78,8 @@ extern "C" {
 
 /* PWM 输出限制 */
 #define CHASSIS_PWM_MAX_PERMILLE            900
-#define CHASSIS_PWM_DEADBAND_PERMILLE       0
-#define MOTOR_DIRECTION_CHANGE_COAST_CYCLES 2U
+#define CHASSIS_PWM_DEADBAND_PERMILLE       170
+#define MOTOR_DIRECTION_CHANGE_SETTLE_CYCLES 2U
 #define DRV8874_WAKE_DELAY_MS               2U
 
 /* 编码器物理参数 */
@@ -95,6 +96,9 @@ extern "C" {
 #define CHASSIS_MIN_ENCODER_DT_MS           1U
 #define CHASSIS_MAX_ENCODER_DT_MS           100U
 #define CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES 5U
+#define CHASSIS_ENCODER_MAX_ABS_MPS         2.5f
+#define CHASSIS_ENCODER_SPIKE_REJECT_MPS    0.45f
+#define CHASSIS_ENCODER_FILTER_MIN_SAMPLES  3U
 
 /* ADC 监控参数 */
 #define ADC_MONITOR_CHANNEL_COUNT           5U

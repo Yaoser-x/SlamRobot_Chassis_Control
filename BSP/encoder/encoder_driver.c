@@ -100,15 +100,14 @@ void EncoderDriver_Update(uint32_t now_ms)
       continue;
     }
 
-    encoder_state.delta[i] = delta[i];
-    encoder_state.count[i] += delta[i];
-
     if (has_last_update == 0U ||
         dt_ms <= CHASSIS_MIN_ENCODER_DT_MS ||
         dt_ms > CHASSIS_MAX_ENCODER_DT_MS ||
         counts_per_rev <= 0.0f ||
         meters_per_rev <= 0.0f)
     {
+      encoder_state.delta[i] = delta[i];
+      encoder_state.count[i] += delta[i];
       encoder_state.speed_mps[i] = 0.0f;
       encoder_state.speed_valid[i] = 0U;
       EncoderMath_SpeedWindowReset(&speed_window[i]);
@@ -116,11 +115,29 @@ void EncoderDriver_Update(uint32_t now_ms)
     }
     else
     {
-      EncoderMath_SpeedWindowPush(&speed_window[i], delta[i], dt_ms);
-      encoder_state.speed_mps[i] = ((float)speed_window[i].delta_sum / counts_per_rev) *
-                                   meters_per_rev /
-                                   ((float)speed_window[i].dt_sum_ms / 1000.0f);
-      encoder_state.speed_valid[i] = 1U;
+      if (EncoderMath_DeltaAccepted(delta[i],
+                                    &speed_window[i],
+                                    dt_ms,
+                                    counts_per_rev,
+                                    CHASSIS_WHEEL_RADIUS_M,
+                                    CHASSIS_ENCODER_MAX_ABS_MPS,
+                                    CHASSIS_ENCODER_SPIKE_REJECT_MPS,
+                                    CHASSIS_ENCODER_FILTER_MIN_SAMPLES) != 0U)
+      {
+        encoder_state.delta[i] = delta[i];
+        encoder_state.count[i] += delta[i];
+        EncoderMath_SpeedWindowPush(&speed_window[i], delta[i], dt_ms);
+      }
+      else
+      {
+        encoder_state.delta[i] = 0;
+      }
+
+      encoder_state.speed_mps[i] = EncoderMath_CountDeltaSpeedMps(speed_window[i].delta_sum,
+                                                                  speed_window[i].dt_sum_ms,
+                                                                  counts_per_rev,
+                                                                  CHASSIS_WHEEL_RADIUS_M);
+      encoder_state.speed_valid[i] = (speed_window[i].dt_sum_ms != 0U) ? 1U : 0U;
     }
 
     if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)

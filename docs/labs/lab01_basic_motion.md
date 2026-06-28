@@ -10,13 +10,12 @@
 
 ### 1. H 桥与 PWM 调速
 
-DRV8874 为 H 桥电机驱动器，IN1/IN2 引脚控制桥臂开关状态：
+DRV8874 为 H 桥电机驱动器，本项目使用 PH/EN 模式：IN1 作为 EN/PWM 控速，IN2 作为 PH/DIR 方向电平。
 
 ```
-IN1 = PWM, IN2 = 0  →  电机正转（Forward）
-IN1 = 0,  IN2 = PWM →  电机反转（Reverse）
-IN1 = 0,  IN2 = 0   →  惯性滑行（Coast）
-IN1 = 1,  IN2 = 1   →  制动（Brake）
+EN/IN1 = PWM, PH/IN2 = GPIO 高  →  前进
+EN/IN1 = PWM, PH/IN2 = GPIO 低  →  后退
+EN/IN1 = 0,   PH/IN2 = GPIO 低  →  低侧慢衰减制动
 ```
 
 控制量单位为 **permille（‰）**，范围 ±900‰。正值表示前进方向，负值表示后退方向，绝对值越大转速越高。900‰ 对应约 90% 占空比，保留 10% 余量避免桥臂直通。
@@ -57,7 +56,7 @@ M1/M2 = 左侧 (MOTOR_SIDE_LEFT)
 M3/M4 = 右侧 (MOTOR_SIDE_RIGHT)
 ```
 
-> V2.0 当前常用两驱默认启用 M1+M3，M2/M4 禁用；因此 `right 300` 在默认配置下只驱动逻辑 M3。实板 M3 的 PWM 为 `PE13/PC8`，nFAULT 为 `PA3`，编码器为 `TIM3 PB4/PB5`，电流采样为 `PC1`。
+> V2.0 当前常用两驱默认启用 M2+M3，M1/M4 禁用；因此 `right 300` 在默认配置下只驱动逻辑 M3。实板 M3 的 EN/PWM 为 `PE13`，PH/GPIO 为 `PC8`，nFAULT 为 `PA3`，编码器为 `TIM3 PB4/PB5`，电流采样为 `PC1`。
 
 ## 实验设备
 
@@ -149,7 +148,7 @@ motor 0 0       # 停止
 ### 步骤 6：单路 raw 控制和四路独立控制
 
 ```bash
-# 单路 raw 控制（IN1 前进, IN2 后退）
+# 单路 raw 控制（按 F-R 解析为 EN/PWM 有符号输出）
 m1 300 0        # M1 300‰ 正转
 m1 0 300        # M1 300‰ 反转
 m1 300 300      # M1 制动（IN1=IN2=300‰）
@@ -235,4 +234,4 @@ plt.savefig('lab01_pwm_speed.png', dpi=150)
 | 某路电机不转 | DRV8874 nSLEEP 拉低或接线断开 | `status` 检查 `drv_fault`，万用表检查电机接线 |
 | 四路电机都不转 | 电池电压过低或 DRV_SLEEP_ALL 未拉高 | `status` 检查 `vbat`；重新上电 |
 | 电机转动方向与预期相反 | `CHASSIS_Mx_MOTOR_DIR` 符号错误 | 修改对应宏为 `-1`，重新构建烧录 |
-| 车轮低速时有异响 | PWM 死区设置或机械间隙 | 增大 `MOTOR_DIRECTION_CHANGE_COAST_CYCLES` |
+| 车轮低速时有异响 | PWM 死区设置或机械间隙 | 增大 `MOTOR_DIRECTION_CHANGE_SETTLE_CYCLES` |

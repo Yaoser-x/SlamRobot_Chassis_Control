@@ -16,13 +16,6 @@ static void SSD1306_WriteCmd(uint8_t cmd)
                     0x00, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 10);
 }
 
-/* --- Internal I2C data write --- */
-static void SSD1306_WriteData(uint8_t data)
-{
-  HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1),
-                    0x40, I2C_MEMADD_SIZE_8BIT, &data, 1, 10);
-}
-
 /* --- Initialization sequence --- */
 void SSD1306_Init(void)
 {

@@ -5,8 +5,11 @@
 #include "adc_monitor.h"
 #include "adc.h"
 #include "chassis_config.h"
+#include "tim.h"
 
 ADC_HandleTypeDef hadc1;
+static TIM_TypeDef tim8_instance = {0};
+TIM_HandleTypeDef htim8 = { .Instance = &tim8_instance };
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);
 
@@ -14,6 +17,7 @@ static uint32_t fake_primask;
 static uint16_t *fake_adc_dma;
 static uint32_t fake_adc_dma_len;
 static uint32_t fake_adc_start_count;
+static uint32_t fake_tim8_base_start_count;
 static uint32_t fake_tick;
 
 uint32_t osKernelGetTickCount(void)
@@ -42,6 +46,15 @@ HAL_StatusTypeDef HAL_ADC_Start_DMA(ADC_HandleTypeDef *hadc, uint32_t *buffer, u
   fake_adc_dma = (uint16_t *)buffer;
   fake_adc_dma_len = length;
   fake_adc_start_count++;
+  return HAL_OK;
+}
+
+HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef *htim)
+{
+  if (htim == &htim8)
+  {
+    fake_tim8_base_start_count++;
+  }
   return HAL_OK;
 }
 
@@ -91,9 +104,11 @@ static void test_current_zero_requires_startup_samples(void)
 {
   adc_monitor_state_t state = {0};
   uint32_t start_count = fake_adc_start_count;
+  uint32_t tim8_start_count = fake_tim8_base_start_count;
 
   AdcMonitor_Init();
   require_int(fake_adc_start_count == start_count + 1U, "adc dma started once");
+  require_int(fake_tim8_base_start_count == tim8_start_count + 1U, "tim8 base started once");
   require_int(fake_adc_dma_len == ADC_MONITOR_CHANNEL_COUNT, "adc dma length");
   push_adc_sample(100U, 110U, 120U, 130U, 2700U);
 

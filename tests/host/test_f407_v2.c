@@ -7,10 +7,12 @@
 #include "chassis_config.h"
 #include "chassis_layout.h"
 #include "chassis_math.h"
+#include "chassis_output_slew.h"
 #include "chassis_task_timing.h"
 #include "control_manager.h"
 #include "encoder_math.h"
 #include "imu_bmi270.h"
+#include "motor_output_logic.h"
 #include "pid_controller.h"
 #include "upper_protocol.h"
 
@@ -354,6 +356,106 @@ static void test_encoder_interval_average_speed(void)
                 "zero interval returns zero");
 }
 
+static void test_motor_output_logic_phase_enable(void)
+{
+  motor_output_phase_enable_t output;
+
+  output = MotorOutputLogic_ResolvePhaseEnable(300);
+  require_int(output.en_permille == 300, "positive drive keeps PWM magnitude on EN");
+  require_int(output.phase_high != 0U, "positive drive sets PH high");
+
+  output = MotorOutputLogic_ResolvePhaseEnable(-300);
+  require_int(output.en_permille == 300, "negative drive keeps PWM magnitude on EN");
+  require_int(output.phase_high == 0U, "negative drive sets PH low");
+
+  output = MotorOutputLogic_ResolvePhaseEnable(0);
+  require_int(output.en_permille == 0, "zero drive disables EN");
+  require_int(output.phase_high == 0U, "zero drive leaves PH low");
+}
+
+static void test_motor_output_logic_raw_inputs(void)
+{
+  motor_output_phase_enable_t output;
+
+  output = MotorOutputLogic_ResolveRawInput(300, 0);
+  require_int(output.en_permille == 300, "raw forward drives EN");
+  require_int(output.phase_high != 0U, "raw forward sets PH high");
+
+  output = MotorOutputLogic_ResolveRawInput(0, 300);
+  require_int(output.en_permille == 300, "raw reverse drives EN");
+  require_int(output.phase_high == 0U, "raw reverse sets PH low");
+
+  output = MotorOutputLogic_ResolveRawInput(300, 300);
+  require_int(output.en_permille == 0, "balanced raw inputs stop");
+  require_int(output.phase_high == 0U, "balanced raw inputs leave PH low");
+}
+
+static void test_chassis_output_slew_step(void)
+{
+  require_int(ChassisOutputSlew_Step(0, 150, 5) == 5, "slew ramps up by one step");
+  require_int(ChassisOutputSlew_Step(145, 150, 5) == 150, "slew reaches target without overshoot");
+  require_int(ChassisOutputSlew_Step(150, 0, 5) == 145, "slew ramps down by one step");
+  require_int(ChassisOutputSlew_Step(-100, 100, 5) == -95, "slew does not jump across sign");
+  require_int(ChassisOutputSlew_Step(0, 150, 0) == 150, "invalid zero step falls back to target");
+  require_int(ChassisOutputSlew_Step(0, -150, -5) == -150, "invalid negative step falls back to target");
+}
+
+static void test_encoder_delta_filter(void)
+{
+  encoder_speed_window_t window;
+
+  EncoderMath_SpeedWindowReset(&window);
+  require_int(EncoderMath_DeltaAccepted(45,
+                                        &window,
+                                        10U,
+                                        2464.0f,
+                                        0.035f,
+                                        2.5f,
+                                        0.45f,
+                                        3U) != 0U,
+              "filter accepts normal cold sample");
+  require_int(EncoderMath_DeltaAccepted(400,
+                                        &window,
+                                        10U,
+                                        2464.0f,
+                                        0.035f,
+                                        2.5f,
+                                        0.45f,
+                                        3U) == 0U,
+              "filter rejects impossible speed");
+  require_int(EncoderMath_DeltaAccepted(-400,
+                                        &window,
+                                        10U,
+                                        2464.0f,
+                                        0.035f,
+                                        2.5f,
+                                        0.45f,
+                                        3U) == 0U,
+              "filter rejects impossible reverse speed");
+
+  EncoderMath_SpeedWindowPush(&window, 45, 10U);
+  EncoderMath_SpeedWindowPush(&window, 44, 10U);
+  EncoderMath_SpeedWindowPush(&window, 46, 10U);
+  require_int(EncoderMath_DeltaAccepted(70,
+                                        &window,
+                                        10U,
+                                        2464.0f,
+                                        0.035f,
+                                        2.5f,
+                                        0.45f,
+                                        3U) != 0U,
+              "filter accepts plausible change");
+  require_int(EncoderMath_DeltaAccepted(113,
+                                        &window,
+                                        10U,
+                                        2464.0f,
+                                        0.035f,
+                                        2.5f,
+                                        0.45f,
+                                        3U) == 0U,
+              "filter rejects isolated spike");
+}
+
 static void test_task_timing_next_wake(void)
 {
   uint8_t missed = 0U;
@@ -526,6 +628,10 @@ int main(void)
   test_encoder_wrap_diff();
   test_encoder_speed_window();
   test_encoder_interval_average_speed();
+  test_motor_output_logic_phase_enable();
+  test_motor_output_logic_raw_inputs();
+  test_chassis_output_slew_step();
+  test_encoder_delta_filter();
   test_task_timing_next_wake();
   test_imu_state_contract();
   test_pid_init_and_reset();

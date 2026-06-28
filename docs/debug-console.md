@@ -23,8 +23,8 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | **`line off`** | — | 禁用巡线控制 |
 | `motor` | `<L> <R>` | 左右侧开环 permille（范围 -900…900） |
 | `left` / `right` | `<P>` | 单侧开环快捷命令 |
-| `m1`…`m4` | `<F> <R>` | 单路电机 raw IN1/IN2 permille |
-| `raw` | `<LF> <LR> <RF> <RR>` | 四路 raw 输入 |
+| `m1`…`m4` | `<F> <R>` | 单路 raw EN/PH 测试；输出按 `F-R` 解析为有符号 PWM |
+| `raw` | `<LF> <LR> <RF> <RR>` | 左右侧 raw EN/PH 输入；每侧按 `F-R` 解析 |
 | `vel` | `<mm/s> [mrad/s]` | 闭环速度控制（提交至 `CONTROL_SOURCE_DEBUG`） |
 | `stop` | — | 清除所有测试命令、清空 open-loop 和 `vel` 指令 |
 | `estop` | `<0\|1>` | 清除/设置紧急停止 |
@@ -75,7 +75,7 @@ log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
 
 **输出格式**：第一列为 `t_ms`（`osKernelGetTickCount()`），后续按用户输入顺序排列字段列。所有浮点值缩放为毫/微单位整数（×1000），避免 `printf` 浮点开销。
 
-**性能**：过滤模式下惰性获取状态快照——仅获取选中字段对应的子系统数据，其余不调用 `GetState`。日志行通过 `HAL_UART_Transmit` 同步输出（50ms 超时），USART TX 繁忙时阻塞等待。
+**性能**：过滤模式下惰性获取状态快照——仅获取选中字段对应的子系统数据，其余不调用 `GetState`。日志行通过 `HAL_UART_Transmit` 同步输出（100ms 超时），USART TX 繁忙时阻塞等待。
 
 ---
 
@@ -157,7 +157,8 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 ### 5.4 ESP12F 管理
 
 - `espreset` 通过拉低 `ESP_RST` 复位 ESP12F
-- `espboot 0` 设置下载模式（`ESP_IO0=0` + 复位），`espboot 1` 恢复正常
+- `espisolate` 彻底断电 ESP12F（拉低 RST + EN），仅可通过整板复位恢复。用于确认 ESP12F 异常时不影响主控
+- `espboot 1` 设置下载模式（`ESP_IO0=0` + 复位），`espboot 0` 恢复正常启动（`ESP_IO0=1`）
 - `espflash on` 进入烧录桥（下载模式：IO0=0, RST 脉冲），用于 esptool.py 或 Arduino 烧录
 - `espat on` 进入 AT 透传桥（正常模式：IO0=1, RST 脉冲），用于手动发 AT 指令测试连通性
 - `espat on` / `espflash on` 操作均不可逆——需要等待 30s 自动退出或复位整板才能恢复调试台

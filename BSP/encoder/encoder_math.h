@@ -26,6 +26,14 @@ float EncoderMath_CountDeltaSpeedMps(int32_t delta,
                                      float wheel_radius_m);
 void EncoderMath_SpeedWindowReset(encoder_speed_window_t *window);
 void EncoderMath_SpeedWindowPush(encoder_speed_window_t *window, int32_t delta, uint32_t dt_ms);
+uint8_t EncoderMath_DeltaAccepted(int32_t delta,
+                                  const encoder_speed_window_t *window,
+                                  uint32_t dt_ms,
+                                  float counts_per_rev,
+                                  float wheel_radius_m,
+                                  float max_abs_mps,
+                                  float spike_reject_mps,
+                                  uint8_t min_samples);
 
 #ifdef __cplusplus
 }

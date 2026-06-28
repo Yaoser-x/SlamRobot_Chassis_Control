@@ -3,14 +3,15 @@
 #include "bsp_config.h"
 #include "chassis_layout.h"
 #include "main.h"
+#include "motor_output_logic.h"
 #include "tim.h"
 
 typedef struct
 {
   TIM_HandleTypeDef *in1_htim;
   uint32_t in1_channel;
-  TIM_HandleTypeDef *in2_htim;
-  uint32_t in2_channel;
+  GPIO_TypeDef *phase_port;
+  uint16_t phase_pin;
   GPIO_TypeDef *fault_port;
   uint16_t fault_pin;
 } motor_hw_t;
@@ -18,15 +19,15 @@ typedef struct
 typedef struct
 {
   int8_t last_drive_sign;
-  uint8_t direction_change_coast_cycles;
+  uint8_t direction_change_settle_cycles;
 } motor_runtime_t;
 
 /* CubeMX labels keep legacy M2/M3 names; logical M2/M3 nFAULT pins are crossed here. */
 static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
-  { &htim1, TIM_CHANNEL_1, &htim8, TIM_CHANNEL_1, M1_FAULT_GPIO_Port, M1_FAULT_Pin },
-  { &htim1, TIM_CHANNEL_2, &htim8, TIM_CHANNEL_2, M3_FAULT_GPIO_Port, M3_FAULT_Pin },
-  { &htim1, TIM_CHANNEL_3, &htim8, TIM_CHANNEL_3, M2_FAULT_GPIO_Port, M2_FAULT_Pin },
-  { &htim1, TIM_CHANNEL_4, &htim8, TIM_CHANNEL_4, M4_FAULT_GPIO_Port, M4_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_1, M1_IN2_GPIO_Port, M1_IN2_Pin, M1_FAULT_GPIO_Port, M1_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_2, M2_IN2_GPIO_Port, M2_IN2_Pin, M3_FAULT_GPIO_Port, M3_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_3, M3_IN2_GPIO_Port, M3_IN2_Pin, M2_FAULT_GPIO_Port, M2_FAULT_Pin },
+  { &htim1, TIM_CHANNEL_4, M4_IN2_GPIO_Port, M4_IN2_Pin, M4_FAULT_GPIO_Port, M4_FAULT_Pin },
 };
 
 static motor_runtime_t motor_runtime[MOTOR_ID_COUNT];
@@ -109,16 +110,23 @@ static int8_t MotorDriver_Sign(int16_t value)
   return 0;
 }
 
-static void MotorDriver_SetRaw(const motor_hw_t *motor, uint32_t in1_pulse, uint32_t in2_pulse)
+static void MotorDriver_SetRaw(const motor_hw_t *motor, uint32_t in1_pulse, GPIO_PinState phase_state)
 {
   __HAL_TIM_SET_COMPARE(motor->in1_htim, motor->in1_channel, in1_pulse);
-  __HAL_TIM_SET_COMPARE(motor->in2_htim, motor->in2_channel, in2_pulse);
+  HAL_GPIO_WritePin(motor->phase_port, motor->phase_pin, phase_state);
+}
+
+static void MotorDriver_SetPhaseEnable(const motor_hw_t *motor, motor_output_phase_enable_t output)
+{
+  uint32_t en_pulse = MotorDriver_PulseFromPermille(motor->in1_htim, output.en_permille);
+  GPIO_PinState phase_state = (output.phase_high != 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET;
+
+  MotorDriver_SetRaw(motor, en_pulse, phase_state);
 }
 
 static void MotorDriver_StartPwm(const motor_hw_t *motor)
 {
   (void)HAL_TIM_PWM_Start(motor->in1_htim, motor->in1_channel);
-  (void)HAL_TIM_PWM_Start(motor->in2_htim, motor->in2_channel);
 }
 
 void MotorDriver_Init(void)
@@ -132,7 +140,7 @@ void MotorDriver_Init(void)
   {
     motor_runtime[i] = (motor_runtime_t){0};
     MotorDriver_StartPwm(&motor_hw[i]);
-    MotorDriver_SetRaw(&motor_hw[i], 0U, 0U);
+    MotorDriver_SetRaw(&motor_hw[i], 0U, GPIO_PIN_RESET);
   }
   __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
   __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
@@ -145,7 +153,7 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
   motor_runtime_t *runtime;
   int16_t corrected;
   int8_t drive_sign;
-  uint32_t pulse;
+  motor_output_phase_enable_t output;
 
   if (MotorDriver_IsValidMotor(motor) == 0U)
   {
@@ -157,54 +165,39 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
   if (ChassisLayout_MotorEnabled(motor) == 0U)
   {
     runtime->last_drive_sign = 0;
-    runtime->direction_change_coast_cycles = 0U;
-    MotorDriver_SetRaw(hw, 0U, 0U);
+    runtime->direction_change_settle_cycles = 0U;
+    MotorDriver_SetRaw(hw, 0U, GPIO_PIN_RESET);
     return;
   }
 
   corrected = (int16_t)(permille * ChassisLayout_MotorDirection(motor));
   drive_sign = MotorDriver_Sign(corrected);
-
-  if (corrected < 0)
-  {
-    pulse = MotorDriver_PulseFromPermille(hw->in2_htim, (int16_t)-corrected);
-  }
-  else
-  {
-    pulse = MotorDriver_PulseFromPermille(hw->in1_htim, corrected);
-  }
+  output = MotorOutputLogic_ResolvePhaseEnable(corrected);
 
   if (drive_sign == 0)
   {
     runtime->last_drive_sign = 0;
-    runtime->direction_change_coast_cycles = 0U;
-    MotorDriver_SetRaw(hw, 0U, 0U);
+    runtime->direction_change_settle_cycles = 0U;
+    MotorDriver_SetRaw(hw, 0U, GPIO_PIN_RESET);
     return;
   }
 
-  if (runtime->direction_change_coast_cycles > 0U)
+  if (runtime->direction_change_settle_cycles > 0U)
   {
-    runtime->direction_change_coast_cycles--;
-    MotorDriver_SetRaw(hw, 0U, 0U);
+    runtime->direction_change_settle_cycles--;
+    MotorDriver_SetRaw(hw, 0U, GPIO_PIN_RESET);
     return;
   }
 
   if (runtime->last_drive_sign != 0 && drive_sign != runtime->last_drive_sign)
   {
     runtime->last_drive_sign = 0;
-    runtime->direction_change_coast_cycles = MOTOR_DIRECTION_CHANGE_COAST_CYCLES;
-    MotorDriver_SetRaw(hw, 0U, 0U);
+    runtime->direction_change_settle_cycles = MOTOR_DIRECTION_CHANGE_SETTLE_CYCLES;
+    MotorDriver_SetRaw(hw, 0U, GPIO_PIN_RESET);
     return;
   }
 
-  if (corrected > 0)
-  {
-    MotorDriver_SetRaw(hw, pulse, 0U);
-  }
-  else
-  {
-    MotorDriver_SetRaw(hw, 0U, pulse);
-  }
+  MotorDriver_SetPhaseEnable(hw, output);
   runtime->last_drive_sign = drive_sign;
 }
 
@@ -235,14 +228,12 @@ void MotorDriver_SetInputPermille(motor_id_t motor, int16_t forward_permille, in
   if (ChassisLayout_MotorEnabled(motor) == 0U)
   {
     motor_runtime[(uint32_t)motor] = (motor_runtime_t){0};
-    MotorDriver_SetRaw(hw, 0U, 0U);
+    MotorDriver_SetRaw(hw, 0U, GPIO_PIN_RESET);
     return;
   }
 
   motor_runtime[(uint32_t)motor] = (motor_runtime_t){0};
-  MotorDriver_SetRaw(hw,
-                     MotorDriver_PulseFromPermille(hw->in1_htim, forward_permille),
-                     MotorDriver_PulseFromPermille(hw->in2_htim, reverse_permille));
+  MotorDriver_SetPhaseEnable(hw, MotorOutputLogic_ResolveRawInput(forward_permille, reverse_permille));
 }
 
 void MotorDriver_SetSideInputPermille(motor_side_t side, int16_t forward_permille, int16_t reverse_permille)
@@ -262,8 +253,6 @@ void MotorDriver_SetSideInputPermille(motor_side_t side, int16_t forward_permill
 void MotorDriver_Stop(motor_id_t motor, motor_stop_mode_t mode)
 {
   const motor_hw_t *hw;
-  uint32_t in1_pulse = 0U;
-  uint32_t in2_pulse = 0U;
 
   if (MotorDriver_IsValidMotor(motor) == 0U)
   {
@@ -271,13 +260,9 @@ void MotorDriver_Stop(motor_id_t motor, motor_stop_mode_t mode)
   }
 
   hw = &motor_hw[(uint32_t)motor];
+  (void)mode;
   motor_runtime[(uint32_t)motor] = (motor_runtime_t){0};
-  if (mode == MOTOR_STOP_BRAKE)
-  {
-    in1_pulse = MotorDriver_PulseFromPermille(hw->in1_htim, CHASSIS_PWM_MAX_PERMILLE);
-    in2_pulse = MotorDriver_PulseFromPermille(hw->in2_htim, CHASSIS_PWM_MAX_PERMILLE);
-  }
-  MotorDriver_SetRaw(hw, in1_pulse, in2_pulse);
+  MotorDriver_SetPhaseEnable(hw, MotorOutputLogic_ResolvePhaseEnable(0));
 }
 
 void MotorDriver_StopSide(motor_side_t side, motor_stop_mode_t mode)

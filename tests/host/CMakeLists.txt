@@ -12,10 +12,12 @@ add_executable(test_f407_v2
     test_f407_v2.c
     ../../BSP/chassis_layout.c
     ../../App/chassis/chassis_math.c
+    ../../App/chassis/chassis_output_slew.c
     ../../App/chassis/chassis_task_timing.c
     ../../App/control/control_manager.c
     ../../App/protocol/upper_protocol.c
     ../../BSP/encoder/encoder_math.c
+    ../../BSP/motor/motor_output_logic.c
     ../../BSP/pid/pid_controller.c
 )
 
@@ -61,3 +63,19 @@ target_include_directories(test_adc_monitor PRIVATE
 )
 
 add_test(NAME adc_monitor COMMAND test_adc_monitor)
+
+add_executable(test_motor_driver_gpio
+    test_motor_driver_gpio.c
+    ../../BSP/chassis_layout.c
+    ../../BSP/motor/motor_driver.c
+    ../../BSP/motor/motor_output_logic.c
+)
+
+target_include_directories(test_motor_driver_gpio PRIVATE
+    .
+    ../../App/chassis
+    ../../BSP
+    ../../BSP/motor
+)
+
+add_test(NAME motor_driver_gpio COMMAND test_motor_driver_gpio)

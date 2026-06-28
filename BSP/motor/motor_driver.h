@@ -24,8 +24,7 @@ typedef enum
 
 typedef enum
 {
-  MOTOR_STOP_COAST = 0,
-  MOTOR_STOP_BRAKE = 1
+  MOTOR_STOP_LOW_SIDE_BRAKE = 0
 } motor_stop_mode_t;
 
 typedef struct
