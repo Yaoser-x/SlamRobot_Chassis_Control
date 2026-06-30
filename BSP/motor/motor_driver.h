@@ -27,10 +27,25 @@ typedef enum
   MOTOR_STOP_LOW_SIDE_BRAKE = 0
 } motor_stop_mode_t;
 
+typedef enum
+{
+  MOTOR_DRIVER_PHASE_IDLE_BRAKE = 0,
+  MOTOR_DRIVER_PHASE_RUN,
+  MOTOR_DRIVER_PHASE_RAMP_DOWN,
+  MOTOR_DRIVER_PHASE_REVERSE_BRAKE,
+  MOTOR_DRIVER_PHASE_PH_SETTLE,
+  MOTOR_DRIVER_PHASE_RAMP_UP
+} motor_driver_phase_t;
+
 typedef struct
 {
   uint8_t fault_active[MOTOR_ID_COUNT];
   int16_t output_permille[MOTOR_ID_COUNT];
+  int16_t requested_pwm[MOTOR_ID_COUNT];
+  int16_t applied_pwm[MOTOR_ID_COUNT];
+  int8_t current_ph_dir[MOTOR_ID_COUNT];
+  int8_t pending_dir[MOTOR_ID_COUNT];
+  motor_driver_phase_t phase[MOTOR_ID_COUNT];
   uint8_t sleep_enabled;
   uint8_t tim1_moe_active;
   uint8_t tim1_break_flag;
@@ -43,8 +58,6 @@ typedef struct
 void MotorDriver_Init(void);
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille);
 void MotorDriver_SetSidePermille(motor_side_t side, int16_t permille);
-void MotorDriver_SetInputPermille(motor_id_t motor, int16_t forward_permille, int16_t reverse_permille);
-void MotorDriver_SetSideInputPermille(motor_side_t side, int16_t forward_permille, int16_t reverse_permille);
 void MotorDriver_Stop(motor_id_t motor, motor_stop_mode_t mode);
 void MotorDriver_StopSide(motor_side_t side, motor_stop_mode_t mode);
 void MotorDriver_StopAll(motor_stop_mode_t mode);

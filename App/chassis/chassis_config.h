@@ -66,7 +66,6 @@ extern "C" {
 /* 速度斜坡 */
 #define CHASSIS_SPEED_RAMP_MPS2             1.0f
 #define CHASSIS_ANGULAR_RAMP_RPS2           10.0f
-#define CHASSIS_OUTPUT_SLEW_STEP_PER_CYCLE  5
 
 /* PID 控制 */
 #define CHASSIS_PID_ENABLED                 1U

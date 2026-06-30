@@ -14,8 +14,6 @@ typedef struct
 } motor_output_phase_enable_t;
 
 motor_output_phase_enable_t MotorOutputLogic_ResolvePhaseEnable(int16_t signed_permille);
-motor_output_phase_enable_t MotorOutputLogic_ResolveRawInput(int16_t forward_permille,
-                                                             int16_t reverse_permille);
 
 #ifdef __cplusplus
 }

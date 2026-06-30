@@ -165,35 +165,184 @@ static void test_motor_driver_uses_gpio_for_phase(void)
   require_int(pwm_start_count_tim1 == 4U, "starts TIM1 PWM for EN channels");
   require_int(pwm_start_count_tim8 == 0U, "does not start TIM8 PWM for PH GPIO pins");
 
-  MotorDriver_SetInputPermille(MOTOR_ID_M2, 300, 0);
+  MotorDriver_SetPermille(MOTOR_ID_M3, 300);
   MotorDriver_GetState(&state);
-  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_2) == 2520U, "M2 forward writes EN PWM");
-  require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 forward drives PH GPIO high");
-  require_int(HostTimGetCompare(&htim8, TIM_CHANNEL_2) == 0U, "M2 PH does not write TIM8 CCR");
-  require_int(state.output_permille[MOTOR_ID_M2] == 300, "M2 forward state records signed output");
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 126U, "M3 first forward step ramps EN by 15 permille");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 forward drives PH GPIO high");
+  require_int(HostTimGetCompare(&htim8, TIM_CHANNEL_3) == 0U, "M3 PH does not write TIM8 CCR");
+  require_int(state.requested_pwm[MOTOR_ID_M3] == 300, "M3 state records requested signed PWM");
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 15, "M3 state records ramped signed PWM");
+  require_int(state.output_permille[MOTOR_ID_M3] == 15, "legacy output mirrors applied signed PWM");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_RUN, "M3 enters run phase");
 
-  MotorDriver_SetInputPermille(MOTOR_ID_M2, 50, 0);
+  for (uint8_t i = 0U; i < 19U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  }
   MotorDriver_GetState(&state);
-  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_2) == 420U, "M2 low forward writes proportional EN PWM");
-  require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 low forward keeps PH GPIO high");
-  require_int(state.output_permille[MOTOR_ID_M2] == 50, "M2 low forward state records requested output");
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 2520U, "M3 reaches 300 permille after 20 cycles");
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 300, "M3 applied PWM reaches target");
 
-  MotorDriver_SetInputPermille(MOTOR_ID_M2, 0, 300);
-  MotorDriver_GetState(&state);
-  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_2) == 2520U, "M2 reverse keeps EN PWM magnitude");
-  require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_RESET, "M2 reverse drives PH GPIO low");
-  require_int(HostTimGetCompare(&htim8, TIM_CHANNEL_2) == 0U, "M2 reverse does not write TIM8 CCR");
-  require_int(state.output_permille[MOTOR_ID_M2] == -300, "M2 reverse state records signed output");
-
-  MotorDriver_SetInputPermille(MOTOR_ID_M1, 300, 0);
+  MotorDriver_SetPermille(MOTOR_ID_M1, 300);
   MotorDriver_GetState(&state);
   require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_1) == 0U, "disabled M1 keeps EN off");
   require_int(gpio_c_state(M1_IN2_Pin) == GPIO_PIN_RESET, "disabled M1 keeps PH low");
   require_int(state.output_permille[MOTOR_ID_M1] == 0, "disabled M1 state records off output");
 }
 
+static void test_motor_driver_ramps_up_and_down_without_changing_phase(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+
+  for (uint8_t i = 0U; i < 60U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 900);
+  }
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 900, "M3 reaches 900 after 60 rise cycles");
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 7560U, "M3 900 permille writes expected EN PWM");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH remains high while running forward");
+
+  for (uint8_t i = 0U; i < 35U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 0);
+    MotorDriver_GetState(&state);
+    require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH stays high while ramping down to stop");
+    require_int(state.applied_pwm[MOTOR_ID_M3] > 0, "M3 still has nonzero PWM before final down cycle");
+  }
+  MotorDriver_SetPermille(MOTOR_ID_M3, 0);
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 reaches zero after 36 down cycles");
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 0U, "M3 EN is low after normal stop");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH is preserved after normal stop");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_IDLE_BRAKE, "M3 enters idle brake after zero target");
+}
+
+static void test_motor_driver_reverses_only_after_brake_and_phase_settle(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  }
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 300, "M3 starts at forward 300");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 starts with forward PH");
+
+  for (uint8_t i = 0U; i < 11U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+    MotorDriver_GetState(&state);
+    require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH does not change while PWM is nonzero");
+    require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_RAMP_DOWN, "M3 ramps down before reverse");
+  }
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 reaches zero before reverse brake");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH still unchanged at zero");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_REVERSE_BRAKE, "M3 enters reverse brake");
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 holds old PH for first brake cycle");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_REVERSE_BRAKE, "M3 stays in reverse brake");
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 holds old PH for second brake cycle");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_PH_SETTLE, "M3 waits for PH switch permission");
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_RESET, "M3 writes new PH only with EN low");
+  require_int(state.current_ph_dir[MOTOR_ID_M3] == -1, "M3 records new PH direction");
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 keeps EN low when PH changes");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_RAMP_UP, "M3 enters ramp-up after PH settle");
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == -15, "M3 ramps up in new direction after settle");
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 126U, "M3 reverse ramp writes first EN step");
+}
+
+static void test_motor_driver_serializes_phase_switches(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M2, 300);
+    MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  }
+  require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_RESET, "M2 positive command maps to low PH by layout");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 positive command maps to high PH by layout");
+
+  for (uint8_t i = 0U; i < 14U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M2, -300);
+    MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  }
+  MotorDriver_SetPermille(MOTOR_ID_M2, -300);
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 is ready to switch PH");
+  require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 switches PH first");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH has not switched in same control round");
+
+  for (uint8_t i = 0U; i < 4U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  }
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_RESET, "M3 switches PH after serialized gap");
+}
+
+static void test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  }
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 forward PH before emergency stop");
+
+  MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
+  MotorDriver_GetState(&state);
+  require_int(state.requested_pwm[MOTOR_ID_M3] == 0, "M3 emergency stop clears requested PWM");
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 emergency stop clears applied PWM");
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 0U, "M3 emergency stop immediately drives EN low");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 emergency stop preserves PH");
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 restart writes PH before PWM");
+  require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_RESET, "M3 restart sets requested PH with EN low");
+  require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_RAMP_UP, "M3 restart waits one call before PWM");
+
+  MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == -15, "M3 restart ramps PWM after PH settle");
+}
+
 int main(void)
 {
   test_motor_driver_uses_gpio_for_phase();
+  test_motor_driver_ramps_up_and_down_without_changing_phase();
+  test_motor_driver_reverses_only_after_brake_and_phase_settle();
+  test_motor_driver_serializes_phase_switches();
+  test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely();
   return 0;
 }

@@ -17,9 +17,3 @@ motor_output_phase_enable_t MotorOutputLogic_ResolvePhaseEnable(int16_t signed_p
 
   return output;
 }
-
-motor_output_phase_enable_t MotorOutputLogic_ResolveRawInput(int16_t forward_permille,
-                                                             int16_t reverse_permille)
-{
-  return MotorOutputLogic_ResolvePhaseEnable((int16_t)(forward_permille - reverse_permille));
-}

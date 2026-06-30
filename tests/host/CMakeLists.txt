@@ -12,7 +12,6 @@ add_executable(test_f407_v2
     test_f407_v2.c
     ../../BSP/chassis_layout.c
     ../../App/chassis/chassis_math.c
-    ../../App/chassis/chassis_output_slew.c
     ../../App/chassis/chassis_task_timing.c
     ../../App/control/control_manager.c
     ../../App/protocol/upper_protocol.c
@@ -102,7 +101,6 @@ add_executable(test_chassis_control_current_limit
     test_chassis_control_current_limit.c
     ../../App/chassis/chassis_control.c
     ../../App/chassis/chassis_math.c
-    ../../App/chassis/chassis_output_slew.c
     ../../BSP/chassis_layout.c
     ../../BSP/pid/pid_controller.c
 )
