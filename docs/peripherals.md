@@ -97,7 +97,7 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 
 **电流零点**：上电后 ADC monitor 在静止阶段累计 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次 ADC 样本，分别生成 M1-M4 的 raw 零点；`status` 中 `cal=n/256` 表示零点采样进度，完成后 `valid=1`。
 
-**电流窗口**：ADC1 由 TIM8 TRGO 约 1kHz 触发，`AdcMonitor_Update()` 每 20ms 汇总窗口统计。`status` 的 `ADCWIN` 行和 `log 1 adcraw` 可查看每路 `mean/rms/peak/n`；默认 `adc` 字段继续输出慢速稳定电流。
+**电流窗口**：ADC1 由 TIM8 TRGO 约 2kHz 触发，`AdcMonitor_Update()` 每 20ms 汇总窗口统计。`status` 的 `ADCWIN` 行和 `log 1 adcraw` 可查看每路 `mean/rms/peak/n`；默认 `adc` 字段继续输出慢速稳定电流。
 
 ---
 

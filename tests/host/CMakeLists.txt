@@ -79,3 +79,43 @@ target_include_directories(test_motor_driver_gpio PRIVATE
 )
 
 add_test(NAME motor_driver_gpio COMMAND test_motor_driver_gpio)
+
+add_executable(test_system_monitor
+    test_system_monitor.c
+    ../../App/monitor/system_monitor.c
+)
+
+target_include_directories(test_system_monitor PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../App/monitor
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/encoder
+    ../../BSP/motor
+)
+
+add_test(NAME system_monitor COMMAND test_system_monitor)
+
+add_executable(test_chassis_control_current_limit
+    test_chassis_control_current_limit.c
+    ../../App/chassis/chassis_control.c
+    ../../App/chassis/chassis_math.c
+    ../../App/chassis/chassis_output_slew.c
+    ../../BSP/chassis_layout.c
+    ../../BSP/pid/pid_controller.c
+)
+
+target_include_directories(test_chassis_control_current_limit PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/encoder
+    ../../BSP/motor
+    ../../BSP/pid
+)
+
+add_test(NAME chassis_control_current_limit COMMAND test_chassis_control_current_limit)

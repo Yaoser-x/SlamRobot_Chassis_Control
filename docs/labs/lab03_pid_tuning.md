@@ -35,7 +35,7 @@ vel V [W]  ──→  ControlManager  ──→  ChassisControl_Step (10ms)
                   ├─ 差速模型: linear_x/angular_z → left_mps/right_mps
                   ├─ 速度斜坡: 1.0 m/s² 平滑过渡
                   ├─ PID 速度环: 独立四路 PI(D)
-                  ├─ 过流保护: 2.4A 持续过流 fault-stop
+                  ├─ 电流诊断: 默认记录 ADC 电流，软件过流锁停关闭
                   └─ 电机输出: TIM1 EN/PWM + GPIO PH/DIR, permille ±900
 ```
 
@@ -61,17 +61,22 @@ vel V [W]  ──→  ControlManager  ──→  ChassisControl_Step (10ms)
 所有 PID 参数为 `chassis_config.h` 中的编译期常量（默认值）：
 
 ```c
-// 每路电机独立 PID（默认纯 P 控制）
-#define CHASSIS_PID_KP_M1   1200.0f    // M1 比例增益
-#define CHASSIS_PID_KI_M1   0.0f       // M1 积分增益（默认关闭）
-#define CHASSIS_PID_KD_M1   0.0f       // M1 微分增益（默认关闭）
-#define CHASSIS_PID_KP_M2   1200.0f    // M2
-#define CHASSIS_PID_KP_M3   1400.0f    // M3（右侧默认略高）
-#define CHASSIS_PID_KP_M4   1400.0f    // M4
-// ... KI/KD 同理
+// 每路电机独立 PID
+#define CHASSIS_PID_KP_M1   50.0f
+#define CHASSIS_PID_KI_M1   8.0f
+#define CHASSIS_PID_KD_M1   0.05f
+#define CHASSIS_PID_KP_M2   1000.0f
+#define CHASSIS_PID_KI_M2   800.0f
+#define CHASSIS_PID_KD_M2   0.15f
+#define CHASSIS_PID_KP_M3   1200.0f
+#define CHASSIS_PID_KI_M3   1000.0f
+#define CHASSIS_PID_KD_M3   0.18f
+#define CHASSIS_PID_KP_M4   100.0f
+#define CHASSIS_PID_KI_M4   0.0f
+#define CHASSIS_PID_KD_M4   0.0f
 
 // 全局 PID 约束
-#define CHASSIS_PID_INTEGRAL_LIMIT     1.5f     // 积分限幅
+#define CHASSIS_PID_INTEGRAL_LIMIT     60.0f    // 积分限幅
 #define CHASSIS_PID_CORRECTION_LIMIT   500.0f   // PID 输出增量限幅
 #define CHASSIS_PID_STOP_EPSILON_MPS   0.005f   // 停止判定阈值
 ```
@@ -97,7 +102,7 @@ cmake --version                # 确认 CMake (> 3.22)
 
 ### 步骤 1：基线响应——默认 Kp
 
-底盘**架空**，测试默认 Kp=1200/1400 下的阶跃响应：
+底盘**架空**，测试当前默认 PID 参数下的阶跃响应：
 
 ```bash
 log 1 motor                     # CSV 日志（仅 motor 字段：速度 + PWM）
@@ -128,7 +133,7 @@ CHASSIS req=100,0mm/s target=100,0mm/s actual=89,92mm/s pwm=523,518,541,537 out=
 | 实验编号 | Kp (M1/M2) | Kp (M3/M4) | 预期 |
 |----------|------------|------------|------|
 | A | 600 | 700 | 响应慢、稳态误差大 |
-| B | 1200 | 1400 | 基线（默认值） |
+| B | 当前默认值 | 当前默认值 | 基线 |
 | C | 2500 | 2800 | 响应快、可能超调 |
 | D | 5000 | 5500 | 可能振荡 |
 
@@ -145,13 +150,13 @@ cmake --build --preset Debug          # 重编译
 | 实验 | Kp_M1 | 上升时间(ms) | 超调量(%) | 稳态误差(mm/s) | PWM 抖动(permille) |
 |------|-------|-------------|----------|---------------|-------------------|
 | A    | 600   |             |          |               |                   |
-| B    | 1200  |             |          |               |                   |
+| B    | 默认值 |             |          |               |                   |
 | C    | 2500  |             |          |               |                   |
 | D    | 5000  |             |          |               |                   |
 
 ### 步骤 3：加入积分项
 
-选定较优的 Kp 值（如默认 1200/1400），在原基础上加入 Ki：
+选定较优的 Kp 值（可从当前默认值开始），在原基础上调整 Ki：
 
 ```c
 #define CHASSIS_PID_KI_M1   50.0f    // 小幅积分
@@ -191,7 +196,7 @@ cmake --build --preset Debug          # 重编译
 
 > **安全警告**：落地测试前确认 `estop 1` 命令熟练、底盘四周无障碍物。
 
-将底盘放置地面（非架空），重复一组较优参数（如 Kp=1200, Ki=50）的阶跃测试。对比空载 vs 带载的响应差异。
+将底盘放置地面（非架空），重复一组较优参数的阶跃测试。对比空载 vs 带载的响应差异。
 
 ## 数据分析
 
@@ -258,7 +263,7 @@ plt.savefig('lab03_step_response.png', dpi=150)
 将不同 Kp/Ki 组合的响应曲线叠加到同一张图：
 
 ```python
-files = {'Kp=600': 'lab03_kp600.csv', 'Kp=1200': 'lab03_baseline.csv',
+files = {'Kp=600': 'lab03_kp600.csv', 'default': 'lab03_baseline.csv',
          'Kp=2500': 'lab03_kp2500.csv', 'Kp+Ki=50': 'lab03_ki50.csv'}
 
 for label, file in files.items():
@@ -272,13 +277,13 @@ plt.savefig('lab03_comparison.png', dpi=150)
 
 ## 思考题
 
-1. 为什么 M3/M4 的默认 Kp (1400) 比 M1/M2 (1200) 高？从机械布局和驱动特性角度分析。
+1. 为什么不同电机的默认 PID 参数不一定相同？从机械布局、驱动特性和编码器反馈质量角度分析。
 
 2. 纯 P 控制为什么会产生稳态误差？用终值定理或控制框图推导说明。加入积分项后稳态误差为什么能被消除？
 
 3. 如果增大 Kp 至 5000，系统开始振荡。振荡频率由哪些因素决定（惯性、控制周期、编码器噪声）？
 
-4. `CHASSIS_PID_INTEGRAL_LIMIT = 1.5` 的含义是什么？如果没有积分限幅，在目标速度突变为 0 时可能发生什么（积分饱和/windup）？
+4. `CHASSIS_PID_INTEGRAL_LIMIT = 60.0` 的含义是什么？如果没有积分限幅，在目标速度突变为 0 时可能发生什么（积分饱和/windup）？
 
 5. `CHASSIS_SPEED_RAMP_MPS2 = 1.0` 速度斜坡对阶跃响应有何影响？如果去掉斜坡限制（设为很大的值），PID 输出会有何变化？
 

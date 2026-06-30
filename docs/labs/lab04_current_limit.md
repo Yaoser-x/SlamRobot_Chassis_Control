@@ -33,7 +33,7 @@ I_motor = abs(V_adc − V_zero) / (R_shunt × Gain)
 
 ### 2. 窗口统计与 EMA 低通滤波
 
-ADC1 由 TIM8 TRGO 触发约 1kHz 采样；`AdcMonitor_Update()` 每 20ms 取走一批样本并计算：
+ADC1 由 TIM8 TRGO 触发约 2kHz 采样；`AdcMonitor_Update()` 每 20ms 取走一批样本并计算：
 
 ```
 I_mean    = mean(abs(raw - zero))

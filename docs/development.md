@@ -74,14 +74,14 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 | --- | --- |
 | Debug | `build/Debug/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
 | Release | `build/Release/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
-| Host 测试 | `build/host-tests-ninja/test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]` |
+| Host 测试 | `test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]`、`test_motor_driver_gpio[.exe]`、`test_system_monitor[.exe]`、`test_chassis_control_current_limit[.exe]` |
 
 ### 2.4 当前构建验证
 
 ```
-Debug:  RAM  ~79 KB / 128 KB (~60%)
-        FLASH ~128 KB / 512 KB (~24%)
-        Host 测试 3/3 通过 (CI host-tests)
+Debug:  RAM   79.3 KB / 128 KB (60.5%)
+        FLASH 132.8 KB / 512 KB (25.3%)
+        Host 测试 6/6 通过 (CI host-tests)
 ```
 
 ---
@@ -100,7 +100,7 @@ Debug:  RAM  ~79 KB / 128 KB (~60%)
 | 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc` |
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
-| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（3 个 target），通过后输出测试摘要 |
+| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（6 个 target），通过后输出测试摘要 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
