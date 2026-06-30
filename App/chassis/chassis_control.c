@@ -152,6 +152,7 @@ static int16_t ChassisControl_MpsToPermille(float target_mps)
 static int16_t ChassisControl_ApplyCurrentLimit(int16_t permille, float current_a, uint8_t *limited)
 {
   int32_t scaled;
+  int32_t abs_scaled;
 
   if (limited != 0)
   {
@@ -166,6 +167,11 @@ static int16_t ChassisControl_ApplyCurrentLimit(int16_t permille, float current_
   if (limited != 0)
   {
     *limited = 1U;
+  }
+  abs_scaled = (scaled < 0) ? -scaled : scaled;
+  if (abs_scaled < CHASSIS_PWM_DEADBAND_PERMILLE)
+  {
+    return 0;
   }
   return ChassisControl_ClampPermille(scaled);
 }
@@ -468,13 +474,24 @@ void ChassisControl_Step(uint32_t now_ms)
 
   if (raw_input_test_enabled != 0U)
   {
+    adc_monitor_state_t adc_state;
+
+    AdcMonitor_GetState(&adc_state);
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
       PidController_Reset(&pid_motor[i]);
+      chassis_state.motor_current_limited[i] = 0U;
       if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
       {
         int16_t target = ChassisControl_ClampPermille((int32_t)raw_forward[i] - (int32_t)raw_reverse[i]);
         int16_t applied = ChassisControl_StepOutputSlew((motor_id_t)i, target);
+        if (adc_state.current_valid != 0U)
+        {
+          applied = ChassisControl_ApplyCurrentLimit(applied,
+                                                     adc_state.current_a[i],
+                                                     &chassis_state.motor_current_limited[i]);
+        }
+        output_slew_permille[i] = applied;
         if (applied >= 0)
         {
           MotorDriver_SetInputPermille((motor_id_t)i, applied, 0);
@@ -493,7 +510,6 @@ void ChassisControl_Step(uint32_t now_ms)
       }
       chassis_state.motor_pid_active[i] = 0U;
       chassis_state.motor_feedback_lost[i] = 0U;
-      chassis_state.motor_current_limited[i] = 0U;
       chassis_state.motor_error_mps[i] = 0.0f;
     }
     ChassisControl_ResetRamps();

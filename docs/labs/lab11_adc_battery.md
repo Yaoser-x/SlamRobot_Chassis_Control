@@ -15,12 +15,12 @@ STM32F407 ADC1 由 TIM8 TRGO 以 1kHz 触发，每次扫描 5 个通道，并通
 | 通道 | ADC 引脚 | 信号 | 物理意义 |
 |------|---------|------|----------|
 | CH10 | PC0 | M1_IPROPI | M1 电机电流 |
-| CH11 | PC1 | M3_IPROPI | M3 电机电流 |
-| CH12 | PC2 | M2_IPROPI | M2 电机电流 |
+| CH11 | PC1 | M2_IPROPI | M2 电机电流 |
+| CH12 | PC2 | M3_IPROPI | M3 电机电流 |
 | CH13 | PC3 | M4_IPROPI | M4 电机电流 |
 | CH14 | PC4 | VBAT_SENSE | 电池电压（经分压） |
 
-> ADC DMA Rank 仍按 `CH10, CH11, CH12, CH13, CH14` 采样；BSP 层把 `PC1/CH11` 归为逻辑 M3，把 `PC2/CH12` 归为逻辑 M2。
+> ADC DMA Rank 仍按 `CH10, CH11, CH12, CH13, CH14` 采样；BSP 层把 `PC1/CH11` 归为逻辑 M2，把 `PC2/CH12` 归为逻辑 M3。
 
 参数（`chassis_config.h`）：
 
@@ -50,14 +50,14 @@ V_bat = V_adc × 5.7
 
 ### 3. 电机电流换算——分流电阻
 
-DRV8874 IPROPI 输出电压与电机电流成正比：
+DRV8874 IPROPI 输出电压与电机电流成正比，当前代码使用实测初始标定 `MOTOR_CURRENT_VOLTS_PER_AMP = 1.0V/A`：
 
 ```
-V_propi = I_motor × R_shunt × Gain = I × 0.1Ω × 1 = I × 0.1
+V_propi = I_motor × MOTOR_CURRENT_VOLTS_PER_AMP = I × 1.0
 
-I_motor = V_propi / 0.1 = V_propi × 10
+I_motor = V_propi / 1.0
 
-I_mA = abs(ADC_raw - ADC_zero_raw) / 4095 × 3.3 / 0.1 × 1000
+I_mA = abs(ADC_raw - ADC_zero_raw) / 4095 × 3.3 / 1.0 × 1000
 ```
 
 上电静止阶段会对四路 IPROPI 分别采样 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次，平均得到每路 raw 零点。实际运放偏移会被运行时零点抵消；若校准期间电机转动或负载电流不为零，零点会被错误写入运行时状态。
@@ -235,7 +235,7 @@ plt.savefig('lab11_discharge.png', dpi=150)
 
 2. 如果上电零点校准期间某一路实际带有 +10mV 对应的负载电流，这个错误零点对后续电流读数有什么影响？会造成过流保护误触发还是漏触发？
 
-3. ADC 量化台阶 = 3.3V / 4095 ≈ 0.806mV。这意味着电流分辨率 ≈ 0.806mV / 0.1Ω ≈ 8.06mA/LSB。如果要提高电流测量分辨率到 1mA，有哪些方法？（提示：过采样平均、外部放大器、更高分辨率 ADC）
+3. ADC 量化台阶 = 3.3V / 4095 ≈ 0.806mV。这意味着电流分辨率 ≈ 0.806mV / 1.0V/A ≈ 0.806mA/LSB。如果要提高电流测量分辨率到 0.1mA，有哪些方法？（提示：过采样平均、外部放大器、更高分辨率 ADC）
 
 4. EMA 滤波的 α 值选择是一个 trade-off。α 越大响应越快但噪声更大。如果电流信号中混入了 50Hz 工频干扰，仅靠 EMA 滤波能否有效去除？如果不能，应该用什么滤波器？
 

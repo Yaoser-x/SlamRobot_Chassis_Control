@@ -2,8 +2,8 @@
 
 ## 实验目标
 
-1. **知识**：理解分流电阻测流原理、ADC 采样与换算、EMA 低通滤波、过流去抖保护机制
-2. **技能**：能通过 `status`/`log 1 adc` 观察实时电流，分析空载/带载/堵转三种工况下的电流特征
+1. **知识**：理解分流电阻测流原理、ADC 采样窗口统计、EMA 低通滤波、过流去抖保护机制
+2. **技能**：能通过 `status`/`log 1 adc adcraw` 观察稳定电流和窗口统计，分析空载/带载/堵转三种工况下的电流特征
 3. **素养**：理解电机电流与负载的对应关系，建立"电流即力矩"的电机控制直觉
 
 ## 实验原理
@@ -14,7 +14,7 @@ DRV8874 的 IPROPI 引脚输出与电机电流成比例的电压，经 ADC 采�
 
 ```
 I_motor = abs(V_adc − V_zero) / (R_shunt × Gain)
-         = abs(ADC_raw − ADC_zero_raw) / 4095 × 3.3 / 0.1
+         = abs(ADC_raw − ADC_zero_raw) / 4095 × 3.3 / 1.0
 ```
 
 参数（`chassis_config.h`）：
@@ -23,16 +23,28 @@ I_motor = abs(V_adc − V_zero) / (R_shunt × Gain)
 |------|------|--------|
 | 分流电阻 | `MOTOR_CURRENT_SHUNT_OHM` | 0.1 Ω |
 | 上电零点采样 | `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | 256 |
-| 电压-电流比 | `MOTOR_CURRENT_VOLTS_PER_AMP` | 0.1 V/A |
-| 电流限幅 | `MOTOR_CURRENT_LIMIT_A` | 0.8 A |
+| 电压-电流比 | `MOTOR_CURRENT_VOLTS_PER_AMP` | 1.0 V/A |
+| 实时电流节流 | `MOTOR_CURRENT_LIMIT_A` | 0.0 A（关闭） |
+| ADC 过流锁停 | `MOTOR_ADC_OVERCURRENT_FAULT_ENABLED` | 0U（关闭） |
 | 过流去抖次数 | `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` | 5 |
 | 额定电流 | `MOTOR_RATED_CURRENT_A` | 0.65 A |
 | 堵转电流 | `MOTOR_STALL_CURRENT_A` | 2.4 A |
 | EMA 滤波系数 | `MOTOR_CURRENT_FILTER_ALPHA` | 0.25 |
 
-### 2. EMA 低通滤波
+### 2. 窗口统计与 EMA 低通滤波
 
-为抑制 ADC 采样噪声，对电流做指数移动平均（EMA）：
+ADC1 由 TIM8 TRGO 触发约 1kHz 采样；`AdcMonitor_Update()` 每 20ms 取走一批样本并计算：
+
+```
+I_mean    = mean(abs(raw - zero))
+I_rms     = sqrt(mean((raw - zero)^2))
+I_peak    = max(abs(raw - zero))
+I_trimmed = 去掉窗口最大/最小后的均值
+```
+
+`log 1 adc` 仍输出慢速稳定电流；`log 1 adcraw` 输出窗口 `mean/rms/peak/n`。与可调电源电流对比时优先看 `mean` 或 `trimmed`，不要直接拿 `peak` 对比电源平均电流。
+
+为抑制 ADC 采样噪声，慢速稳定电流继续对 `I_trimmed` 做指数移动平均（EMA）：
 
 ```
 I_filtered(k) = α × I_raw(k) + (1−α) × I_filtered(k−1)
@@ -46,7 +58,7 @@ I_filtered(k) = α × I_raw(k) + (1−α) × I_filtered(k−1)
 为避免瞬时噪声触发误保护，采用连续超阈值去抖：
 
 ```
-if (I > MOTOR_CURRENT_LIMIT_A) 连续 MOTOR_OVERCURRENT_DEBOUNCE_COUNT (5) 次:
+if (MOTOR_ADC_OVERCURRENT_FAULT_ENABLED && I > MOTOR_STALL_CURRENT_A) 连续 MOTOR_OVERCURRENT_DEBOUNCE_COUNT (5) 次:
     → 设置过流标志 + 触发 fault-stop
 ```
 
@@ -57,8 +69,8 @@ if (I > MOTOR_CURRENT_LIMIT_A) 连续 MOTOR_OVERCURRENT_DEBOUNCE_COUNT (5) 次:
 ```
 空载: I ≈ 0.05~0.15 A  (仅克服内部摩擦)
 带载: I ≈ 0.2~0.5 A    (正常行驶)
-爬坡/加速: I ≈ 0.5~0.8 A (接近限流)
-堵转: I → MOTOR_STALL_CURRENT_A (2.4 A, 触发保护)
+爬坡/加速: I 随负载上升，持续超过堵转阈值会触发 fault-stop
+堵转: I → MOTOR_STALL_CURRENT_A (2.4 A, 当前仅记录诊断；默认不触发 ADC 软件锁停)
 ```
 
 > **核心直觉**：电机电流 ≈ 输出力矩。电流越大表示电机越"吃力"。
@@ -77,7 +89,7 @@ if (I > MOTOR_CURRENT_LIMIT_A) 连续 MOTOR_OVERCURRENT_DEBOUNCE_COUNT (5) 次:
 底盘架空（车轮无负载）：
 
 ```bash
-log 1 adc                         # CSV 日志仅 adc 字段
+log 1 adc adcraw                  # 稳定电流 + 窗口统计
 motor 200 200                     # 低速空载
 # 保持 5 秒
 motor 400 400                     # 中速
@@ -94,7 +106,7 @@ log 0
 ADC vbat=11700mV raw=2545 m1=120mA raw=1452 z=1437 m2=110mA raw=1334 z=1320 m3=130mA raw=1580 z=1564 m4=105mA raw=1280 z=1267 cal=256/256 valid=1
 ```
 
-字段含义：`vbat` 为滤波后的电池电压，紧随其后的 `raw` 为 VBAT ADC 原始值；每路电机的 `raw` 是当前 IPROPI 原始值，`z` 是上电静止校准得到的零点；`cal=256/256 valid=1` 表示电流零点完成且当前电流读数有效。
+字段含义：`vbat` 为滤波后的电池电压，紧随其后的 `raw` 为 VBAT ADC 原始值；每路电机的 `raw` 是最近窗口最后一帧 IPROPI 原始值，`z` 是上电静止校准得到的零点；`cal=256/256 valid=1` 表示电流零点完成且当前电流读数有效。`status` 还会输出 `ADCWIN` 行，其中 `mean/rms/pk/n` 分别表示最近窗口的均值、RMS、峰值和样本数。
 
 **记录四路空载电流（mA）**：
 
@@ -115,7 +127,7 @@ ADC vbat=11700mV raw=2545 m1=120mA raw=1452 z=1437 m2=110mA raw=1334 z=1320 m3=1
 底盘架空，用手轻扶车轮增加阻力：
 
 ```bash
-log 1 motor adc                  # motor + adc 双字段
+log 1 motor adc adcraw           # motor + 稳定电流 + 窗口统计
 vel 150                          # 低速闭环
 # 依次对 M1/M2/M3/M4 车轮手动施加阻力，每个持续 2~3 秒
 # 观察对应电流上升
@@ -128,7 +140,7 @@ log 0
 - 速度在加载时是否下降（PID 增大 PWM 输出补偿）
 - 撤除负载后电流迅速回落的速度（EMA 滤波的滞后特性）
 
-### 步骤 3：限流触发实验
+### 步骤 3：DRV 硬件保护观察
 
 > **警告**：此步骤需要人为堵转电机，持续时间 < 2 秒。长时间堵转会造成电机和驱动板过热。
 
@@ -142,8 +154,8 @@ log 0
 ```
 
 **预期**：
-1. M1 电流迅速上升，超过 `MOTOR_CURRENT_LIMIT_A = 0.8A`
-2. 连续 5 次超阈值后触发 `SYSTEM_ERROR_M1_OVERCURRENT`
+1. 电机负载升高时，观察 ADC 电流峰值和电源平均电流的差异
+2. 若 DRV8874 nFAULT 拉低，系统触发 fault-stop
 3. `status` 中 `errors` 字段出现对应位（0x00000002）
 4. `fault=1` — fault-stop 触发，全部电机停止
 5. 输入 `clearfault` 尝试清除
@@ -153,7 +165,7 @@ clearfault                      # 尝试清除过流锁存
 s                               # 确认 errors 是否清零
 ```
 
-**注意**：若堵转后电流仍未回落至 0.8A 以下，`clearfault` 会拒绝清除。
+**注意**：当前默认关闭 ADC 软件过流锁停；`clearfault` 仍会受 DRV nFAULT 状态约束。
 
 ### 步骤 4：带载跑行测试
 
@@ -201,7 +213,7 @@ axes[0].grid(alpha=0.3)
 ax2 = axes[1]
 for i, col in enumerate(['m1_ma', 'm2_ma', 'm3_ma', 'm4_ma']):
     ax2.plot(t, df[col], label=f'M{i+1} current', alpha=0.7)
-ax2.axhline(800, color='red', linestyle='--', label='limit 800mA')  # mA
+ax2.axhline(2400, color='red', linestyle='--', label='stall 2400mA')  # mA
 ax2.set_ylabel('Current (mA)')
 ax2.set_xlabel('Time (s)')
 ax2.legend(loc='upper left')
@@ -233,7 +245,7 @@ print(f'Noise reduction: {(1 - noise_filtered/noise_raw)*100:.1f}%')
 
 3. 过流去抖需要连续 5 次超阈值才触发保护（safetyTask 20ms 周期，即 100ms 去抖窗口）。为什么需要这个去抖机制？如果去掉（1 次即触发），会有什么风险？
 
-4. `MOTOR_CURRENT_LIMIT_A = 0.8A` 比 `MOTOR_RATED_CURRENT_A = 0.65A` 高约 23%。这个余量是否合理？如果要让底盘具备更强的爬坡能力，提高限流值有什么风险和收益？
+4. 当前 `MOTOR_CURRENT_LIMIT_A = 0.0A` 且 `MOTOR_ADC_OVERCURRENT_FAULT_ENABLED = 0U`。若重新启用实时节流或 ADC 过流锁停，需要怎样区分 PWM 相电流峰值和电源平均电流？
 
 5. 如果上电零点校准期间电机没有完全静止，错误的 `ADC_zero_raw` 会导致什么误差？如何重新上电验证零点？
 

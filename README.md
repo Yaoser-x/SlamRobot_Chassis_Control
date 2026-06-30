@@ -31,7 +31,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
 | **构建验证** | Debug — RAM ~79KB (~60%) / FLASH ~128KB (~24%) — Host 测试 4/4 通过 — CI 双 preset + host-tests |
 
-> V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC2`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC1`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
+> V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 
 ## 目录结构
 

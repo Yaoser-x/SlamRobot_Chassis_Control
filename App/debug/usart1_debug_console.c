@@ -42,7 +42,7 @@ static uint8_t stream_mode;
 static uint8_t debug_velocity_enabled;
 static chassis_cmd_t debug_velocity_cmd;
 static uint8_t log_filter_count;
-static uint8_t log_filter_order[8];
+static uint8_t log_filter_order[10];
 static uint8_t rx_byte;
 static volatile uint8_t rx_ring[DEBUG_CONSOLE_RX_RING_SIZE];
 static volatile uint16_t rx_head;
@@ -187,6 +187,7 @@ typedef enum
 {
   LOG_FLD_MOTOR = 0,
   LOG_FLD_ADC,
+  LOG_FLD_ADC_RAW,
   LOG_FLD_IMU,
   LOG_FLD_ERRORS,
   LOG_FLD_SOURCE,
@@ -197,12 +198,13 @@ typedef enum
 } log_field_id_t;
 
 static const char *const log_field_names[LOG_FLD_COUNT] = {
-  "motor", "adc", "imu", "errors", "source", "ps2", "line", "esp"
+  "motor", "adc", "adcraw", "imu", "errors", "source", "ps2", "line", "esp"
 };
 
 static const char *const log_field_headers[LOG_FLD_COUNT] = {
   "m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm",
   "vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma",
+  "m1_mean_ma,m1_rms_ma,m1_pk_ma,m1_n,m2_mean_ma,m2_rms_ma,m2_pk_ma,m2_n,m3_mean_ma,m3_rms_ma,m3_pk_ma,m3_n,m4_mean_ma,m4_rms_ma,m4_pk_ma,m4_n",
   "imu_online,imu_chip,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg",
   "errors",
   "source",
@@ -303,6 +305,28 @@ static size_t DebugConsole_WriteFieldData(char *tx,
         (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M2]),
         (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M3]),
         (long)DebugConsole_Milli(adc.current_a[MOTOR_ID_M4]));
+      break;
+
+    case LOG_FLD_ADC_RAW:
+      AdcMonitor_GetState(&adc);
+      pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
+        "%ld,%ld,%ld,%u,%ld,%ld,%ld,%u,%ld,%ld,%ld,%u,%ld,%ld,%ld,%u",
+        (long)DebugConsole_Milli(adc.current_mean_a[MOTOR_ID_M1]),
+        (long)DebugConsole_Milli(adc.current_rms_a[MOTOR_ID_M1]),
+        (long)DebugConsole_Milli(adc.current_peak_a[MOTOR_ID_M1]),
+        adc.current_sample_count[MOTOR_ID_M1],
+        (long)DebugConsole_Milli(adc.current_mean_a[MOTOR_ID_M2]),
+        (long)DebugConsole_Milli(adc.current_rms_a[MOTOR_ID_M2]),
+        (long)DebugConsole_Milli(adc.current_peak_a[MOTOR_ID_M2]),
+        adc.current_sample_count[MOTOR_ID_M2],
+        (long)DebugConsole_Milli(adc.current_mean_a[MOTOR_ID_M3]),
+        (long)DebugConsole_Milli(adc.current_rms_a[MOTOR_ID_M3]),
+        (long)DebugConsole_Milli(adc.current_peak_a[MOTOR_ID_M3]),
+        adc.current_sample_count[MOTOR_ID_M3],
+        (long)DebugConsole_Milli(adc.current_mean_a[MOTOR_ID_M4]),
+        (long)DebugConsole_Milli(adc.current_rms_a[MOTOR_ID_M4]),
+        (long)DebugConsole_Milli(adc.current_peak_a[MOTOR_ID_M4]),
+        adc.current_sample_count[MOTOR_ID_M4]);
       break;
 
     case LOG_FLD_IMU:
@@ -607,6 +631,26 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
+                 "ADCWIN m1 mean=%ld rms=%ld pk=%ld n=%u m2 mean=%ld rms=%ld pk=%ld n=%u m3 mean=%ld rms=%ld pk=%ld n=%u m4 mean=%ld rms=%ld pk=%ld n=%u\r\n",
+                 (long)DebugConsole_Milli(adc_state.current_mean_a[MOTOR_ID_M1]),
+                 (long)DebugConsole_Milli(adc_state.current_rms_a[MOTOR_ID_M1]),
+                 (long)DebugConsole_Milli(adc_state.current_peak_a[MOTOR_ID_M1]),
+                 adc_state.current_sample_count[MOTOR_ID_M1],
+                 (long)DebugConsole_Milli(adc_state.current_mean_a[MOTOR_ID_M2]),
+                 (long)DebugConsole_Milli(adc_state.current_rms_a[MOTOR_ID_M2]),
+                 (long)DebugConsole_Milli(adc_state.current_peak_a[MOTOR_ID_M2]),
+                 adc_state.current_sample_count[MOTOR_ID_M2],
+                 (long)DebugConsole_Milli(adc_state.current_mean_a[MOTOR_ID_M3]),
+                 (long)DebugConsole_Milli(adc_state.current_rms_a[MOTOR_ID_M3]),
+                 (long)DebugConsole_Milli(adc_state.current_peak_a[MOTOR_ID_M3]),
+                 adc_state.current_sample_count[MOTOR_ID_M3],
+                 (long)DebugConsole_Milli(adc_state.current_mean_a[MOTOR_ID_M4]),
+                 (long)DebugConsole_Milli(adc_state.current_rms_a[MOTOR_ID_M4]),
+                 (long)DebugConsole_Milli(adc_state.current_peak_a[MOTOR_ID_M4]),
+                 adc_state.current_sample_count[MOTOR_ID_M4]);
+  DebugConsole_Write(tx);
+
+  (void)snprintf(tx, sizeof(tx),
                  "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu gcal=%u gbias_mdps=%ld,%ld,%ld acc_mg=%ld,%ld,%ld corr_mdps=%ld,%ld,%ld filt_mdps=%ld,%ld,%ld euler_mdeg=%ld,%ld,%ld\r\n",
                  imu_state.enabled, imu_state.online, imu_state.chip_id, imu_state.last_error,
                  (unsigned long)imu_state.error_count,
@@ -805,10 +849,10 @@ static void DebugConsole_HandleLine(char *line)
         {
           /* log 1 field1 field2 ...：仅输出指定字段 */
           uint8_t count = 0U;
-          uint8_t order[8];
+          uint8_t order[10];
           uint8_t ok = 1U;
 
-          while (token != 0 && count < 8U)
+          while (token != 0 && count < 10U)
           {
             uint8_t j;
             int8_t found = -1;
@@ -831,7 +875,7 @@ static void DebugConsole_HandleLine(char *line)
 
           if (ok == 0U || count == 0U)
           {
-            DebugConsole_Write("unknown field, valid: motor adc imu errors source ps2 line esp\r\n");
+            DebugConsole_Write("unknown field, valid: motor adc adcraw imu errors source ps2 line esp\r\n");
           }
           else
           {

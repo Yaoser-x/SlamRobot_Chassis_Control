@@ -35,10 +35,10 @@ typedef struct
 #define DMA_IT_HT  ((uint32_t)0x00000008U)  /* DMA_SxCR_HTIE */
 #define DMA_IT_FE  ((uint32_t)0x00000080U)
 
-/* Host no-op: the test doesn't exercise the DMA IT path, it only
-   verifies that AdcMonitor_Init calls this without crashing.        */
+extern uint32_t host_dma_disabled_interrupt_mask;
+
 #define __HAL_DMA_DISABLE_IT(__HANDLE__, __INTERRUPT__)  \
-  do { (void)(__HANDLE__); (void)(__INTERRUPT__); } while (0)
+  do { (void)(__HANDLE__); host_dma_disabled_interrupt_mask |= (__INTERRUPT__); } while (0)
 
 typedef struct
 {

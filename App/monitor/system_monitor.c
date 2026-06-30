@@ -4,12 +4,17 @@
 #include "chassis_config.h"
 #include "chassis_layout.h"
 #include "control_manager.h"
+#include "cmsis_os2.h"
 #include "encoder_driver.h"
 #include "main.h"
 #include "motor_driver.h"
 
 static system_monitor_state_t monitor_state;
 static uint8_t overcurrent_count[MOTOR_ID_COUNT];
+static uint8_t motor_output_active[MOTOR_ID_COUNT];
+static uint8_t startup_blank_armed[MOTOR_ID_COUNT];
+static uint32_t overcurrent_blank_until_ms[MOTOR_ID_COUNT];
+static uint32_t inactive_since_ms[MOTOR_ID_COUNT];
 
 static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
   SYSTEM_ERROR_M1_OVERCURRENT,
@@ -23,11 +28,26 @@ static uint8_t SystemMonitor_CurrentBelowFaultThreshold(float current_a)
   return (current_a <= MOTOR_STALL_CURRENT_A) ? 1U : 0U;
 }
 
+static uint8_t SystemMonitor_TimeReached(uint32_t now_ms, uint32_t deadline_ms)
+{
+  return (((int32_t)(now_ms - deadline_ms)) >= 0) ? 1U : 0U;
+}
+
 static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *adc_state,
+                                                    const uint8_t blanked[MOTOR_ID_COUNT],
                                                     const uint8_t previous_count[MOTOR_ID_COUNT],
                                                     uint8_t next_count[MOTOR_ID_COUNT],
                                                     uint32_t *new_latched_flags)
 {
+  if (MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U)
+  {
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+      next_count[i] = 0U;
+    }
+    return;
+  }
+
   if (adc_state->current_valid == 0U)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -41,6 +61,11 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
   {
     next_count[i] = previous_count[i];
     if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+    {
+      next_count[i] = 0U;
+      continue;
+    }
+    if (blanked[i] != 0U)
     {
       next_count[i] = 0U;
       continue;
@@ -69,6 +94,10 @@ void SystemMonitor_Init(void)
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     overcurrent_count[i] = 0U;
+    motor_output_active[i] = 0U;
+    startup_blank_armed[i] = 1U;
+    overcurrent_blank_until_ms[i] = 0U;
+    inactive_since_ms[i] = 0U;
   }
 }
 
@@ -83,11 +112,14 @@ void SystemMonitor_Update(void)
   system_monitor_state_t next_state;
   uint8_t previous_overcurrent_count[MOTOR_ID_COUNT];
   uint8_t next_overcurrent_count[MOTOR_ID_COUNT];
+  uint8_t overcurrent_blanked[MOTOR_ID_COUNT];
   uint32_t new_latched_flags = 0U;
   uint32_t latched_after_commit;
   uint8_t request_fault_stop = 0U;
+  uint32_t now_ms;
   uint32_t primask;
 
+  now_ms = osKernelGetTickCount();
   AdcMonitor_Update();
   MotorDriver_UpdateFaults();
   AdcMonitor_GetState(&adc_state);
@@ -105,6 +137,37 @@ void SystemMonitor_Update(void)
   }
   __set_PRIMASK(primask);
 
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    uint8_t active = (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+                      motor_state.output_permille[i] != 0) ? 1U : 0U;
+    if (active != 0U)
+    {
+      inactive_since_ms[i] = now_ms;
+      if (motor_output_active[i] == 0U && startup_blank_armed[i] != 0U)
+      {
+        overcurrent_blank_until_ms[i] = now_ms + MOTOR_OVERCURRENT_STARTUP_BLANK_MS;
+        startup_blank_armed[i] = 0U;
+      }
+      motor_output_active[i] = 1U;
+    }
+    else
+    {
+      if (motor_output_active[i] != 0U)
+      {
+        inactive_since_ms[i] = now_ms;
+      }
+      motor_output_active[i] = 0U;
+      if (SystemMonitor_TimeReached(now_ms, inactive_since_ms[i] + MOTOR_OVERCURRENT_STARTUP_REARM_MS) != 0U)
+      {
+        startup_blank_armed[i] = 1U;
+        overcurrent_blank_until_ms[i] = 0U;
+      }
+    }
+    overcurrent_blanked[i] = (startup_blank_armed[i] == 0U &&
+                              SystemMonitor_TimeReached(now_ms, overcurrent_blank_until_ms[i]) == 0U) ? 1U : 0U;
+  }
+
   next_state = (system_monitor_state_t){0};
   next_state.battery_voltage = adc_state.battery_voltage;
   next_state.left_current_a = adc_state.left_current_a;
@@ -116,6 +179,7 @@ void SystemMonitor_Update(void)
   }
 
   SystemMonitor_UpdateOvercurrentCounters(&adc_state,
+                                          overcurrent_blanked,
                                           previous_overcurrent_count,
                                           next_overcurrent_count,
                                           &new_latched_flags);

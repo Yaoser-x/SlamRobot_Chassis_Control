@@ -34,8 +34,8 @@
 
 | 逻辑电机 | EN/IN1 PWM + PH/IN2 DIR | nFAULT | 编码器 | IPROPI |
 | --- | --- | --- | --- | --- |
-| M2 | PE11 / PC7 | PD14 | TIM4 PD12/PD13 | PC2 |
-| M3 | PE13 / PC8 | PA3 | TIM3 PB4/PB5 | PC1 |
+| M2 | PE11 / PC7 | PD14 | TIM4 PD12/PD13 | PC1 |
+| M3 | PE13 / PC8 | PA3 | TIM3 PB4/PB5 | PC2 |
 
 > CubeMX 生成文件保留旧 M2/M3 label；验收时以 BSP 逻辑映射和 `status` 的 M1~M4 顺序为准。
 

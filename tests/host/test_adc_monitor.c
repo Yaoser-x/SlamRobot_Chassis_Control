@@ -8,6 +8,7 @@
 #include "tim.h"
 
 ADC_HandleTypeDef hadc1;
+uint32_t host_dma_disabled_interrupt_mask;
 static TIM_TypeDef tim8_instance = {0};
 TIM_HandleTypeDef htim8 = { .Instance = &tim8_instance };
 
@@ -100,6 +101,12 @@ static float raw_to_vbat(uint16_t raw)
          ADC_MONITOR_RESOLUTION_COUNTS;
 }
 
+static float raw_delta_to_current(uint16_t raw_delta)
+{
+  return ((float)raw_delta * ADC_MONITOR_VREF_V) /
+         (ADC_MONITOR_RESOLUTION_COUNTS * MOTOR_CURRENT_VOLTS_PER_AMP);
+}
+
 static void test_current_zero_requires_startup_samples(void)
 {
   adc_monitor_state_t state = {0};
@@ -109,33 +116,45 @@ static void test_current_zero_requires_startup_samples(void)
   AdcMonitor_Init();
   require_int(fake_adc_start_count == start_count + 1U, "adc dma started once");
   require_int(fake_tim8_base_start_count == tim8_start_count + 1U, "tim8 base started once");
+  require_int((host_dma_disabled_interrupt_mask & DMA_IT_HT) != 0U, "adc disables half-transfer irq");
+  require_int((host_dma_disabled_interrupt_mask & DMA_IT_TC) == 0U, "adc keeps transfer-complete irq");
   require_int(fake_adc_dma_len == ADC_MONITOR_CHANNEL_COUNT, "adc dma length");
-  push_adc_sample(100U, 110U, 120U, 130U, 2700U);
+  require_close(raw_delta_to_current(100U), 0.0806f, 0.0002f, "current scale is 1.0 V/A");
 
   for (uint16_t i = 0U; i < (uint16_t)(ADC_MONITOR_CURRENT_ZERO_SAMPLES - 1U); ++i)
   {
-    AdcMonitor_Update();
+    push_adc_sample(100U, 110U, 120U, 130U, 2700U);
   }
+  AdcMonitor_Update();
   AdcMonitor_GetState(&state);
   require_int(state.samples_ready != 0U, "adc samples ready");
   require_int(state.current_zero_valid == 0U, "zero not ready before sample target");
   require_int(state.current_valid == 0U, "current invalid before zero");
 
+  push_adc_sample(100U, 110U, 120U, 130U, 2700U);
   AdcMonitor_Update();
   AdcMonitor_GetState(&state);
   require_int(state.current_zero_valid != 0U, "zero ready at sample target");
   require_int(state.current_valid != 0U, "current valid after zero");
   require_int(state.current_zero_raw[MOTOR_ID_M1] == 100U, "m1 zero raw");
-  require_int(state.current_zero_raw[MOTOR_ID_M2] == 120U, "m2 zero raw");
-  require_int(state.current_zero_raw[MOTOR_ID_M3] == 110U, "m3 zero raw");
+  require_int(state.current_zero_raw[MOTOR_ID_M2] == 110U, "m2 zero raw");
+  require_int(state.current_zero_raw[MOTOR_ID_M3] == 120U, "m3 zero raw");
   require_int(state.current_zero_raw[MOTOR_ID_M4] == 130U, "m4 zero raw");
   require_close(state.current_a[MOTOR_ID_M2], 0.0f, 0.0001f, "m2 zero current");
 
-  push_adc_sample(110U, 110U, 130U, 130U, 2700U);
+  for (uint8_t i = 0U; i < 19U; ++i)
+  {
+    push_adc_sample(100U, 110U, 130U, 130U, 2700U);
+  }
+  push_adc_sample(100U, 110U, 220U, 130U, 2700U);
   AdcMonitor_Update();
   AdcMonitor_GetState(&state);
-  require_close(state.current_a[MOTOR_ID_M2], 0.0201f, 0.001f, "m2 filtered current step");
-  require_close(state.current_a[MOTOR_ID_M3], 0.0f, 0.0001f, "m3 remains zero");
+  require_close(state.current_a[MOTOR_ID_M2], 0.0f, 0.0001f, "m2 remains zero");
+  require_int(state.current_sample_count[MOTOR_ID_M3] == 20U, "m3 window sample count");
+  require_close(state.current_mean_a[MOTOR_ID_M3], raw_delta_to_current(14U) + (raw_delta_to_current(1U) * 0.5f), 0.001f, "m3 window mean current");
+  require_close(state.current_rms_a[MOTOR_ID_M3], raw_delta_to_current(24U) + (raw_delta_to_current(1U) * 0.3927f), 0.001f, "m3 window rms current");
+  require_close(state.current_peak_a[MOTOR_ID_M3], raw_delta_to_current(100U), 0.001f, "m3 window peak current");
+  require_close(state.current_a[MOTOR_ID_M3], raw_delta_to_current(10U) * MOTOR_CURRENT_FILTER_ALPHA, 0.001f, "m3 slow current uses trimmed sample");
 }
 
 static void test_battery_voltage_is_filtered(void)

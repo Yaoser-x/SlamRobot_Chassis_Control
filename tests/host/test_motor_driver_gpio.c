@@ -157,6 +157,8 @@ static void reset_fake_hw(void)
 
 static void test_motor_driver_uses_gpio_for_phase(void)
 {
+  motor_driver_state_t state;
+
   reset_fake_hw();
   MotorDriver_Init();
 
@@ -164,18 +166,30 @@ static void test_motor_driver_uses_gpio_for_phase(void)
   require_int(pwm_start_count_tim8 == 0U, "does not start TIM8 PWM for PH GPIO pins");
 
   MotorDriver_SetInputPermille(MOTOR_ID_M2, 300, 0);
+  MotorDriver_GetState(&state);
   require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_2) == 2520U, "M2 forward writes EN PWM");
   require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 forward drives PH GPIO high");
   require_int(HostTimGetCompare(&htim8, TIM_CHANNEL_2) == 0U, "M2 PH does not write TIM8 CCR");
+  require_int(state.output_permille[MOTOR_ID_M2] == 300, "M2 forward state records signed output");
+
+  MotorDriver_SetInputPermille(MOTOR_ID_M2, 50, 0);
+  MotorDriver_GetState(&state);
+  require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_2) == 420U, "M2 low forward writes proportional EN PWM");
+  require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 low forward keeps PH GPIO high");
+  require_int(state.output_permille[MOTOR_ID_M2] == 50, "M2 low forward state records requested output");
 
   MotorDriver_SetInputPermille(MOTOR_ID_M2, 0, 300);
+  MotorDriver_GetState(&state);
   require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_2) == 2520U, "M2 reverse keeps EN PWM magnitude");
   require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_RESET, "M2 reverse drives PH GPIO low");
   require_int(HostTimGetCompare(&htim8, TIM_CHANNEL_2) == 0U, "M2 reverse does not write TIM8 CCR");
+  require_int(state.output_permille[MOTOR_ID_M2] == -300, "M2 reverse state records signed output");
 
   MotorDriver_SetInputPermille(MOTOR_ID_M1, 300, 0);
+  MotorDriver_GetState(&state);
   require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_1) == 0U, "disabled M1 keeps EN off");
   require_int(gpio_c_state(M1_IN2_Pin) == GPIO_PIN_RESET, "disabled M1 keeps PH low");
+  require_int(state.output_permille[MOTOR_ID_M1] == 0, "disabled M1 state records off output");
 }
 
 int main(void)

@@ -35,7 +35,7 @@ vel V [W]  ──→  ControlManager  ──→  ChassisControl_Step (10ms)
                   ├─ 差速模型: linear_x/angular_z → left_mps/right_mps
                   ├─ 速度斜坡: 1.0 m/s² 平滑过渡
                   ├─ PID 速度环: 独立四路 PI(D)
-                  ├─ 电流限幅: 0.8A 上限
+                  ├─ 过流保护: 2.4A 持续过流 fault-stop
                   └─ 电机输出: TIM1 EN/PWM + GPIO PH/DIR, permille ±900
 ```
 
@@ -291,5 +291,5 @@ plt.savefig('lab03_comparison.png', dpi=150)
 | `arm-none-eabi-gcc: command not found` | 工具链不在 PATH | 确认安装路径，加入环境变量 |
 | 修改参数后行为没变化 | 未重新编译或烧录了旧 elf | `cmake --build --preset Debug` 确保重新链接 |
 | PWM 高频抖动 | Kd 过大或编码器量化噪声 | 减小 Kd；检查编码器 count 是否有异常跳变 |
-| 速度始终追不上目标 | Kp 过低或电流限幅触发 | 增大 Kp；`status` 检查 `current_limited` 标志 |
+| 速度始终追不上目标 | Kp 过低、PWM 死区或过流保护触发 | 增大 Kp；`status` 检查 fault 与 ADC 电流 |
 | 低频（~1Hz）振荡 | Ki 过大导致积分振荡 | 减半 Ki；增大 `CHASSIS_PID_INTEGRAL_LIMIT` |

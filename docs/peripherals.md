@@ -73,8 +73,8 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | Rank | ADC 通道 | 引脚 | 信号 | 采样时间 |
 | --- | --- | --- | --- | --- |
 | 1 | ADC1_IN10 | PC0 | M1 电流 | 84 cycles |
-| 2 | ADC1_IN11 | PC1 | M3 电流 | 84 cycles |
-| 3 | ADC1_IN12 | PC2 | M2 电流 | 84 cycles |
+| 2 | ADC1_IN11 | PC1 | M2 电流 | 84 cycles |
+| 3 | ADC1_IN12 | PC2 | M3 电流 | 84 cycles |
 | 4 | ADC1_IN13 | PC3 | M4 电流 | 84 cycles |
 | 5 | ADC1_IN14 | PC4 | VBAT 电池电压 | 84 cycles |
 
@@ -87,14 +87,17 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | `ADC_MONITOR_BATTERY_FILTER_ALPHA` | `0.10f` | 电池电压 EMA 滤波系数 |
 | `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | `256U` | 上电电流零点采样次数 |
 | `MOTOR_CURRENT_SHUNT_OHM` | `0.1f` | 电流采样电阻 |
-| `MOTOR_CURRENT_VOLTS_PER_AMP` | `0.1f` | 电流传感器增益 (100mV/A) |
-| `MOTOR_CURRENT_FILTER_ALPHA` | `0.25f` | 电流 EMA 滤波系数 |
-| `MOTOR_CURRENT_LIMIT_A` | `0.8f` | 单路过流阈值 |
+| `MOTOR_CURRENT_VOLTS_PER_AMP` | `1.0f` | 电流传感器实测初始标定 (1.0V/A) |
+| `MOTOR_CURRENT_FILTER_ALPHA` | `0.25f` | 电流窗口 trimmed 值的 EMA 滤波系数 |
+| `MOTOR_CURRENT_LIMIT_A` | `0.0f` | 实时 PWM 电流节流阈值；0 表示关闭 |
+| `MOTOR_ADC_OVERCURRENT_FAULT_ENABLED` | `0U` | ADC 电流软件过流锁停开关；默认关闭 |
 | `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` | `5U` | 过流去抖计数 |
 
 **电池分压**：`VBAT × R_lower / (R_upper + R_lower)`，默认 `R_upper = 47kΩ`，`R_lower = 10kΩ`，分压比 `5.7`。
 
-**电流零点**：上电后 ADC monitor 在静止阶段累计 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次采样，分别生成 M1-M4 的 raw 零点；`status` 中 `cal=n/256` 表示零点采样进度，完成后 `valid=1`。
+**电流零点**：上电后 ADC monitor 在静止阶段累计 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次 ADC 样本，分别生成 M1-M4 的 raw 零点；`status` 中 `cal=n/256` 表示零点采样进度，完成后 `valid=1`。
+
+**电流窗口**：ADC1 由 TIM8 TRGO 约 1kHz 触发，`AdcMonitor_Update()` 每 20ms 汇总窗口统计。`status` 的 `ADCWIN` 行和 `log 1 adcraw` 可查看每路 `mean/rms/peak/n`；默认 `adc` 字段继续输出慢速稳定电流。
 
 ---
 

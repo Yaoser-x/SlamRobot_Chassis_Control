@@ -17,10 +17,14 @@ typedef struct
   uint16_t raw_left_current;
   uint16_t raw_right_current;
   float current_a[MOTOR_ID_COUNT];
+  float current_mean_a[MOTOR_ID_COUNT];
+  float current_rms_a[MOTOR_ID_COUNT];
+  float current_peak_a[MOTOR_ID_COUNT];
   float battery_voltage;
   float left_current_a;
   float right_current_a;
   uint16_t current_zero_sample_count;
+  uint16_t current_sample_count[MOTOR_ID_COUNT];
   uint8_t samples_ready;
   uint8_t current_zero_valid;
   uint8_t current_valid;

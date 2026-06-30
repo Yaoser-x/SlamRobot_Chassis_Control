@@ -35,10 +35,10 @@ TIM1/TIM8 均启用 Automatic Output。BKIN 低电平会立即清除对应定时
 | 位 | 宏 | 含义 | 触发条件 | 是否锁存 |
 |----|-----|------|----------|---------|
 | 0 | `LOW_BATTERY` | 电池低压 | Vbat < 10.5V | 否（编译禁用） |
-| 1 | `M1_OVERCURRENT` | M1 过流 | I > 0.8A × 5 次 | **是** |
-| 2 | `M2_OVERCURRENT` | M2 过流 | I > 0.8A × 5 次 | **是** |
-| 3 | `M3_OVERCURRENT` | M3 过流 | I > 0.8A × 5 次 | **是** |
-| 4 | `M4_OVERCURRENT` | M4 过流 | I > 0.8A × 5 次 | **是** |
+| 1 | `M1_OVERCURRENT` | M1 ADC 过流 | 默认关闭 | 否 |
+| 2 | `M2_OVERCURRENT` | M2 ADC 过流 | 默认关闭 | 否 |
+| 3 | `M3_OVERCURRENT` | M3 ADC 过流 | 默认关闭 | 否 |
+| 4 | `M4_OVERCURRENT` | M4 ADC 过流 | 默认关闭 | 否 |
 | 5 | `ESTOP` | 紧急停止 | `estop 1` 命令 | 否 |
 | 6 | `FAULT_STOP` | 故障停机 | DRV 故障或过流触发 | **是** |
 | 7 | `ENCODER_INVALID` | 编码器无效 | 超时无脉冲 | 否 |
@@ -49,7 +49,7 @@ TIM1/TIM8 均启用 Automatic Output。BKIN 低电平会立即清除对应定时
 ### 3. 故障触发链
 
 ```
-M1 电流 > 0.8A → 去抖 5 次 → SYSTEM_ERROR_M1_OVERCURRENT
+DRV8874 nFAULT 拉低 → SYSTEM_ERROR_DRV_FAULT
     → latched → SYSTEM_ERROR_FAULT_STOP
     → ControlManager_SetFaultStop(1)
     → 清空全部控制源 + EN=0 停止输出
@@ -62,7 +62,7 @@ M1 电流 > 0.8A → 去抖 5 次 → SYSTEM_ERROR_M1_OVERCURRENT
 
 | 锁存故障 | 清除条件 |
 |----------|---------|
-| Mx_OVERCURRENT | 对应电机电流 < `MOTOR_CURRENT_LIMIT_A` |
+| Mx_OVERCURRENT | 当前默认不会由 ADC 电流置位 |
 | DRV_FAULT | 对应 nFAULT 引脚恢复高电平 |
 | FAULT_STOP | 所有触发源（过流+DRV）均已清除 |
 
@@ -156,7 +156,7 @@ clearfault          # 清除锁存故障
 s                   # 确认 latched 清零，fault=0
 ```
 
-**如果 `clearfault` 后 latched 未被清除**，说明故障条件尚未解除（电流仍 > 0.8A 或 nFAULT 仍低）。
+**如果 `clearfault` 后 latched 未被清除**，说明故障条件尚未解除（通常是 nFAULT 仍低）。
 
 ### 步骤 4：errors 位掩码解析
 
@@ -212,7 +212,7 @@ fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
 
 # M1 电流 + 阈值
 axes[0].plot(t, df['m1_ma'], 'b-', alpha=0.7, label='M1 current')
-axes[0].axhline(800, color='red', linestyle='--', label='limit 800mA')
+axes[0].axhline(2400, color='red', linestyle='--', label='stall 2400mA')
 axes[0].set_ylabel('Current (mA)')
 axes[0].legend()
 axes[0].grid(alpha=0.3)

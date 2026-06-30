@@ -30,6 +30,7 @@ typedef enum
 typedef struct
 {
   uint8_t fault_active[MOTOR_ID_COUNT];
+  int16_t output_permille[MOTOR_ID_COUNT];
   uint8_t sleep_enabled;
   uint8_t tim1_moe_active;
   uint8_t tim1_break_flag;

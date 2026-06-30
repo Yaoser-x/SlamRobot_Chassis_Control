@@ -7,6 +7,14 @@
 
 static uint16_t adc_dma_buffer[ADC_MONITOR_CHANNEL_COUNT];
 static volatile uint16_t adc_sample_snapshot[ADC_MONITOR_CHANNEL_COUNT];
+static volatile uint16_t adc_window_latest_raw[MOTOR_ID_COUNT];
+static volatile uint32_t adc_window_raw_sum[MOTOR_ID_COUNT];
+static volatile uint32_t adc_window_delta_sum[MOTOR_ID_COUNT];
+static volatile uint64_t adc_window_delta_sq_sum[MOTOR_ID_COUNT];
+static volatile uint16_t adc_window_delta_min[MOTOR_ID_COUNT];
+static volatile uint16_t adc_window_delta_max[MOTOR_ID_COUNT];
+static volatile uint32_t adc_window_raw_count;
+static volatile uint32_t adc_window_delta_count;
 static volatile uint8_t adc_samples_ready;
 static adc_monitor_state_t adc_state;
 static uint8_t current_filter_initialized;
@@ -16,11 +24,11 @@ static uint16_t current_zero_sample_count;
 static uint16_t current_zero_raw[MOTOR_ID_COUNT];
 static uint32_t current_zero_sum[MOTOR_ID_COUNT];
 
-/* ADC DMA order follows CubeMX ranks; logical M2/M3 are swapped here. */
+/* ADC DMA order follows logical motor current channels: M1, M2, M3, M4. */
 static const uint8_t current_adc_index[MOTOR_ID_COUNT] = {
   0U,
-  2U,
   1U,
+  2U,
   3U,
 };
 
@@ -29,16 +37,38 @@ static float AdcMonitor_RawToVoltage(uint16_t raw)
   return ((float)raw * ADC_MONITOR_VREF_V) / ADC_MONITOR_RESOLUTION_COUNTS;
 }
 
-static float AdcMonitor_RawDeltaToCurrent(uint16_t raw, uint16_t zero_raw)
+static float AdcMonitor_RawDeltaToCurrentFloat(float raw_delta)
 {
   float current = 0.0f;
 
   if (MOTOR_CURRENT_VOLTS_PER_AMP > 0.0f)
   {
-    uint16_t raw_delta = (raw >= zero_raw) ? (uint16_t)(raw - zero_raw) : (uint16_t)(zero_raw - raw);
-    current = AdcMonitor_RawToVoltage(raw_delta) / MOTOR_CURRENT_VOLTS_PER_AMP;
+    current = (raw_delta * ADC_MONITOR_VREF_V) /
+              (ADC_MONITOR_RESOLUTION_COUNTS * MOTOR_CURRENT_VOLTS_PER_AMP);
   }
   return current;
+}
+
+static float AdcMonitor_Sqrtf(float value)
+{
+  float estimate;
+
+  if (value <= 0.0f)
+  {
+    return 0.0f;
+  }
+
+  estimate = (value >= 1.0f) ? value : 1.0f;
+  for (uint8_t i = 0U; i < 8U; ++i)
+  {
+    estimate = 0.5f * (estimate + (value / estimate));
+  }
+  return estimate;
+}
+
+static uint16_t AdcMonitor_ClampU16(uint32_t value)
+{
+  return (value > 65535UL) ? 65535U : (uint16_t)value;
 }
 
 static float AdcMonitor_FilterBattery(float previous, float sample)
@@ -56,27 +86,95 @@ static float AdcMonitor_FilterBattery(float previous, float sample)
   return previous + (alpha * (sample - previous));
 }
 
-static void AdcMonitor_UpdateCurrentZero(const uint16_t raw_current[MOTOR_ID_COUNT])
+static void AdcMonitor_ResetWindowAccumulators(void)
+{
+  adc_window_raw_count = 0UL;
+  adc_window_delta_count = 0UL;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    adc_window_raw_sum[i] = 0UL;
+    adc_window_delta_sum[i] = 0UL;
+    adc_window_delta_sq_sum[i] = 0ULL;
+    adc_window_delta_min[i] = 0U;
+    adc_window_delta_max[i] = 0U;
+  }
+}
+
+static void AdcMonitor_UpdateCurrentZero(const uint32_t raw_sum[MOTOR_ID_COUNT],
+                                         uint32_t sample_count)
 {
   if (ADC_MONITOR_CALIBRATION_ENABLED == 0U || current_zero_valid != 0U)
+  {
+    return;
+  }
+  if (sample_count == 0UL)
   {
     return;
   }
 
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    current_zero_sum[i] += raw_current[i];
+    current_zero_sum[i] += raw_sum[i];
   }
-  current_zero_sample_count++;
 
-  if (current_zero_sample_count >= ADC_MONITOR_CURRENT_ZERO_SAMPLES)
   {
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    uint32_t total_count = (uint32_t)current_zero_sample_count + sample_count;
+    if (total_count >= ADC_MONITOR_CURRENT_ZERO_SAMPLES)
     {
-      current_zero_raw[i] = (uint16_t)(current_zero_sum[i] / (uint32_t)current_zero_sample_count);
+      for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+      {
+        current_zero_raw[i] = (uint16_t)(current_zero_sum[i] / total_count);
+      }
+      current_zero_sample_count = ADC_MONITOR_CURRENT_ZERO_SAMPLES;
+      current_zero_valid = 1U;
     }
-    current_zero_valid = 1U;
+    else
+    {
+      current_zero_sample_count = (uint16_t)total_count;
+    }
   }
+}
+
+static void AdcMonitor_ComputeCurrentWindow(uint32_t delta_sum,
+                                            uint64_t delta_sq_sum,
+                                            uint16_t delta_min,
+                                            uint16_t delta_max,
+                                            uint32_t sample_count,
+                                            float *mean_a,
+                                            float *rms_a,
+                                            float *peak_a,
+                                            float *trimmed_a)
+{
+  float mean_delta;
+  float rms_delta;
+  float trimmed_delta;
+  uint32_t trimmed_sum;
+
+  if (sample_count == 0UL)
+  {
+    *mean_a = 0.0f;
+    *rms_a = 0.0f;
+    *peak_a = 0.0f;
+    *trimmed_a = 0.0f;
+    return;
+  }
+
+  mean_delta = (float)delta_sum / (float)sample_count;
+  rms_delta = AdcMonitor_Sqrtf((float)delta_sq_sum / (float)sample_count);
+  if (sample_count > 2UL)
+  {
+    trimmed_sum = delta_sum - (uint32_t)delta_min - (uint32_t)delta_max;
+    trimmed_delta = (float)trimmed_sum / (float)(sample_count - 2UL);
+  }
+  else
+  {
+    trimmed_delta = mean_delta;
+  }
+
+  *mean_a = AdcMonitor_RawDeltaToCurrentFloat(mean_delta);
+  *rms_a = AdcMonitor_RawDeltaToCurrentFloat(rms_delta);
+  *peak_a = AdcMonitor_RawDeltaToCurrentFloat((float)delta_max);
+  *trimmed_a = AdcMonitor_RawDeltaToCurrentFloat(trimmed_delta);
 }
 
 static float AdcMonitor_FilterCurrent(float previous, float sample)
@@ -103,9 +201,11 @@ void AdcMonitor_Init(void)
   }
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
+    adc_window_latest_raw[i] = 0U;
     current_zero_raw[i] = 0U;
     current_zero_sum[i] = 0U;
   }
+  AdcMonitor_ResetWindowAccumulators();
   adc_samples_ready = 0U;
   current_filter_initialized = 0U;
   battery_filter_initialized = 0U;
@@ -115,8 +215,8 @@ void AdcMonitor_Init(void)
                         (uint32_t *)adc_dma_buffer,
                         ADC_MONITOR_CHANNEL_COUNT) == HAL_OK)
   {
-    /* Diagnostic isolation: keep DMA sampling, bypass HT/TC callbacks. */
-    __HAL_DMA_DISABLE_IT(hadc1.DMA_Handle, DMA_IT_HT | DMA_IT_TC);
+    /* Keep TC enabled: HAL_ADC_ConvCpltCallback publishes ADC samples. */
+    __HAL_DMA_DISABLE_IT(hadc1.DMA_Handle, DMA_IT_HT);
     (void)HAL_TIM_Base_Start(&htim8);
   }
 }
@@ -124,12 +224,19 @@ void AdcMonitor_Init(void)
 void AdcMonitor_Update(void)
 {
   uint16_t raw_current[MOTOR_ID_COUNT];
+  uint32_t raw_sum[MOTOR_ID_COUNT];
+  uint32_t delta_sum[MOTOR_ID_COUNT];
+  uint64_t delta_sq_sum[MOTOR_ID_COUNT];
+  uint16_t delta_min[MOTOR_ID_COUNT];
+  uint16_t delta_max[MOTOR_ID_COUNT];
   uint16_t zero_raw[MOTOR_ID_COUNT];
   uint16_t raw_battery;
   adc_monitor_state_t next_state;
   float previous_current[MOTOR_ID_COUNT];
   float previous_battery;
   uint8_t samples_ready;
+  uint32_t raw_sample_count;
+  uint32_t delta_sample_count;
   uint8_t zero_valid;
   uint16_t zero_sample_count;
   uint8_t next_current_valid;
@@ -145,20 +252,28 @@ void AdcMonitor_Update(void)
   __disable_irq();
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    raw_current[i] = adc_sample_snapshot[current_adc_index[i]];
+    raw_current[i] = adc_window_latest_raw[i];
+    raw_sum[i] = adc_window_raw_sum[i];
+    delta_sum[i] = adc_window_delta_sum[i];
+    delta_sq_sum[i] = adc_window_delta_sq_sum[i];
+    delta_min[i] = adc_window_delta_min[i];
+    delta_max[i] = adc_window_delta_max[i];
     zero_raw[i] = current_zero_raw[i];
     previous_current[i] = adc_state.current_a[i];
   }
   raw_battery = adc_sample_snapshot[4];
   previous_battery = adc_state.battery_voltage;
   samples_ready = adc_samples_ready;
+  raw_sample_count = adc_window_raw_count;
+  delta_sample_count = adc_window_delta_count;
+  AdcMonitor_ResetWindowAccumulators();
   zero_valid = current_zero_valid;
   zero_sample_count = current_zero_sample_count;
   __set_PRIMASK(primask);
 
   if (samples_ready != 0U)
   {
-    AdcMonitor_UpdateCurrentZero(raw_current);
+    AdcMonitor_UpdateCurrentZero(raw_sum, raw_sample_count);
   }
 
   primask = __get_PRIMASK();
@@ -187,12 +302,33 @@ void AdcMonitor_Update(void)
 
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
-    float current = AdcMonitor_RawDeltaToCurrent(raw_current[i], zero_raw[i]);
+    float mean_current = 0.0f;
+    float rms_current = 0.0f;
+    float peak_current = 0.0f;
+    float trimmed_current = 0.0f;
+
     next_state.raw_current[i] = raw_current[i];
     next_state.current_zero_raw[i] = zero_raw[i];
-    if (next_current_valid != 0U)
+    if (next_current_valid != 0U && delta_sample_count != 0UL)
     {
-      next_state.current_a[i] = AdcMonitor_FilterCurrent(previous_current[i], current);
+      AdcMonitor_ComputeCurrentWindow(delta_sum[i],
+                                      delta_sq_sum[i],
+                                      delta_min[i],
+                                      delta_max[i],
+                                      delta_sample_count,
+                                      &mean_current,
+                                      &rms_current,
+                                      &peak_current,
+                                      &trimmed_current);
+      next_state.current_a[i] = AdcMonitor_FilterCurrent(previous_current[i], trimmed_current);
+      next_state.current_mean_a[i] = mean_current;
+      next_state.current_rms_a[i] = rms_current;
+      next_state.current_peak_a[i] = peak_current;
+      next_state.current_sample_count[i] = AdcMonitor_ClampU16(delta_sample_count);
+    }
+    else if (next_current_valid != 0U)
+    {
+      next_state.current_a[i] = previous_current[i];
     }
     else
     {
@@ -203,6 +339,10 @@ void AdcMonitor_Update(void)
     {
       next_state.raw_current[i] = 0U;
       next_state.current_a[i] = 0.0f;
+      next_state.current_mean_a[i] = 0.0f;
+      next_state.current_rms_a[i] = 0.0f;
+      next_state.current_peak_a[i] = 0.0f;
+      next_state.current_sample_count[i] = 0U;
     }
     else if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)
     {
@@ -233,6 +373,8 @@ void AdcMonitor_Update(void)
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
+  uint8_t zero_valid;
+
   if (hadc != &hadc1)
   {
     return;
@@ -241,6 +383,41 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
   for (uint8_t i = 0U; i < ADC_MONITOR_CHANNEL_COUNT; ++i)
   {
     adc_sample_snapshot[i] = adc_dma_buffer[i];
+  }
+  zero_valid = current_zero_valid;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    uint16_t raw = adc_dma_buffer[current_adc_index[i]];
+    adc_window_latest_raw[i] = raw;
+    adc_window_raw_sum[i] += raw;
+    if (zero_valid != 0U)
+    {
+      uint16_t zero_raw = current_zero_raw[i];
+      uint16_t delta = (raw >= zero_raw) ? (uint16_t)(raw - zero_raw) : (uint16_t)(zero_raw - raw);
+      adc_window_delta_sum[i] += delta;
+      adc_window_delta_sq_sum[i] += (uint64_t)delta * (uint64_t)delta;
+      if (adc_window_delta_count == 0UL)
+      {
+        adc_window_delta_min[i] = delta;
+        adc_window_delta_max[i] = delta;
+      }
+      else
+      {
+        if (delta < adc_window_delta_min[i])
+        {
+          adc_window_delta_min[i] = delta;
+        }
+        if (delta > adc_window_delta_max[i])
+        {
+          adc_window_delta_max[i] = delta;
+        }
+      }
+    }
+  }
+  adc_window_raw_count++;
+  if (zero_valid != 0U)
+  {
+    adc_window_delta_count++;
   }
   adc_samples_ready = 1U;
 }

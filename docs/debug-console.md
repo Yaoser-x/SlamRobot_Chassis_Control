@@ -58,6 +58,7 @@ log 1                          全字段（36 列），兼容旧行为
 log 1 imu                      仅时间戳 + IMU 14 列
 log 1 motor imu                时间戳 + motor(8 列) + imu(14 列)，按输入顺序
 log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
+log 1 motor adc adcraw         电机速度/PWM + 稳定电流 + ADC 窗口统计
 ```
 
 ### 3.2 可用字段
@@ -65,7 +66,8 @@ log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
 | 字段名 | 输出列 | 列数 | 数据来源 |
 | --- | --- | --- | --- |
 | `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisControl_GetState` |
-| `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `AdcMonitor_GetState` |
+| `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `AdcMonitor_GetState` 的慢速稳定电流，兼容旧 CSV |
+| `adcraw` | `m*_mean_ma, m*_rms_ma, m*_pk_ma, m*_n` | 16 | 最近 ADC 窗口的均值/RMS/峰值/样本数，用于电流校准 |
 | `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg` | 14 | `ImuBmi270_GetState` |
 | `errors` | `errors` | 1 | `SystemMonitor_GetState` |
 | `source` | `source` | 1 | `SystemMonitor_GetState` |

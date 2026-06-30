@@ -27,8 +27,8 @@ extern "C" {
  *
  * 默认两驱:
  *   M2 = 左侧，M3 = 右侧，M1/M4 禁用。
- *   V2.0 实板 M2: EN/PWM=PE11，PH/GPIO=PC7，nFAULT=PD14，ENC=PD12/PD13，IPROPI=PC2。
- *   V2.0 实板 M3: EN/PWM=PE13，PH/GPIO=PC8，nFAULT=PA3，ENC=PB4/PB5，IPROPI=PC1。
+ *   V2.0 实板 M2: EN/PWM=PE11，PH/GPIO=PC7，nFAULT=PD14，ENC=PD12/PD13，IPROPI=PC1。
+ *   V2.0 实板 M3: EN/PWM=PE13，PH/GPIO=PC8，nFAULT=PA3，ENC=PB4/PB5，IPROPI=PC2。
  *
  * 安全规则:
  *   左右两侧必须各至少启用一路电机；否则拒绝运动输出。
@@ -78,7 +78,7 @@ extern "C" {
 
 /* PWM 输出限制 */
 #define CHASSIS_PWM_MAX_PERMILLE            900
-#define CHASSIS_PWM_DEADBAND_PERMILLE       170
+#define CHASSIS_PWM_DEADBAND_PERMILLE       0
 #define MOTOR_DIRECTION_CHANGE_SETTLE_CYCLES 2U
 #define DRV8874_WAKE_DELAY_MS               2U
 
@@ -114,10 +114,13 @@ extern "C" {
 /* 电机电流参数 */
 #define MOTOR_CURRENT_SHUNT_OHM             0.1f
 #define MOTOR_CURRENT_ZERO_V                0.0f
-#define MOTOR_CURRENT_VOLTS_PER_AMP         0.1f
+#define MOTOR_CURRENT_VOLTS_PER_AMP         1.0f
 #define MOTOR_CURRENT_FILTER_ALPHA          0.25f
-#define MOTOR_CURRENT_LIMIT_A               0.8f
+#define MOTOR_CURRENT_LIMIT_A               0.0f
+#define MOTOR_ADC_OVERCURRENT_FAULT_ENABLED 0U
 #define MOTOR_OVERCURRENT_DEBOUNCE_COUNT    5U
+#define MOTOR_OVERCURRENT_STARTUP_BLANK_MS  200U
+#define MOTOR_OVERCURRENT_STARTUP_REARM_MS  200U
 
 /* 电机保护阈值 */
 #define MOTOR_RATED_CURRENT_A               0.65f
