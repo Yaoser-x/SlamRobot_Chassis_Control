@@ -35,6 +35,11 @@ void MotorDriver_Init(void)
 {
 }
 
+void MotorDriver_SetSpeedGetter(motor_speed_getter_t getter)
+{
+  (void)getter;
+}
+
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 {
   fake_signed_pwm[motor] = permille;
@@ -104,6 +109,15 @@ void ControlManager_ClearCommand(void)
 void EncoderDriver_GetState(encoder_state_t *state)
 {
   *state = fake_encoder_state;
+}
+
+float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
+{
+  if ((uint32_t)motor >= MOTOR_ID_COUNT)
+  {
+    return 0.0f;
+  }
+  return fake_encoder_state.speed_mps[(uint32_t)motor];
 }
 
 void AdcMonitor_GetState(adc_monitor_state_t *state)

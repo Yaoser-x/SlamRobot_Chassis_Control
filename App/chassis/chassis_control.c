@@ -108,6 +108,33 @@ static void ChassisControl_ResetPidTargets(void)
   chassis_state.right_feedback_lost = 0U;
 }
 
+static void ChassisControl_ScaleWheelTargets(float *left_mps, float *right_mps)
+{
+  float abs_left;
+  float abs_right;
+  float max_abs;
+
+  if (CHASSIS_WHEEL_SPEED_PROPORTIONAL_SCALE == 0U)
+  {
+    return;
+  }
+  if (left_mps == 0 || right_mps == 0)
+  {
+    return;
+  }
+
+  abs_left  = (*left_mps  < 0.0f) ? -*left_mps  : *left_mps;
+  abs_right = (*right_mps < 0.0f) ? -*right_mps : *right_mps;
+  max_abs = (abs_left > abs_right) ? abs_left : abs_right;
+
+  if (max_abs > CHASSIS_OPENLOOP_FULL_MPS)
+  {
+    float scale = CHASSIS_OPENLOOP_FULL_MPS / max_abs;
+    *left_mps  *= scale;
+    *right_mps *= scale;
+  }
+}
+
 static int16_t ChassisControl_MpsToPermille(float target_mps)
 {
   int32_t permille;
@@ -384,6 +411,7 @@ static void ChassisControl_StopOutput(void)
 void ChassisControl_Init(void)
 {
   MotorDriver_Init();
+  MotorDriver_SetSpeedGetter(EncoderDriver_GetMotorSpeedMps);
   ControlManager_Init();
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
@@ -511,11 +539,13 @@ void ChassisControl_Step(uint32_t now_ms)
     }
 
     ChassisControl_ResolveSideTargets(cmd.linear_x, cmd.angular_z, &req_left, &req_right);
+    ChassisControl_ScaleWheelTargets(&req_left, &req_right);
     ChassisControl_SetSideTargets(req_left, req_right, 1U);
 
     ramped_linear_x = ChassisControl_RampToward(ramped_linear_x, cmd.linear_x, linear_step);
     ramped_angular_z = ChassisControl_RampToward(ramped_angular_z, cmd.angular_z, angular_step);
     ChassisControl_ResolveSideTargets(ramped_linear_x, ramped_angular_z, &ramp_left, &ramp_right);
+    ChassisControl_ScaleWheelTargets(&ramp_left, &ramp_right);
     ChassisControl_SetSideTargets(ramp_left, ramp_right, 0U);
 
     if (req_left == 0.0f && req_right == 0.0f)

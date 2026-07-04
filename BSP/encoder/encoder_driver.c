@@ -126,18 +126,28 @@ void EncoderDriver_Update(uint32_t now_ms)
       {
         encoder_state.delta[i] = delta[i];
         encoder_state.count[i] += delta[i];
+        encoder_state.consecutive_anomalies[i] = 0U;
         EncoderMath_SpeedWindowPush(&speed_window[i], delta[i], dt_ms);
       }
       else
       {
         encoder_state.delta[i] = 0;
+        encoder_state.anomaly_count[i]++;
+        encoder_state.consecutive_anomalies[i]++;
       }
 
       encoder_state.speed_mps[i] = EncoderMath_CountDeltaSpeedMps(speed_window[i].delta_sum,
                                                                   speed_window[i].dt_sum_ms,
                                                                   counts_per_rev,
                                                                   CHASSIS_WHEEL_RADIUS_M);
-      encoder_state.speed_valid[i] = (speed_window[i].dt_sum_ms != 0U) ? 1U : 0U;
+      if (encoder_state.consecutive_anomalies[i] >= CHASSIS_ENCODER_MAX_CONSECUTIVE_ANOMALIES)
+      {
+        encoder_state.speed_valid[i] = 0U;
+      }
+      else
+      {
+        encoder_state.speed_valid[i] = (speed_window[i].dt_sum_ms != 0U) ? 1U : 0U;
+      }
     }
 
     if (ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)
@@ -206,4 +216,21 @@ void EncoderDriver_GetState(encoder_state_t *state)
   __disable_irq();
   *state = encoder_state;
   __set_PRIMASK(primask);
+}
+
+float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
+{
+  uint32_t primask;
+  float speed;
+
+  if ((uint32_t)motor >= MOTOR_ID_COUNT)
+  {
+    return 0.0f;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  speed = encoder_state.speed_mps[(uint32_t)motor];
+  __set_PRIMASK(primask);
+  return speed;
 }

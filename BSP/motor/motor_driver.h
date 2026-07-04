@@ -55,7 +55,10 @@ typedef struct
   uint32_t tim8_break_count;
 } motor_driver_state_t;
 
+typedef float (*motor_speed_getter_t)(motor_id_t motor);
+
 void MotorDriver_Init(void);
+void MotorDriver_SetSpeedGetter(motor_speed_getter_t getter);
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille);
 void MotorDriver_SetSidePermille(motor_side_t side, int16_t permille);
 void MotorDriver_Stop(motor_id_t motor, motor_stop_mode_t mode);

@@ -112,7 +112,7 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | USART3 | PD8 TX, PD9 RX | RPI | DMA1 Stream1 Circular | 是 | 上位机 (Raspberry Pi) 帧协议 |
 | UART4 | PC10 TX, PC11 RX | LINE | DMA1 Stream2 Circular | 是 | HiWonder 八路巡线传感器 |
 
-USART3 / ESP12F 共用同一上位机帧协议（`App/protocol/upper_protocol.h`）。ESP12F 额外支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
+USART3 / ESP12F 共用同一上位机帧协议（`App/protocol/upper_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
 
 ---
 

@@ -6,6 +6,7 @@
 #include "cmsis_os2.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
+#include "imu_bmi270.h"
 #include "line_control.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
@@ -33,6 +34,9 @@ static uint32_t upper_last_status_ms;
 static uint32_t upper_last_rx_timestamp_ms;
 static upper_uart_state_t upper_state;
 static uint8_t upper_parser_idle_cycles;
+static uint8_t upper_imu_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
+static uint8_t upper_imu_payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
+static uint32_t upper_last_imu_status_ms;
 
 #define UPPER_PARSER_TIMEOUT_CYCLES  20U  /* 20 × 5ms = 100ms 无字节则重置解析器 */
 
@@ -57,13 +61,24 @@ static void UpperUart_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t p
         .source = CONTROL_SOURCE_UPPER,
         .timestamp_ms = osKernelGetTickCount(),
       };
-      (void)velocity.mode;
+      (void)velocity.mode; /* reserved: control mode byte */
       ControlManager_SetCommand(&chassis_cmd);
     }
   }
   else if (cmd == UPPER_CMD_ESTOP && payload_len == UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN)
   {
     ControlManager_SetEmergencyStop(payload[0]);
+  }
+  else if (cmd == UPPER_CMD_LINE_CTRL && payload_len == UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN)
+  {
+    LineControl_Enable((payload[0] != 0U) ? 1U : 0U);
+  }
+  else if (cmd == UPPER_CMD_CLEAR_FAULT && payload_len == UPPER_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN)
+  {
+    if (ControlManager_IsEmergencyStop() == 0U)
+    {
+      SystemMonitor_ClearLatchedFaults(0xFFFFFFFFUL);
+    }
   }
 }
 
@@ -229,7 +244,15 @@ static void UpperUart_SendStatus(uint32_t now_ms)
     {
       status.motor_speed_valid_mask |= (uint8_t)(1U << i);
     }
+    if (encoder_state.anomaly_count[i] > 0U)
+    {
+      status.encoder_anomaly_mask |= (uint8_t)(1U << i);
+    }
   }
+
+  if (upper_state.rx_checksum_errors > 0U)  { status.comm_health_flags |= UPPER_COMM_HEALTH_CRC_ERR; }
+  if (upper_state.rx_timeout_resets > 0U)   { status.comm_health_flags |= UPPER_COMM_HEALTH_TIMEOUT; }
+  if (upper_state.tx_busy_drops > 0U)       { status.comm_health_flags |= UPPER_COMM_HEALTH_TX_DROP; }
 
   payload_len = UpperProtocol_BuildStatusPayload(&status, upper_status_payload, sizeof(upper_status_payload));
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_STATUS, upper_status_payload, payload_len, upper_tx_frame, sizeof(upper_tx_frame));
@@ -256,12 +279,58 @@ void UpperUart_Init(void)
   (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
 }
 
+static void UpperUart_SendImuStatus(uint32_t now_ms)
+{
+  imu_bmi270_state_t imu_state;
+  upper_imu_status_payload_t imu;
+  uint8_t payload_len;
+  uint16_t frame_len;
+
+  if ((now_ms - upper_last_imu_status_ms) < UPPER_IMU_STATUS_PERIOD_MS)
+  {
+    return;
+  }
+  upper_last_imu_status_ms = now_ms;
+
+  ImuBmi270_GetState(&imu_state);
+  if (imu_state.online == 0U)
+  {
+    return;
+  }
+
+  imu = (upper_imu_status_payload_t){0};
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    imu.accel_g[i] = imu_state.accel_g[i];
+    imu.gyro_corrected_dps[i] = imu_state.gyro_corrected_dps[i];
+  }
+  imu.euler_deg[0] = imu_state.roll_deg;
+  imu.euler_deg[1] = imu_state.pitch_deg;
+  imu.euler_deg[2] = imu_state.yaw_deg;
+  imu.timestamp_ms = now_ms;
+  if (imu_state.online != 0U)       { imu.status_flags |= UPPER_IMU_FLAG_ONLINE; }
+  if (imu_state.gyro_calibrated != 0U) { imu.status_flags |= UPPER_IMU_FLAG_CALIBRATED; }
+  if (imu_state.error_count > 0U)   { imu.status_flags |= UPPER_IMU_FLAG_ERROR; }
+  imu.temperature_c = (int8_t)((int32_t)imu_state.temperature_c - 40);
+
+  payload_len = UpperProtocol_BuildImuStatusPayload(&imu, upper_imu_payload, sizeof(upper_imu_payload));
+  frame_len = UpperProtocol_BuildFrame(UPPER_CMD_IMU_STATUS, upper_imu_payload, payload_len, upper_imu_tx_frame, sizeof(upper_imu_tx_frame));
+  if (frame_len > 0U)
+  {
+    if (HAL_UART_Transmit_DMA(&huart3, upper_imu_tx_frame, frame_len) != HAL_OK)
+    {
+      upper_state.tx_busy_drops++;
+    }
+  }
+}
+
 void UpperUart_Update(void)
 {
   uint32_t now_ms = osKernelGetTickCount();
 
   UpperUart_PollRx();
   UpperUart_SendStatus(now_ms);
+  UpperUart_SendImuStatus(now_ms);
 }
 
 void Task_UpperUart(void *argument)

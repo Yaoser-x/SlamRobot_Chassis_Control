@@ -151,7 +151,7 @@ static void test_status_v2_payload_layout_and_saturation(void)
   uint8_t payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN] = {0};
   uint8_t payload_len;
 
-  require_int(UPPER_PROTOCOL_STATUS_PAYLOAD_LEN == 64U, "status v2 payload length");
+  require_int(UPPER_PROTOCOL_STATUS_PAYLOAD_LEN == 65U, "status v2 payload length");
   require_int(UPPER_PROTOCOL_MAX_PAYLOAD >= UPPER_PROTOCOL_STATUS_PAYLOAD_LEN,
               "status v2 fits max payload");
 
@@ -184,6 +184,8 @@ static void test_status_v2_payload_layout_and_saturation(void)
   status.motor_output_permille[2] = 0;
   status.motor_output_permille[3] = 321;
   status.motor_speed_valid_mask = 0x0BU;
+  status.encoder_anomaly_mask = 0x05U;
+  status.comm_health_flags = UPPER_COMM_HEALTH_CRC_ERR | UPPER_COMM_HEALTH_TX_DROP;
 
   payload_len = UpperProtocol_BuildStatusPayload(&status, payload, (uint8_t)sizeof(payload));
   require_int(payload_len == UPPER_PROTOCOL_STATUS_PAYLOAD_LEN, "status v2 build length");
@@ -215,7 +217,8 @@ static void test_status_v2_payload_layout_and_saturation(void)
   require_int(read_i16_le(&payload[58]) == 0, "m3 pwm");
   require_int(read_i16_le(&payload[60]) == 321, "m4 pwm");
   require_int(payload[62] == 0x0BU, "speed valid mask");
-  require_int(payload[63] == 0U, "reserved byte");
+  require_int(payload[63] == 0x05U, "encoder anomaly mask");
+  require_int(payload[64] == (UPPER_COMM_HEALTH_CRC_ERR | UPPER_COMM_HEALTH_TX_DROP), "comm health flags");
 }
 
 static void test_control_priority_timeout_and_reject_stop(void)

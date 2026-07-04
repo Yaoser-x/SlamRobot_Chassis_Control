@@ -60,7 +60,7 @@ static void Esp12fComm_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t 
         .source = CONTROL_SOURCE_ESP12F,
         .timestamp_ms = osKernelGetTickCount(),
       };
-      (void)velocity.mode;
+      (void)velocity.mode; /* reserved: control mode byte */
       (void)ControlManager_SetCommand(&chassis_cmd);
     }
   }
@@ -71,6 +71,13 @@ static void Esp12fComm_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t 
   else if (cmd == UPPER_CMD_LINE_CTRL && payload_len == UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN)
   {
     LineControl_Enable((payload[0] != 0U) ? 1U : 0U);
+  }
+  else if (cmd == UPPER_CMD_CLEAR_FAULT && payload_len == UPPER_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN)
+  {
+    if (ControlManager_IsEmergencyStop() == 0U)
+    {
+      SystemMonitor_ClearLatchedFaults(0xFFFFFFFFUL);
+    }
   }
 }
 
@@ -198,7 +205,15 @@ static void Esp12fComm_SendStatus(uint32_t now_ms)
     {
       status.motor_speed_valid_mask |= (uint8_t)(1U << i);
     }
+    if (encoder_state.anomaly_count[i] > 0U)
+    {
+      status.encoder_anomaly_mask |= (uint8_t)(1U << i);
+    }
   }
+
+  if (esp12f_state.rx_checksum_errors > 0U)   { status.comm_health_flags |= UPPER_COMM_HEALTH_ESP_CRC; }
+  if (esp12f_state.rx_overflow_errors > 0U)    { status.comm_health_flags |= UPPER_COMM_HEALTH_ESP_TIMEOUT; }
+  if (esp12f_state.tx_busy_drops > 0U)         { status.comm_health_flags |= UPPER_COMM_HEALTH_ESP_TX_DROP; }
 
   payload_len = UpperProtocol_BuildStatusPayload(&status, esp12f_status_payload, sizeof(esp12f_status_payload));
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_STATUS, esp12f_status_payload, payload_len, esp12f_tx_frame, sizeof(esp12f_tx_frame));

@@ -228,7 +228,51 @@ uint8_t UpperProtocol_BuildStatusPayload(const upper_status_payload_t *status, u
     offset = (uint8_t)(offset + 2U);
   }
   out[offset++] = status->motor_speed_valid_mask;
-  out[offset] = 0U;
+  out[offset++] = status->encoder_anomaly_mask;
+  out[offset] = status->comm_health_flags;
 
   return UPPER_PROTOCOL_STATUS_PAYLOAD_LEN;
+}
+
+static void UpperProtocol_WriteFloat(uint8_t *out, float value)
+{
+  uint32_t raw;
+  (void)memcpy(&raw, &value, sizeof(raw));
+  UpperProtocol_WriteU32(out, raw);
+}
+
+uint8_t UpperProtocol_BuildImuStatusPayload(const upper_imu_status_payload_t *imu, uint8_t *out, uint8_t out_len)
+{
+  uint8_t offset = 0U;
+
+  if (imu == 0 || out == 0 || out_len < UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN)
+  {
+    return 0U;
+  }
+
+  out[offset++] = UPPER_PROTOCOL_VERSION;
+
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    UpperProtocol_WriteFloat(&out[offset], imu->accel_g[i]);
+    offset = (uint8_t)(offset + 4U);
+  }
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    UpperProtocol_WriteFloat(&out[offset], imu->gyro_corrected_dps[i]);
+    offset = (uint8_t)(offset + 4U);
+  }
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    UpperProtocol_WriteFloat(&out[offset], imu->euler_deg[i]);
+    offset = (uint8_t)(offset + 4U);
+  }
+
+  UpperProtocol_WriteU32(&out[offset], imu->timestamp_ms);
+  offset = (uint8_t)(offset + 4U);
+
+  out[offset++] = imu->status_flags;
+  out[offset] = (uint8_t)((int8_t)imu->temperature_c);
+
+  return UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN;
 }

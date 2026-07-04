@@ -37,14 +37,23 @@ extern "C" {
 #define LINE_DETECT_THRESHOLD_COUNT         1U
 #define UPPER_UART_TASK_PERIOD_MS           5U
 #define UPPER_UART_STATUS_PERIOD_MS         50U
+#define UPPER_IMU_STATUS_PERIOD_MS          20U
 #define ESP12F_STATUS_PERIOD_MS             100U
 
-#define CHASSIS_CMD_TIMEOUT_MS              500U  /* 默认超时；control_manager 已按源独立配置 */
+#define CHASSIS_CMD_TIMEOUT_MS              500U  /* @deprecated 已迁移至下方 CONTROL_TIMEOUT_* 按源独立配置，保留兼容 */
+
+/* 控制源独立超时 (ms) */
+#define CONTROL_TIMEOUT_UPPER_MS            200U
+#define CONTROL_TIMEOUT_PS2_MS              500U
+#define CONTROL_TIMEOUT_ESP12F_MS           500U
+#define CONTROL_TIMEOUT_LINE_MS             50U
+#define CONTROL_TIMEOUT_DEBUG_MS            2000U
 
 #define CHASSIS_MAX_LINEAR_MPS              0.5f
 #define CHASSIS_MAX_ANGULAR_RPS             10.0f
 #define CHASSIS_OPENLOOP_FULL_MPS           0.5f
 #define CHASSIS_ANGULAR_EPSILON_RPS         0.0001f
+#define CHASSIS_WHEEL_SPEED_PROPORTIONAL_SCALE 1U
 
 /* PS2 手柄调参 */
 #define PS2_LINEAR_MAX_MPS                  CHASSIS_MAX_LINEAR_MPS

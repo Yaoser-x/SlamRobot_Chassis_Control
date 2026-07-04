@@ -15,6 +15,8 @@ typedef struct
   int32_t delta[MOTOR_ID_COUNT];
   float speed_mps[MOTOR_ID_COUNT];
   uint8_t speed_valid[MOTOR_ID_COUNT];
+  uint16_t anomaly_count[MOTOR_ID_COUNT];
+  uint8_t consecutive_anomalies[MOTOR_ID_COUNT];
   int32_t left_count;
   int32_t right_count;
   int32_t left_delta;
@@ -31,6 +33,7 @@ void EncoderDriver_Init(void);
 void EncoderDriver_Update(uint32_t now_ms);
 void EncoderDriver_GetState(encoder_state_t *state);
 float EncoderDriver_GetCountsPerRev(void);
+float EncoderDriver_GetMotorSpeedMps(motor_id_t motor);
 int32_t EncoderDriver_DiffCount(uint32_t now, uint32_t last, uint32_t period);
 
 #ifdef __cplusplus

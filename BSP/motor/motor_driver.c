@@ -31,6 +31,13 @@ typedef struct
 #define MOTOR_REVERSE_BRAKE_CYCLES    2U
 #define MOTOR_PHASE_SWITCH_GAP_CALLS  MOTOR_ID_COUNT
 
+static motor_speed_getter_t g_speed_getter;
+
+void MotorDriver_SetSpeedGetter(motor_speed_getter_t getter)
+{
+  g_speed_getter = getter;
+}
+
 /* CubeMX labels keep legacy M2/M3 names; logical M2/M3 nFAULT pins are crossed here. */
 static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
   { &htim1, TIM_CHANNEL_1, M1_IN2_GPIO_Port, M1_IN2_Pin, M1_FAULT_GPIO_Port, M1_FAULT_Pin },
@@ -331,7 +338,7 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
     if (runtime->applied_pwm == 0)
     {
       runtime->phase = MOTOR_DRIVER_PHASE_REVERSE_BRAKE;
-      runtime->wait_cycles = MOTOR_REVERSE_BRAKE_CYCLES;
+      runtime->wait_cycles = (g_speed_getter != 0) ? MOTOR_REVERSE_MAX_BRAKE_CYCLES : MOTOR_REVERSE_BRAKE_CYCLES;
     }
     else
     {
@@ -348,7 +355,17 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 
     if (runtime->phase == MOTOR_DRIVER_PHASE_REVERSE_BRAKE)
     {
-      if (runtime->wait_cycles > 1U)
+      uint8_t ready_to_reverse = 0U;
+      if (g_speed_getter != 0)
+      {
+        float speed = g_speed_getter(motor);
+        float abs_speed = (speed < 0.0f) ? -speed : speed;
+        if (abs_speed < MOTOR_REVERSE_SPEED_THRESHOLD_MPS)
+        {
+          ready_to_reverse = 1U;
+        }
+      }
+      if (ready_to_reverse == 0U && runtime->wait_cycles > 1U)
       {
         runtime->wait_cycles--;
       }
