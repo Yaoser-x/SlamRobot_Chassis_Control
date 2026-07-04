@@ -205,7 +205,7 @@ static const char *const log_field_headers[LOG_FLD_COUNT] = {
   "m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm",
   "vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma",
   "m1_mean_ma,m1_rms_ma,m1_pk_ma,m1_n,m2_mean_ma,m2_rms_ma,m2_pk_ma,m2_n,m3_mean_ma,m3_rms_ma,m3_pk_ma,m3_n,m4_mean_ma,m4_rms_ma,m4_pk_ma,m4_n",
-  "imu_online,imu_chip,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg",
+  "imu_online,imu_chip,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg,imu_stime,imu_qw_milli,imu_qx_milli,imu_qy_milli,imu_qz_milli,imu_quality",
   "errors",
   "source",
   "ps2_ok,ps2_fail",
@@ -332,20 +332,26 @@ static size_t DebugConsole_WriteFieldData(char *tx,
     case LOG_FLD_IMU:
       ImuBmi270_GetState(&imu);
       pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
-        "%u,%u,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld",
+        "%u,%u,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%lu,%ld,%ld,%ld,%ld,%lu",
         imu.online, imu.chip_id,
-        (long)DebugConsole_Milli(imu.accel_g[0]),
-        (long)DebugConsole_Milli(imu.accel_g[1]),
-        (long)DebugConsole_Milli(imu.accel_g[2]),
-        (long)DebugConsole_Milli(imu.gyro_corrected_dps[0]),
-        (long)DebugConsole_Milli(imu.gyro_corrected_dps[1]),
-        (long)DebugConsole_Milli(imu.gyro_corrected_dps[2]),
+        (long)DebugConsole_Milli(imu.body_accel_g[0]),
+        (long)DebugConsole_Milli(imu.body_accel_g[1]),
+        (long)DebugConsole_Milli(imu.body_accel_g[2]),
+        (long)DebugConsole_Milli(imu.body_gyro_dps[0]),
+        (long)DebugConsole_Milli(imu.body_gyro_dps[1]),
+        (long)DebugConsole_Milli(imu.body_gyro_dps[2]),
         (long)DebugConsole_Milli(imu.gyro_filtered_dps[0]),
         (long)DebugConsole_Milli(imu.gyro_filtered_dps[1]),
         (long)DebugConsole_Milli(imu.gyro_filtered_dps[2]),
         (long)DebugConsole_Milli(imu.roll_deg),
         (long)DebugConsole_Milli(imu.pitch_deg),
-        (long)DebugConsole_Milli(imu.yaw_deg));
+        (long)DebugConsole_Milli(imu.yaw_deg),
+        (unsigned long)imu.sensor_time,
+        (long)DebugConsole_Milli(imu.quaternion[0]),
+        (long)DebugConsole_Milli(imu.quaternion[1]),
+        (long)DebugConsole_Milli(imu.quaternion[2]),
+        (long)DebugConsole_Milli(imu.quaternion[3]),
+        (unsigned long)imu.quality_flags);
       break;
 
     case LOG_FLD_ERRORS:
@@ -547,7 +553,7 @@ static void DebugConsole_PrintEspFlashStatus(void)
 
 static void DebugConsole_PrintHeader(void)
 {
-  DebugConsole_Write("t_ms,m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm,vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma,imu_online,imu_chip,errors,source,ps2_ok,ps2_fail,line_bytes,line_frames,esp_rx,esp_tx,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg\r\n");
+  DebugConsole_Write("t_ms,m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm,vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma,imu_online,imu_chip,errors,source,ps2_ok,ps2_fail,line_bytes,line_frames,esp_rx,esp_tx,imu_acc_x_mg,imu_acc_y_mg,imu_acc_z_mg,imu_gyro_corr_x_mdps,imu_gyro_corr_y_mdps,imu_gyro_corr_z_mdps,imu_gyro_filt_x_mdps,imu_gyro_filt_y_mdps,imu_gyro_filt_z_mdps,imu_roll_mdeg,imu_pitch_mdeg,imu_yaw_mdeg,imu_stime,imu_qw_milli,imu_qx_milli,imu_qy_milli,imu_qz_milli,imu_quality\r\n");
 }
 
 static void DebugConsole_PrintStatus(void)
@@ -588,6 +594,30 @@ static void DebugConsole_PrintStatus(void)
                  (unsigned long)encoder_hw_count[MOTOR_ID_M2],
                  (unsigned long)encoder_hw_count[MOTOR_ID_M3],
                  (unsigned long)encoder_hw_count[MOTOR_ID_M4]);
+  DebugConsole_Write(tx);
+
+  (void)snprintf(tx, sizeof(tx),
+                 "BMI270 profile=%u init=%u stime=%lu valid=%u samples=%lu drdy=%lu poll=%lu q_milli=%ld,%ld,%ld,%ld quality=0x%08lX latched=0x%08lX qcnt=%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+                 imu_state.profile,
+                 imu_state.init_state,
+                 (unsigned long)imu_state.sensor_time,
+                 imu_state.sensor_time_valid,
+                 (unsigned long)imu_state.sample_count,
+                 (unsigned long)imu_state.drdy_count,
+                 (unsigned long)imu_state.poll_fallback_count,
+                 (long)DebugConsole_Milli(imu_state.quaternion[0]),
+                 (long)DebugConsole_Milli(imu_state.quaternion[1]),
+                 (long)DebugConsole_Milli(imu_state.quaternion[2]),
+                 (long)DebugConsole_Milli(imu_state.quaternion[3]),
+                 (unsigned long)imu_state.quality_flags,
+                 (unsigned long)imu_state.quality_latched_flags,
+                 (unsigned long)imu_state.spi_error_count,
+                 (unsigned long)imu_state.init_failure_count,
+                 (unsigned long)imu_state.fifo_overflow_count,
+                 (unsigned long)imu_state.timestamp_error_count,
+                 (unsigned long)imu_state.gyro_saturation_count,
+                 (unsigned long)imu_state.accel_anomaly_count,
+                 (unsigned long)imu_state.attitude_invalid_count);
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
@@ -721,7 +751,7 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
   Esp12fComm_GetState(&esp_state);
 
   (void)snprintf(tx, sizeof(tx),
-                 "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld\r\n",
+                 "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%lu,%ld,%ld,%ld,%ld,%lu\r\n",
                  (unsigned long)now_ms,
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M1]),
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M2]),
@@ -746,18 +776,24 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
                  (unsigned long)line_state.rx_frames,
                  (unsigned long)esp_state.rx_frames,
                  (unsigned long)esp_state.tx_frames,
-                 (long)DebugConsole_Milli(imu_state.accel_g[0]),
-                 (long)DebugConsole_Milli(imu_state.accel_g[1]),
-                 (long)DebugConsole_Milli(imu_state.accel_g[2]),
-                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[0]),
-                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[1]),
-                 (long)DebugConsole_Milli(imu_state.gyro_corrected_dps[2]),
+                 (long)DebugConsole_Milli(imu_state.body_accel_g[0]),
+                 (long)DebugConsole_Milli(imu_state.body_accel_g[1]),
+                 (long)DebugConsole_Milli(imu_state.body_accel_g[2]),
+                 (long)DebugConsole_Milli(imu_state.body_gyro_dps[0]),
+                 (long)DebugConsole_Milli(imu_state.body_gyro_dps[1]),
+                 (long)DebugConsole_Milli(imu_state.body_gyro_dps[2]),
                  (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[0]),
                  (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[1]),
                  (long)DebugConsole_Milli(imu_state.gyro_filtered_dps[2]),
                  (long)DebugConsole_Milli(imu_state.roll_deg),
                  (long)DebugConsole_Milli(imu_state.pitch_deg),
-                 (long)DebugConsole_Milli(imu_state.yaw_deg));
+                 (long)DebugConsole_Milli(imu_state.yaw_deg),
+                 (unsigned long)imu_state.sensor_time,
+                 (long)DebugConsole_Milli(imu_state.quaternion[0]),
+                 (long)DebugConsole_Milli(imu_state.quaternion[1]),
+                 (long)DebugConsole_Milli(imu_state.quaternion[2]),
+                 (long)DebugConsole_Milli(imu_state.quaternion[3]),
+                 (unsigned long)imu_state.quality_flags);
   DebugConsole_Write(tx);
 }
 

@@ -267,9 +267,25 @@ uint8_t UpperProtocol_BuildImuStatusPayload(const upper_imu_status_payload_t *im
     UpperProtocol_WriteFloat(&out[offset], imu->euler_deg[i]);
     offset = (uint8_t)(offset + 4U);
   }
+  for (uint8_t i = 0U; i < 4U; ++i)
+  {
+    UpperProtocol_WriteFloat(&out[offset], imu->quaternion[i]);
+    offset = (uint8_t)(offset + 4U);
+  }
 
   UpperProtocol_WriteU32(&out[offset], imu->timestamp_ms);
   offset = (uint8_t)(offset + 4U);
+  UpperProtocol_WriteU32(&out[offset], imu->sensor_time);
+  offset = (uint8_t)(offset + 4U);
+  UpperProtocol_WriteU32(&out[offset], imu->sample_count);
+  offset = (uint8_t)(offset + 4U);
+  UpperProtocol_WriteU32(&out[offset], imu->quality_flags);
+  offset = (uint8_t)(offset + 4U);
+  for (uint8_t i = 0U; i < 7U; ++i)
+  {
+    UpperProtocol_WriteU32(&out[offset], imu->quality_counters[i]);
+    offset = (uint8_t)(offset + 4U);
+  }
 
   out[offset++] = imu->status_flags;
   out[offset] = (uint8_t)((int8_t)imu->temperature_c);

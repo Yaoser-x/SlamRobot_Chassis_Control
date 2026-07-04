@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define CHASSIS_IMU_TASK_FLAG_DRDY (1UL << 0)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

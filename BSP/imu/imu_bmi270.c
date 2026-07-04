@@ -1,6 +1,10 @@
 #include "imu_bmi270.h"
 
+#include "imu_bmi270_calibration.h"
 #include "imu_bmi270_config.h"
+#include "imu_bmi270_fifo.h"
+#include "imu_bmi270_math.h"
+#include "imu_bmi270_time.h"
 #include "main.h"
 #include "spi.h"
 
@@ -10,11 +14,21 @@
 #define BMI270_REG_CHIP_ID       0x00U
 #define BMI270_REG_ERR_REG       0x02U
 #define BMI270_REG_DATA_8        0x0CU
+#define BMI270_REG_SENSORTIME_0  0x18U
 #define BMI270_REG_INTERNAL_STATUS 0x21U
+#define BMI270_REG_FIFO_LENGTH_0 0x24U
+#define BMI270_REG_FIFO_DATA     0x26U
 #define BMI270_REG_ACC_CONF      0x40U
 #define BMI270_REG_ACC_RANGE     0x41U
 #define BMI270_REG_GYR_CONF      0x42U
 #define BMI270_REG_GYR_RANGE     0x43U
+#define BMI270_REG_FIFO_DOWNS    0x45U
+#define BMI270_REG_FIFO_WTM_0    0x46U
+#define BMI270_REG_FIFO_WTM_1    0x47U
+#define BMI270_REG_FIFO_CONFIG_0 0x48U
+#define BMI270_REG_FIFO_CONFIG_1 0x49U
+#define BMI270_REG_INT1_IO_CTRL  0x53U
+#define BMI270_REG_INT_MAP_DATA  0x58U
 #define BMI270_REG_INIT_CTRL     0x59U
 #define BMI270_REG_INIT_ADDR_0   0x5BU
 #define BMI270_REG_INIT_ADDR_1   0x5CU
@@ -31,23 +45,21 @@
 #define BMI270_INIT_TIMEOUT_MS   25U
 #define BMI270_INIT_RETRY_MS     1000U
 #define BMI270_CONFIG_CHUNK_SIZE 32U
+#define BMI270_FIFO_READ_MAX_BYTES 128U
+#define BMI270_FIFO_MAX_SAMPLES 8U
 #define BMI270_INTERNAL_STATUS_MSG_MASK 0x0FU
 #define BMI270_INTERNAL_STATUS_INIT_OK 0x01U
 #define BMI270_INIT_CTRL_PREPARE 0x00U
 #define BMI270_INIT_CTRL_COMPLETE 0x01U
-#define BMI270_PWR_CONF_APS_OFF  0x00U
-#define BMI270_PWR_CTRL_ACC_GYR_TEMP_ON 0x0EU
-#define BMI270_ACC_CONF_100HZ_PERF 0xA8U
-#define BMI270_ACC_RANGE_2G      0x00U
-#define BMI270_GYR_CONF_100HZ_NOISE_PERF 0xE8U
-#define BMI270_GYR_RANGE_500DPS  0x02U
 #define BMI270_ACCEL_LSB_PER_G   16384.0f
 #define BMI270_GYRO_LSB_PER_DPS  65.6f
 #define BMI270_ACCEL_FILTER_ALPHA 0.20f
 #define BMI270_GYRO_FILTER_ALPHA 0.20f
-#define BMI270_ATTITUDE_FILTER_ALPHA 0.02f
 #define BMI270_ATTITUDE_MAX_DT_S 0.100f
-#define BMI270_RAD_TO_DEG        57.2957795f
+#define BMI270_DIRECT_FALLBACK_DT_S 0.010f
+#define BMI270_GYRO_SATURATION_DPS 490.0f
+#define BMI270_ACCEL_REJECT_MIN_G 0.40f
+#define BMI270_ACCEL_REJECT_MAX_G 1.80f
 #define BMI270_GYRO_CAL_DEFAULT_SAMPLES 500U
 #define BMI270_GYRO_CAL_MIN_SAMPLES 50U
 #define BMI270_GYRO_CAL_MAX_SAMPLES 2000U
@@ -57,6 +69,10 @@
 
 static imu_bmi270_state_t imu_state;
 static uint32_t imu_next_init_retry_ms;
+static imu_bmi270_profile_id_t imu_selected_profile = IMU_BMI270_PROFILE_PERFORMANCE;
+static imu_bmi270_calibration_t imu_calibration;
+static imu_bmi270_mahony_t imu_fusion;
+static imu_bmi270_mahony_params_t imu_fusion_params;
 
 static void ImuBmi270_CsLow(void)
 {
@@ -96,14 +112,6 @@ static float ImuBmi270_WrapAngleDeg(float angle_deg)
   return angle_deg;
 }
 
-static void ImuBmi270_AccelEulerDeg(const float accel_g[3], float *roll_deg, float *pitch_deg)
-{
-  *roll_deg = atan2f(accel_g[1], accel_g[2]) * BMI270_RAD_TO_DEG;
-  *pitch_deg = atan2f(-accel_g[0],
-                      sqrtf((accel_g[1] * accel_g[1]) + (accel_g[2] * accel_g[2]))) *
-               BMI270_RAD_TO_DEG;
-}
-
 static void ImuBmi270_SetError(uint8_t error)
 {
   uint32_t primask = __get_PRIMASK();
@@ -113,8 +121,76 @@ static void ImuBmi270_SetError(uint8_t error)
   if (error != IMU_BMI270_ERROR_NONE)
   {
     imu_state.error_count++;
+    if (error == IMU_BMI270_ERROR_SPI)
+    {
+      imu_state.quality_flags |= IMU_BMI270_QUALITY_SPI_ERROR;
+      imu_state.quality_latched_flags |= IMU_BMI270_QUALITY_SPI_ERROR;
+      imu_state.spi_error_count++;
+    }
+    else if (error == IMU_BMI270_ERROR_CONFIG || error == IMU_BMI270_ERROR_CHIP_ID)
+    {
+      imu_state.quality_flags |= IMU_BMI270_QUALITY_INIT_FAILED;
+      imu_state.quality_latched_flags |= IMU_BMI270_QUALITY_INIT_FAILED;
+      imu_state.init_failure_count++;
+    }
+    else if (error == IMU_BMI270_ERROR_FIFO)
+    {
+      imu_state.quality_flags |= IMU_BMI270_QUALITY_FIFO_OVERFLOW;
+      imu_state.quality_latched_flags |= IMU_BMI270_QUALITY_FIFO_OVERFLOW;
+      imu_state.fifo_overflow_count++;
+    }
+    else if (error == IMU_BMI270_ERROR_TIMESTAMP)
+    {
+      imu_state.quality_flags |= IMU_BMI270_QUALITY_TIMESTAMP_ERROR;
+      imu_state.quality_latched_flags |= IMU_BMI270_QUALITY_TIMESTAMP_ERROR;
+      imu_state.timestamp_error_count++;
+    }
+    else if (error == IMU_BMI270_ERROR_PROFILE_VERIFY)
+    {
+      imu_state.quality_flags |= IMU_BMI270_QUALITY_PROFILE_MISMATCH;
+      imu_state.quality_latched_flags |= IMU_BMI270_QUALITY_PROFILE_MISMATCH;
+    }
   }
   __set_PRIMASK(primask);
+}
+
+static void ImuBmi270_SetQuality(uint32_t flags)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  imu_state.quality_flags |= flags;
+  imu_state.quality_latched_flags |= flags;
+  if ((flags & IMU_BMI270_QUALITY_GYRO_SATURATION) != 0UL)
+  {
+    imu_state.gyro_saturation_count++;
+  }
+  if ((flags & IMU_BMI270_QUALITY_ACCEL_ANOMALY) != 0UL)
+  {
+    imu_state.accel_anomaly_count++;
+  }
+  if ((flags & IMU_BMI270_QUALITY_ATTITUDE_INVALID) != 0UL)
+  {
+    imu_state.attitude_invalid_count++;
+  }
+  if ((flags & IMU_BMI270_QUALITY_POLL_FALLBACK) != 0UL)
+  {
+    imu_state.poll_fallback_count++;
+  }
+  __set_PRIMASK(primask);
+}
+
+static void ImuBmi270_ClearTransientQuality(void)
+{
+  imu_state.quality_flags &= ~(IMU_BMI270_QUALITY_SPI_ERROR |
+                               IMU_BMI270_QUALITY_INIT_FAILED |
+                               IMU_BMI270_QUALITY_FIFO_OVERFLOW |
+                               IMU_BMI270_QUALITY_TIMESTAMP_ERROR |
+                               IMU_BMI270_QUALITY_GYRO_SATURATION |
+                               IMU_BMI270_QUALITY_ACCEL_ANOMALY |
+                               IMU_BMI270_QUALITY_ATTITUDE_INVALID |
+                               IMU_BMI270_QUALITY_POLL_FALLBACK |
+                               IMU_BMI270_QUALITY_PROFILE_MISMATCH);
 }
 
 static HAL_StatusTypeDef ImuBmi270_ReadRegRaw(uint8_t reg, uint8_t rx[3])
@@ -253,10 +329,10 @@ static uint8_t ImuBmi270_ReadBytes(uint8_t reg, uint8_t *data, uint8_t len)
 {
   HAL_StatusTypeDef status;
   uint8_t addr = (uint8_t)(reg | BMI270_READ_BIT);
-  uint8_t rx[BMI270_CONFIG_CHUNK_SIZE + 2U] = {0U};
-  uint8_t tx[BMI270_CONFIG_CHUNK_SIZE + 2U] = {0U};
+  uint8_t rx[BMI270_FIFO_READ_MAX_BYTES + 2U] = {0U};
+  uint8_t tx[BMI270_FIFO_READ_MAX_BYTES + 2U] = {0U};
 
-  if (data == 0 || len == 0U || len > BMI270_CONFIG_CHUNK_SIZE)
+  if (data == 0 || len == 0U || len > BMI270_FIFO_READ_MAX_BYTES)
   {
     return 0U;
   }
@@ -297,6 +373,40 @@ static uint8_t ImuBmi270_ReadRawFrame(int16_t accel_raw[3], int16_t gyro_raw[3])
   gyro_raw[0] = ImuBmi270_ReadI16(&data[6]);
   gyro_raw[1] = ImuBmi270_ReadI16(&data[8]);
   gyro_raw[2] = ImuBmi270_ReadI16(&data[10]);
+  return 1U;
+}
+
+static uint8_t ImuBmi270_ReadSensorTime(uint32_t *sensor_time)
+{
+  uint8_t data[3];
+
+  if (sensor_time == 0)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_ReadBytes(BMI270_REG_SENSORTIME_0, data, sizeof(data)) == 0U)
+  {
+    return 0U;
+  }
+
+  *sensor_time = ((uint32_t)data[0]) | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16);
+  return 1U;
+}
+
+static uint8_t ImuBmi270_ReadFifoLength(uint16_t *fifo_len)
+{
+  uint8_t data[2];
+
+  if (fifo_len == 0)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_ReadBytes(BMI270_REG_FIFO_LENGTH_0, data, sizeof(data)) == 0U)
+  {
+    return 0U;
+  }
+
+  *fifo_len = (uint16_t)((((uint16_t)data[1] & 0x3FU) << 8) | data[0]);
   return 1U;
 }
 
@@ -417,17 +527,124 @@ static uint8_t ImuBmi270_WaitInitOk(void)
   return 0U;
 }
 
+static uint8_t ImuBmi270_ApplyProfile(const imu_bmi270_profile_t *profile)
+{
+  imu_bmi270_profile_check_t check;
+
+  if (profile == 0)
+  {
+    return 0U;
+  }
+
+  if (ImuBmi270_WriteReg(BMI270_REG_PWR_CONF, profile->pwr_conf) == 0U)
+  {
+    return 0U;
+  }
+  HAL_Delay(BMI270_SPI_SELECT_DELAY_MS);
+  if (ImuBmi270_WriteReg(BMI270_REG_ACC_CONF, profile->acc_conf) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_ACC_RANGE, profile->acc_range) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_GYR_CONF, profile->gyr_conf) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_GYR_RANGE, profile->gyr_range) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_FIFO_DOWNS, profile->fifo_downs) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_FIFO_WTM_0, profile->fifo_wtm_0) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_FIFO_WTM_1, profile->fifo_wtm_1) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_FIFO_CONFIG_0, profile->fifo_config_0) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_FIFO_CONFIG_1, profile->fifo_config_1) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_INT1_IO_CTRL, profile->int1_io_ctrl) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_INT_MAP_DATA, profile->int_map_data) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270_WriteReg(BMI270_REG_PWR_CTRL, profile->pwr_ctrl) == 0U)
+  {
+    return 0U;
+  }
+  HAL_Delay(2U);
+
+  memset(&check, 0, sizeof(check));
+  if (ImuBmi270_ReadReg(BMI270_REG_ACC_CONF, &check.acc_conf) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_ACC_RANGE, &check.acc_range) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_GYR_CONF, &check.gyr_conf) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_GYR_RANGE, &check.gyr_range) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_PWR_CONF, &check.pwr_conf) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_PWR_CTRL, &check.pwr_ctrl) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_FIFO_CONFIG_0, &check.fifo_config_0) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_FIFO_CONFIG_1, &check.fifo_config_1) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_INT1_IO_CTRL, &check.int1_io_ctrl) == 0U ||
+      ImuBmi270_ReadReg(BMI270_REG_INT_MAP_DATA, &check.int_map_data) == 0U)
+  {
+    return 0U;
+  }
+
+  if (ImuBmi270Profile_Check(profile, &check) == 0U)
+  {
+    ImuBmi270_SetError(IMU_BMI270_ERROR_PROFILE_VERIFY);
+    return 0U;
+  }
+  return 1U;
+}
+
 void ImuBmi270_Init(void)
 {
   imu_state = (imu_bmi270_state_t){0};
   imu_state.enabled = 1U;
+  imu_state.profile = (uint8_t)imu_selected_profile;
+  imu_state.init_state = IMU_BMI270_INIT_STATE_RESET;
+  imu_state.quaternion[0] = 1.0f;
   imu_next_init_retry_ms = 0U;
+  (void)ImuBmi270Calibration_Load(&imu_calibration);
+  imu_fusion_params = ImuBmi270Mahony_DefaultParams();
+  ImuBmi270Mahony_Init(&imu_fusion);
   ImuBmi270_CsHigh();
 }
 
 uint8_t ImuBmi270_SetEnabled(uint8_t enabled)
 {
   imu_state.enabled = (enabled != 0U) ? 1U : 0U;
+  imu_state.init_state = (enabled != 0U) ? imu_state.init_state : IMU_BMI270_INIT_STATE_DISABLED;
+  return 1U;
+}
+
+uint8_t ImuBmi270_SetProfile(imu_bmi270_profile_id_t profile)
+{
+  if (ImuBmi270Profile_Get(profile) == 0)
+  {
+    return 0U;
+  }
+  imu_selected_profile = profile;
+  imu_state.profile = (uint8_t)profile;
+  imu_state.online = 0U;
+  imu_state.filter_initialized = 0U;
   return 1U;
 }
 
@@ -458,6 +675,9 @@ uint8_t ImuBmi270_ProbeNow(void)
 
 uint8_t ImuBmi270_ConfigNow(void)
 {
+  const imu_bmi270_profile_t *profile = ImuBmi270Profile_Get(imu_selected_profile);
+
+  imu_state.init_state = IMU_BMI270_INIT_STATE_PROBE;
   if (ImuBmi270_WriteReg(BMI270_REG_CMD, BMI270_CMD_SOFT_RESET) == 0U)
   {
     return 0U;
@@ -468,11 +688,13 @@ uint8_t ImuBmi270_ConfigNow(void)
     return 0U;
   }
 
-  if (ImuBmi270_WriteReg(BMI270_REG_PWR_CONF, BMI270_PWR_CONF_APS_OFF) == 0U)
+  if (ImuBmi270_WriteReg(BMI270_REG_PWR_CONF, profile->pwr_conf) == 0U)
   {
     return 0U;
   }
   HAL_Delay(BMI270_SPI_SELECT_DELAY_MS);
+
+  imu_state.init_state = IMU_BMI270_INIT_STATE_LOAD_CONFIG;
   if (ImuBmi270_LoadConfigFile() == 0U)
   {
     return 0U;
@@ -481,79 +703,103 @@ uint8_t ImuBmi270_ConfigNow(void)
   {
     return 0U;
   }
-  if (ImuBmi270_WriteReg(BMI270_REG_ACC_CONF, BMI270_ACC_CONF_100HZ_PERF) == 0U)
+  imu_state.init_state = IMU_BMI270_INIT_STATE_VERIFY_PROFILE;
+  if (ImuBmi270_ApplyProfile(profile) == 0U)
   {
     return 0U;
   }
-  if (ImuBmi270_WriteReg(BMI270_REG_ACC_RANGE, BMI270_ACC_RANGE_2G) == 0U)
-  {
-    return 0U;
-  }
-  if (ImuBmi270_WriteReg(BMI270_REG_GYR_CONF, BMI270_GYR_CONF_100HZ_NOISE_PERF) == 0U)
-  {
-    return 0U;
-  }
-  if (ImuBmi270_WriteReg(BMI270_REG_GYR_RANGE, BMI270_GYR_RANGE_500DPS) == 0U)
-  {
-    return 0U;
-  }
-  if (ImuBmi270_WriteReg(BMI270_REG_PWR_CTRL, BMI270_PWR_CTRL_ACC_GYR_TEMP_ON) == 0U)
-  {
-    return 0U;
-  }
-  HAL_Delay(2U);
   imu_state.enabled = 1U;
   imu_state.filter_initialized = 0U;
+  imu_state.profile = (uint8_t)imu_selected_profile;
+  imu_state.init_state = IMU_BMI270_INIT_STATE_SAMPLING;
+  ImuBmi270Mahony_Init(&imu_fusion);
   ImuBmi270_SetError(IMU_BMI270_ERROR_NONE);
   return 1U;
 }
 
-uint8_t ImuBmi270_Update(void)
+static void ImuBmi270_ProcessMeasurement(const int16_t accel_raw[3],
+                                          const int16_t gyro_raw[3],
+                                          uint32_t sensor_time,
+                                          uint8_t sensor_time_valid,
+                                          float fallback_dt_s)
 {
-  int16_t accel_raw[3];
-  int16_t gyro_raw[3];
   uint32_t primask;
-  uint32_t now_ms;
-  uint32_t update_ms;
-  uint32_t elapsed_ms;
-  float accel_g[3];
+  uint32_t update_ms = HAL_GetTick();
+  float sensor_accel_g[3];
+  float body_accel_g[3];
+  float ros_accel_g[3];
   float gyro_raw_dps[3];
   float gyro_corrected_dps[3];
-  float accel_roll_deg;
-  float accel_pitch_deg;
-  float attitude_dt_s;
+  float body_gyro_dps[3];
+  float ros_gyro_dps[3];
+  float euler_deg[3];
+  float dt_s = fallback_dt_s;
+  uint8_t dt_valid = 0U;
+  float accel_norm;
 
-  if (imu_state.enabled == 0U)
-  {
-    return 1U;
-  }
-  if (imu_state.online == 0U)
-  {
-    now_ms = HAL_GetTick();
-    if ((int32_t)(now_ms - imu_next_init_retry_ms) < 0)
-    {
-      return 0U;
-    }
-    if (ImuBmi270_ConfigNow() == 0U)
-    {
-      imu_next_init_retry_ms = now_ms + BMI270_INIT_RETRY_MS;
-      return 0U;
-    }
-  }
-
-  if (ImuBmi270_ReadRawFrame(accel_raw, gyro_raw) == 0U)
-  {
-    return 0U;
-  }
-  update_ms = HAL_GetTick();
+  primask = __get_PRIMASK();
+  __disable_irq();
+  ImuBmi270_ClearTransientQuality();
+  __set_PRIMASK(primask);
 
   for (uint8_t i = 0U; i < 3U; ++i)
   {
-    accel_g[i] = (float)accel_raw[i] / BMI270_ACCEL_LSB_PER_G;
+    sensor_accel_g[i] = (((float)accel_raw[i] / BMI270_ACCEL_LSB_PER_G) -
+                         imu_calibration.accel_bias_g[i]) * imu_calibration.accel_scale[i];
     gyro_raw_dps[i] = (float)gyro_raw[i] / BMI270_GYRO_LSB_PER_DPS;
-    gyro_corrected_dps[i] = gyro_raw_dps[i] - imu_state.gyro_bias_dps[i];
+    gyro_corrected_dps[i] = gyro_raw_dps[i] -
+                            imu_state.gyro_bias_dps[i] -
+                            imu_calibration.gyro_bias_dps[i];
+    if (ImuBmi270_AbsFloat(gyro_raw_dps[i]) >= BMI270_GYRO_SATURATION_DPS)
+    {
+      ImuBmi270_SetQuality(IMU_BMI270_QUALITY_GYRO_SATURATION);
+    }
   }
-  ImuBmi270_AccelEulerDeg(accel_g, &accel_roll_deg, &accel_pitch_deg);
+
+  ImuBmi270Coordinate_Apply(imu_calibration.sensor_to_body, sensor_accel_g, body_accel_g);
+  ImuBmi270Coordinate_Apply(imu_calibration.sensor_to_body, gyro_corrected_dps, body_gyro_dps);
+  ImuBmi270Coordinate_BodyToRos(body_accel_g, ros_accel_g);
+  ImuBmi270Coordinate_BodyToRos(body_gyro_dps, ros_gyro_dps);
+
+  accel_norm = sqrtf((body_accel_g[0] * body_accel_g[0]) +
+                     (body_accel_g[1] * body_accel_g[1]) +
+                     (body_accel_g[2] * body_accel_g[2]));
+  if (accel_norm < BMI270_ACCEL_REJECT_MIN_G || accel_norm > BMI270_ACCEL_REJECT_MAX_G)
+  {
+    ImuBmi270_SetQuality(IMU_BMI270_QUALITY_ACCEL_ANOMALY);
+  }
+
+  if (sensor_time_valid != 0U && imu_state.sensor_time_valid != 0U)
+  {
+    if (ImuBmi270Time_DeltaSeconds(sensor_time, imu_state.sensor_time, BMI270_ATTITUDE_MAX_DT_S, &dt_s) != 0U)
+    {
+      dt_valid = 1U;
+    }
+    else
+    {
+      ImuBmi270_SetError(IMU_BMI270_ERROR_TIMESTAMP);
+      ImuBmi270_SetQuality(IMU_BMI270_QUALITY_ATTITUDE_INVALID);
+    }
+  }
+  else if (fallback_dt_s > 0.0f)
+  {
+    dt_valid = 1U;
+    ImuBmi270_SetQuality(IMU_BMI270_QUALITY_POLL_FALLBACK);
+  }
+
+  if (dt_valid != 0U)
+  {
+    ImuBmi270Mahony_Update(&imu_fusion, body_gyro_dps, body_accel_g, dt_s, &imu_fusion_params);
+    if ((imu_fusion.status_flags & IMU_BMI270_FUSION_ACCEL_DEGRADED) != 0UL)
+    {
+      ImuBmi270_SetQuality(IMU_BMI270_QUALITY_ACCEL_ANOMALY);
+    }
+    if ((imu_fusion.status_flags & IMU_BMI270_FUSION_INVALID_DT) != 0UL)
+    {
+      ImuBmi270_SetQuality(IMU_BMI270_QUALITY_ATTITUDE_INVALID);
+    }
+  }
+  ImuBmi270Quaternion_ToEulerDeg(&imu_fusion.q, euler_deg);
 
   primask = __get_PRIMASK();
   __disable_irq();
@@ -567,49 +813,165 @@ uint8_t ImuBmi270_Update(void)
   {
     for (uint8_t i = 0U; i < 3U; ++i)
     {
-      imu_state.accel_g[i] = accel_g[i];
-      imu_state.gyro_filtered_dps[i] = gyro_corrected_dps[i];
-      imu_state.gyro_dps[i] = gyro_corrected_dps[i];
+      imu_state.accel_g[i] = sensor_accel_g[i];
+      imu_state.body_accel_g[i] = body_accel_g[i];
+      imu_state.ros_accel_g[i] = ros_accel_g[i];
+      imu_state.gyro_filtered_dps[i] = body_gyro_dps[i];
+      imu_state.gyro_dps[i] = body_gyro_dps[i];
+      imu_state.body_gyro_dps[i] = body_gyro_dps[i];
+      imu_state.ros_gyro_dps[i] = ros_gyro_dps[i];
     }
-    imu_state.roll_deg = accel_roll_deg;
-    imu_state.pitch_deg = accel_pitch_deg;
-    imu_state.yaw_deg = 0.0f;
     imu_state.filter_initialized = 1U;
   }
   else
   {
     for (uint8_t i = 0U; i < 3U; ++i)
     {
-      imu_state.accel_g[i] = ImuBmi270_Filter(imu_state.accel_g[i], accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+      imu_state.accel_g[i] = ImuBmi270_Filter(imu_state.accel_g[i], sensor_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+      imu_state.body_accel_g[i] = ImuBmi270_Filter(imu_state.body_accel_g[i], body_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+      imu_state.ros_accel_g[i] = ImuBmi270_Filter(imu_state.ros_accel_g[i], ros_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
       imu_state.gyro_filtered_dps[i] = ImuBmi270_Filter(imu_state.gyro_filtered_dps[i],
-                                                        gyro_corrected_dps[i],
+                                                        body_gyro_dps[i],
                                                         BMI270_GYRO_FILTER_ALPHA);
       imu_state.gyro_dps[i] = imu_state.gyro_filtered_dps[i];
-    }
-    elapsed_ms = update_ms - imu_state.last_update_ms;
-    if ((elapsed_ms > 0U) && (((float)elapsed_ms * 0.001f) <= BMI270_ATTITUDE_MAX_DT_S))
-    {
-      attitude_dt_s = (float)elapsed_ms * 0.001f;
-      imu_state.roll_deg = ImuBmi270_Filter(imu_state.roll_deg + (gyro_corrected_dps[0] * attitude_dt_s),
-                                            accel_roll_deg,
-                                            BMI270_ATTITUDE_FILTER_ALPHA);
-      imu_state.pitch_deg = ImuBmi270_Filter(imu_state.pitch_deg + (gyro_corrected_dps[1] * attitude_dt_s),
-                                             accel_pitch_deg,
-                                             BMI270_ATTITUDE_FILTER_ALPHA);
-      imu_state.yaw_deg = ImuBmi270_WrapAngleDeg(imu_state.yaw_deg + (gyro_corrected_dps[2] * attitude_dt_s));
-    }
-    else
-    {
-      imu_state.roll_deg = ImuBmi270_Filter(imu_state.roll_deg, accel_roll_deg, BMI270_ATTITUDE_FILTER_ALPHA);
-      imu_state.pitch_deg = ImuBmi270_Filter(imu_state.pitch_deg, accel_pitch_deg, BMI270_ATTITUDE_FILTER_ALPHA);
+      imu_state.body_gyro_dps[i] = imu_state.gyro_filtered_dps[i];
+      imu_state.ros_gyro_dps[i] = ImuBmi270_Filter(imu_state.ros_gyro_dps[i], ros_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
     }
   }
+  imu_state.quaternion[0] = imu_fusion.q.w;
+  imu_state.quaternion[1] = imu_fusion.q.x;
+  imu_state.quaternion[2] = imu_fusion.q.y;
+  imu_state.quaternion[3] = imu_fusion.q.z;
+  imu_state.roll_deg = euler_deg[0];
+  imu_state.pitch_deg = euler_deg[1];
+  imu_state.yaw_deg = ImuBmi270_WrapAngleDeg(euler_deg[2]);
+  imu_state.accel_correction_weight = imu_fusion.accel_weight;
+  imu_state.sensor_time = sensor_time & IMU_BMI270_SENSOR_TIME_MASK;
+  imu_state.sensor_time_valid = sensor_time_valid;
+  imu_state.sample_count++;
   imu_state.last_update_ms = update_ms;
   imu_state.online = 1U;
+  imu_state.init_state = IMU_BMI270_INIT_STATE_SAMPLING;
   __set_PRIMASK(primask);
+}
+
+static uint8_t ImuBmi270_UpdateDirect(float fallback_dt_s)
+{
+  int16_t accel_raw[3];
+  int16_t gyro_raw[3];
+  uint32_t sensor_time = 0UL;
+  uint8_t sensor_time_valid = 0U;
+
+  if (ImuBmi270_ReadRawFrame(accel_raw, gyro_raw) == 0U)
+  {
+    return 0U;
+  }
+  sensor_time_valid = ImuBmi270_ReadSensorTime(&sensor_time);
+  ImuBmi270_ProcessMeasurement(accel_raw, gyro_raw, sensor_time, sensor_time_valid, fallback_dt_s);
+  return 1U;
+}
+
+static uint8_t ImuBmi270_UpdateFifo(void)
+{
+  uint16_t fifo_len = 0U;
+  uint8_t fifo[BMI270_FIFO_READ_MAX_BYTES];
+  imu_bmi270_fifo_sample_t samples[BMI270_FIFO_MAX_SAMPLES];
+  imu_bmi270_fifo_parse_result_t parse;
+  uint32_t last_time;
+  uint8_t any_processed = 0U;
+
+  if (ImuBmi270_ReadFifoLength(&fifo_len) == 0U)
+  {
+    return 0U;
+  }
+  if (fifo_len == 0U)
+  {
+    return 0U;
+  }
+  if (fifo_len > BMI270_FIFO_READ_MAX_BYTES)
+  {
+    fifo_len = BMI270_FIFO_READ_MAX_BYTES;
+    ImuBmi270_SetError(IMU_BMI270_ERROR_FIFO);
+  }
+  if (ImuBmi270_ReadBytes(BMI270_REG_FIFO_DATA, fifo, (uint8_t)fifo_len) == 0U)
+  {
+    return 0U;
+  }
+  if (ImuBmi270Fifo_Parse(fifo, fifo_len, samples, BMI270_FIFO_MAX_SAMPLES, &parse) == 0U)
+  {
+    ImuBmi270_SetError(IMU_BMI270_ERROR_FIFO);
+    return 0U;
+  }
+  if ((parse.flags & IMU_BMI270_FIFO_PARSE_SKIP_FRAME) != 0UL)
+  {
+    ImuBmi270_SetError(IMU_BMI270_ERROR_FIFO);
+  }
+
+  last_time = parse.sensor_time & IMU_BMI270_SENSOR_TIME_MASK;
+  for (uint32_t i = 0UL; i < parse.sample_count && i < BMI270_FIFO_MAX_SAMPLES; ++i)
+  {
+    uint32_t sample_time = last_time;
+    uint8_t sample_time_valid = parse.sensor_time_valid;
+
+    if (parse.sensor_time_valid != 0U && parse.sample_count > 0UL)
+    {
+      uint32_t remaining = (parse.sample_count - 1UL) - i;
+      sample_time = (last_time - (remaining * IMU_BMI270_SENSOR_TIME_100HZ_TICKS)) &
+                    IMU_BMI270_SENSOR_TIME_MASK;
+    }
+    if (samples[i].accel_valid != 0U && samples[i].gyro_valid != 0U)
+    {
+      ImuBmi270_ProcessMeasurement(samples[i].accel_raw, samples[i].gyro_raw,
+                                   sample_time, sample_time_valid, 0.0f);
+      any_processed = 1U;
+    }
+  }
+
+  return any_processed;
+}
+
+uint8_t ImuBmi270_Update(void)
+{
+  uint32_t now_ms;
+
+  if (imu_state.enabled == 0U)
+  {
+    return 1U;
+  }
+  if (imu_state.online == 0U)
+  {
+    now_ms = HAL_GetTick();
+    if ((int32_t)(now_ms - imu_next_init_retry_ms) < 0)
+    {
+      imu_state.init_state = IMU_BMI270_INIT_STATE_RETRY_WAIT;
+      return 0U;
+    }
+    if (ImuBmi270_ConfigNow() == 0U)
+    {
+      imu_next_init_retry_ms = now_ms + BMI270_INIT_RETRY_MS;
+      imu_state.init_state = IMU_BMI270_INIT_STATE_RETRY_WAIT;
+      return 0U;
+    }
+  }
+
+  if (ImuBmi270_UpdateFifo() != 0U)
+  {
+    ImuBmi270_SetError(IMU_BMI270_ERROR_NONE);
+    return 1U;
+  }
+
+  if (ImuBmi270_UpdateDirect(BMI270_DIRECT_FALLBACK_DT_S) == 0U)
+  {
+    return 0U;
+  }
 
   ImuBmi270_SetError(IMU_BMI270_ERROR_NONE);
   return 1U;
+}
+
+void ImuBmi270_OnDataReadyFromIsr(void)
+{
+  imu_state.drdy_count++;
 }
 
 uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms)

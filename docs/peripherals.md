@@ -126,16 +126,18 @@ Bosch BMI270 六轴惯性测量单元，SPI2 接口通信。
 | SPI2 MISO | PB14 | Master 接收 |
 | SPI2 MOSI | PB15 | Master 发送 |
 | IMU_CS | PB12 | GPIO Output，默认高（片选低有效） |
-| IMU_INT1 | PE0 | EXTI0 输入（中断功能预留） |
+| IMU_INT1 | PE0 | EXTI0 输入（BMI270 DRDY/FIFO watermark 唤醒 `imuTask`） |
 
 **驱动特性**：
 - 集成 Bosch SensorAPI v2.86.1，加载 8192 字节配置表至 feature engine 内部 RAM
-- 100 Hz ODR（加速度计 ±2g，陀螺仪 ±500dps）
+- `normal / performance / debug` 三套 profile 统一管理 ODR、量程、FIFO、DRDY、APS，并在配置后读回校验
+- 100 Hz ODR（加速度计 ±2g，陀螺仪 ±500dps），FIFO header + watermark + SensorTime 数据链路
 - 陀螺零偏校准（`imucal [n]`，含静止验证）
-- 互补滤波姿态估计（roll/pitch 融合加速度计，yaw 纯积分）
+- Mahony 四元数融合输出 quaternion + roll/pitch/yaw；异常加速度模长自动降低校正权重
+- 传感器坐标、车体坐标、ROS REP-103 坐标分层处理；上位机 IMU 输出统一为车体坐标
 - EMA 低通滤波（加速度计/陀螺仪 α=0.20）
 - SPI 硬件诊断（`imudiag`：寄存器回读 + bit-bang 回退 + MISO 上下拉检测）
-- 初始化失败或运行中离线自动重连（1s 间隔重试）
+- 初始化状态机显式跟踪 probe/config/profile/sampling/retry；SPI、FIFO、时间戳、饱和、加速度和姿态质量状态均有 flags/counters
 
 ### 5.1 I2C1 — SSD1306 OLED
 

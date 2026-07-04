@@ -301,16 +301,31 @@ static void UpperUart_SendImuStatus(uint32_t now_ms)
   imu = (upper_imu_status_payload_t){0};
   for (uint8_t i = 0U; i < 3U; ++i)
   {
-    imu.accel_g[i] = imu_state.accel_g[i];
-    imu.gyro_corrected_dps[i] = imu_state.gyro_corrected_dps[i];
+    imu.accel_g[i] = imu_state.body_accel_g[i];
+    imu.gyro_corrected_dps[i] = imu_state.body_gyro_dps[i];
   }
   imu.euler_deg[0] = imu_state.roll_deg;
   imu.euler_deg[1] = imu_state.pitch_deg;
   imu.euler_deg[2] = imu_state.yaw_deg;
+  for (uint8_t i = 0U; i < 4U; ++i)
+  {
+    imu.quaternion[i] = imu_state.quaternion[i];
+  }
   imu.timestamp_ms = now_ms;
+  imu.sensor_time = imu_state.sensor_time;
+  imu.sample_count = imu_state.sample_count;
+  imu.quality_flags = imu_state.quality_flags;
+  imu.quality_counters[0] = imu_state.spi_error_count;
+  imu.quality_counters[1] = imu_state.init_failure_count;
+  imu.quality_counters[2] = imu_state.fifo_overflow_count;
+  imu.quality_counters[3] = imu_state.timestamp_error_count;
+  imu.quality_counters[4] = imu_state.gyro_saturation_count;
+  imu.quality_counters[5] = imu_state.accel_anomaly_count;
+  imu.quality_counters[6] = imu_state.attitude_invalid_count;
   if (imu_state.online != 0U)       { imu.status_flags |= UPPER_IMU_FLAG_ONLINE; }
   if (imu_state.gyro_calibrated != 0U) { imu.status_flags |= UPPER_IMU_FLAG_CALIBRATED; }
-  if (imu_state.error_count > 0U)   { imu.status_flags |= UPPER_IMU_FLAG_ERROR; }
+  if (imu_state.quality_flags != 0UL || imu_state.last_error != IMU_BMI270_ERROR_NONE) { imu.status_flags |= UPPER_IMU_FLAG_ERROR; }
+  if (imu_state.sensor_time_valid != 0U) { imu.status_flags |= UPPER_IMU_FLAG_SENSOR_TIME; }
   imu.temperature_c = (int8_t)((int32_t)imu_state.temperature_c - 40);
 
   payload_len = UpperProtocol_BuildImuStatusPayload(&imu, upper_imu_payload, sizeof(upper_imu_payload));

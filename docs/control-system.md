@@ -86,7 +86,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 | **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 384W (1536B) | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳和 motorTask 心跳守卫 |
 | **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `EncoderDriver_Update` + `ChassisControl_Step`：编码器刷新、差速+PID+PWM |
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUart_Update`：USART3 上位机协议收发 |
-| **imuTask** | `Task_Imu` | Normal | 10ms | `osDelayUntil` | 512W (2048B) | `ImuBmi270_Update`：100 Hz 采样、校准、姿态估计 |
+| **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
 | **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
 | **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 256W (1024B) | `LineUart_Update` + `LineUart_RequestAnalog` + `LineControl_Update`：帧解析、传感器查询、P 控制提交 |
 | **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `Esp12fComm_Update`：ESP12F 协议收发与烧录桥 |

@@ -65,7 +65,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/encoder/encoder_math.c
     BSP/esp12f/esp12f_flash_bridge.c
     BSP/imu/imu_bmi270.c
+    BSP/imu/imu_bmi270_calibration.c
     BSP/imu/imu_bmi270_config.c
+    BSP/imu/imu_bmi270_fifo.c
+    BSP/imu/imu_bmi270_math.c
+    BSP/imu/imu_bmi270_profile.c
+    BSP/imu/imu_bmi270_time.c
     BSP/led/led_status.c
     BSP/line/line_uart.c
     BSP/motor/motor_driver.c

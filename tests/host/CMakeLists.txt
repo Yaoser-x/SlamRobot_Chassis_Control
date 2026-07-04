@@ -117,3 +117,21 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
 )
 
 add_test(NAME chassis_control_current_limit COMMAND test_chassis_control_current_limit)
+
+add_executable(test_imu_pipeline
+    test_imu_pipeline.c
+    ../../BSP/imu/imu_bmi270_calibration.c
+    ../../BSP/imu/imu_bmi270_fifo.c
+    ../../BSP/imu/imu_bmi270_math.c
+    ../../BSP/imu/imu_bmi270_profile.c
+    ../../BSP/imu/imu_bmi270_time.c
+)
+
+target_include_directories(test_imu_pipeline PRIVATE
+    .
+    ../../BSP/imu
+)
+
+target_link_libraries(test_imu_pipeline PRIVATE m)
+
+add_test(NAME imu_pipeline COMMAND test_imu_pipeline)

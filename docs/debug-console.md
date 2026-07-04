@@ -54,9 +54,9 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 
 ```
 log 0                          停止日志
-log 1                          全字段（36 列），兼容旧行为
-log 1 imu                      仅时间戳 + IMU 14 列
-log 1 motor imu                时间戳 + motor(8 列) + imu(14 列)，按输入顺序
+log 1                          全字段（追加 IMU SensorTime/quaternion/quality）
+log 1 imu                      仅时间戳 + IMU 20 列
+log 1 motor imu                时间戳 + motor(8 列) + imu(20 列)，按输入顺序
 log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
 log 1 motor adc adcraw         电机速度/PWM + 稳定电流 + ADC 窗口统计
 ```
@@ -68,7 +68,7 @@ log 1 motor adc adcraw         电机速度/PWM + 稳定电流 + ADC 窗口统�
 | `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisControl_GetState` |
 | `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `AdcMonitor_GetState` 的慢速稳定电流，兼容旧 CSV |
 | `adcraw` | `m*_mean_ma, m*_rms_ma, m*_pk_ma, m*_n` | 16 | 最近 ADC 窗口的均值/RMS/峰值/样本数，用于电流校准 |
-| `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg` | 14 | `ImuBmi270_GetState` |
+| `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg, imu_stime, imu_q*_milli, imu_quality` | 20 | `ImuBmi270_GetState`（车体坐标系） |
 | `errors` | `errors` | 1 | `SystemMonitor_GetState` |
 | `source` | `source` | 1 | `SystemMonitor_GetState` |
 | `ps2` | `ps2_ok, ps2_fail` | 2 | `Ps2Control_GetState` |
@@ -136,7 +136,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ### 5.1 状态查询
 
-- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度）、IMU 状态与欧拉角、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
+- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度）、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
 
 `ENC` 行末的 `hw=a,b,c,d` 是按逻辑 M1~M4 排列的原始定时器计数，用于区分“定时器未收到脉冲”和“逻辑计数未更新”。V2.0 映射为 M1=TIM2、M2=TIM4、M3=TIM3、M4=TIM5；CubeMX 中 M2/M3 的旧 label 不代表运行时逻辑顺序。
 
@@ -154,7 +154,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 - `imutest` 执行单次 SPI 读取 chip-id，不修改 IMU 运行状态
 - `imucal` 要求保持静止，校准成功后自动写入零偏估计值，`imucalclear` 清除
-- `imu 0` 不会关闭 SPI 外设，仅停止 `imuTask` 周期采样
+- `imu 0` 不会关闭 SPI 外设，仅停止 `imuTask` 采样；正常采样由 BMI270 INT1 唤醒，10ms 超时后轮询降级
 
 ### 5.4 ESP12F 管理
 

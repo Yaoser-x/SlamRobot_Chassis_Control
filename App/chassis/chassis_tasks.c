@@ -21,6 +21,9 @@
 #include "ssd1306.h"
 #include "oled_ui.h"
 #include "control_manager.h"
+#include "main.h"
+
+extern osThreadId_t imuTaskHandle;
 
 void ChassisTasks_InitHardware(void)
 {
@@ -103,12 +106,25 @@ void Task_RpiComm(void *argument)
 
 void Task_Imu(void *argument)
 {
-  uint32_t next_wake = osKernelGetTickCount();
   (void)argument;
   for (;;)
   {
+    (void)osThreadFlagsWait(CHASSIS_IMU_TASK_FLAG_DRDY,
+                            osFlagsWaitAny,
+                            CHASSIS_IMU_PERIOD_MS);
     (void)ImuBmi270_Update();
-    ChassisTaskTiming_DelayUntil(CHASSIS_TASK_TIMING_IMU, &next_wake, CHASSIS_IMU_PERIOD_MS);
+  }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == IMU_INT1_Pin)
+  {
+    ImuBmi270_OnDataReadyFromIsr();
+    if (imuTaskHandle != NULL)
+    {
+      (void)osThreadFlagsSet(imuTaskHandle, CHASSIS_IMU_TASK_FLAG_DRDY);
+    }
   }
 }
 

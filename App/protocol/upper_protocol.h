@@ -10,7 +10,7 @@ extern "C" {
 #define UPPER_PROTOCOL_HEAD_0 0xA5U
 #define UPPER_PROTOCOL_HEAD_1 0x5AU
 #define UPPER_PROTOCOL_VERSION 2U
-#define UPPER_PROTOCOL_MAX_PAYLOAD 65U
+#define UPPER_PROTOCOL_MAX_PAYLOAD 99U
 #define UPPER_PROTOCOL_MAX_FRAME (UPPER_PROTOCOL_MAX_PAYLOAD + 5U)
 #define UPPER_PROTOCOL_CMD_LEN(payload_len) ((uint8_t)(1U + (payload_len)))
 #define UPPER_PROTOCOL_STATUS_PAYLOAD_LEN 65U
@@ -18,7 +18,7 @@ extern "C" {
 #define UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN 1U
 #define UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN 1U
 #define UPPER_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN 0U
-#define UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN 43U
+#define UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN 99U
 #define UPPER_PROTOCOL_MOTOR_COUNT 4U
 
 #define UPPER_STATUS_FLAG_ESTOP           (1U << 0)
@@ -38,6 +38,7 @@ extern "C" {
 #define UPPER_IMU_FLAG_ONLINE      (1U << 0)
 #define UPPER_IMU_FLAG_CALIBRATED  (1U << 1)
 #define UPPER_IMU_FLAG_ERROR       (1U << 2)
+#define UPPER_IMU_FLAG_SENSOR_TIME (1U << 3)
 
 typedef enum
 {
@@ -80,7 +81,12 @@ typedef struct
   float accel_g[3];
   float gyro_corrected_dps[3];
   float euler_deg[3];
+  float quaternion[4];
   uint32_t timestamp_ms;
+  uint32_t sensor_time;
+  uint32_t sample_count;
+  uint32_t quality_flags;
+  uint32_t quality_counters[7];
   uint8_t status_flags;
   int8_t temperature_c;
 } upper_imu_status_payload_t;

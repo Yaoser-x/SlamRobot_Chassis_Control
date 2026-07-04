@@ -100,6 +100,15 @@ static int32_t read_i32_le(const uint8_t *in)
   return (int32_t)read_u32_le(in);
 }
 
+static float read_float_le(const uint8_t *in)
+{
+  uint32_t raw = read_u32_le(in);
+  float value;
+
+  (void)memcpy(&value, &raw, sizeof(value));
+  return value;
+}
+
 static void test_protocol_frame_and_velocity(void)
 {
   uint8_t frame[UPPER_PROTOCOL_MAX_FRAME] = {0};
@@ -219,6 +228,48 @@ static void test_status_v2_payload_layout_and_saturation(void)
   require_int(payload[62] == 0x0BU, "speed valid mask");
   require_int(payload[63] == 0x05U, "encoder anomaly mask");
   require_int(payload[64] == (UPPER_COMM_HEALTH_CRC_ERR | UPPER_COMM_HEALTH_TX_DROP), "comm health flags");
+}
+
+static void test_imu_status_payload_extended_layout(void)
+{
+  upper_imu_status_payload_t imu = {0};
+  uint8_t payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN] = {0};
+  uint8_t payload_len;
+
+  require_int(UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN == 99U, "imu payload extended length");
+  require_int(UPPER_PROTOCOL_MAX_PAYLOAD >= UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
+              "imu payload fits max payload");
+
+  imu.accel_g[0] = 1.0f;
+  imu.gyro_corrected_dps[2] = 3.0f;
+  imu.euler_deg[2] = 90.0f;
+  imu.quaternion[0] = 1.0f;
+  imu.quaternion[3] = 0.5f;
+  imu.timestamp_ms = 1234UL;
+  imu.sensor_time = 0x00302010UL;
+  imu.sample_count = 42UL;
+  imu.quality_flags = IMU_BMI270_QUALITY_FIFO_OVERFLOW | IMU_BMI270_QUALITY_ACCEL_ANOMALY;
+  imu.quality_counters[0] = 1UL;
+  imu.quality_counters[6] = 7UL;
+  imu.status_flags = UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_SENSOR_TIME;
+  imu.temperature_c = 25;
+
+  payload_len = UpperProtocol_BuildImuStatusPayload(&imu, payload, (uint8_t)sizeof(payload));
+  require_int(payload_len == UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN, "imu extended build length");
+  require_int(payload[0] == UPPER_PROTOCOL_VERSION, "imu version");
+  require_close(read_float_le(&payload[1]), 1.0f, 0.0001f, "imu accel body x");
+  require_close(read_float_le(&payload[33]), 90.0f, 0.0001f, "imu yaw");
+  require_close(read_float_le(&payload[37]), 1.0f, 0.0001f, "imu quaternion w");
+  require_close(read_float_le(&payload[49]), 0.5f, 0.0001f, "imu quaternion z");
+  require_int(read_u32_le(&payload[53]) == 1234UL, "imu host timestamp");
+  require_int(read_u32_le(&payload[57]) == 0x00302010UL, "imu sensor time");
+  require_int(read_u32_le(&payload[61]) == 42UL, "imu sample count");
+  require_int(read_u32_le(&payload[65]) == (IMU_BMI270_QUALITY_FIFO_OVERFLOW | IMU_BMI270_QUALITY_ACCEL_ANOMALY),
+              "imu quality flags");
+  require_int(read_u32_le(&payload[69]) == 1UL, "imu first quality counter");
+  require_int(read_u32_le(&payload[93]) == 7UL, "imu last quality counter");
+  require_int(payload[97] == (UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_SENSOR_TIME), "imu status flags");
+  require_int((int8_t)payload[98] == 25, "imu temperature");
 }
 
 static void test_control_priority_timeout_and_reject_stop(void)
@@ -456,6 +507,10 @@ static void test_imu_state_contract(void)
   require_int(sizeof(state.roll_deg) == sizeof(float), "imu roll field");
   require_int(sizeof(state.pitch_deg) == sizeof(float), "imu pitch field");
   require_int(sizeof(state.yaw_deg) == sizeof(float), "imu yaw field");
+  require_int((sizeof(state.quaternion) / sizeof(state.quaternion[0])) == 4U, "imu quaternion field");
+  require_int((sizeof(state.body_accel_g) / sizeof(state.body_accel_g[0])) == 3U, "imu body accel field");
+  require_int((sizeof(state.body_gyro_dps) / sizeof(state.body_gyro_dps[0])) == 3U, "imu body gyro field");
+  require_int(sizeof(state.quality_flags) == sizeof(uint32_t), "imu quality flags field");
 }
 
 /* ────────── L1: PID 控制器纯逻辑测试 ────────── */
@@ -596,6 +651,7 @@ int main(void)
 {
   test_protocol_frame_and_velocity();
   test_status_v2_payload_layout_and_saturation();
+  test_imu_status_payload_extended_layout();
   test_control_priority_timeout_and_reject_stop();
   test_control_stop_recovery_requires_new_command();
   test_side_target_distribution();
