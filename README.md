@@ -29,7 +29,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
-| **构建验证** | Debug — RAM 79.3KB (60.5%) / FLASH 132.8KB (25.3%) — Host 测试 6/6 通过 — CI 双 preset + host-tests |
+| **构建验证** | Debug — RAM 79.3KB (60.5%) / FLASH 132.8KB (25.3%) — Host 测试 7/7 通过 — CI 双 preset + host-tests |
 
 > V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 
@@ -60,7 +60,8 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 ├── cmake/             工具链文件 + CubeMX CMake 目标
 ├── docs/              详细文档
 ├── firmware/          ESP12F Arduino 固件源码
-│   └── esp12f/        固定 AP + 网页遥控固件 (F407_ESP12F.ino)
+│   └── esp12f/        WiFi 帧协议通信 + 网页遥控固件 (F407_ESP12F/)
+│       └── F407_ESP12F/  Arduino 工程目录 (F407_ESP12F.ino)
 └── .github/workflows/ CI 构建流水线
 ```
 
@@ -72,7 +73,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
 | [调试命令台](docs/debug-console.md) | USART1 全命令参考、CSV 日志字段过滤、line 命令输出格式 |
 | [ESP12F 烧录](docs/esp12f-flashing.md) | esptool.py / Arduino IDE 烧录流程、透明桥行为、常见故障排查 |
-| [ESP12F 固件](firmware/esp12f/) | Arduino 源码：固定 AP、WebSocket 摇杆遥控、upper_protocol 帧协议 |
+| [ESP12F 固件](firmware/esp12f/) | Arduino 源码：固定 AP、WebSocket 摇杆遥控、upper_protocol 帧协议通信 |
 | [Bring-up 验收](docs/bring-up.md) | 11 步分阶段验收：从 RTOS 状态到巡线跟踪 |
 | [开发指南](docs/development.md) | 环境搭建、构建命令、GitHub Actions CI、Git 策略、开发约束、常见排查 |
 | [教学实验](docs/labs/README.md) | 13 个分级实验：开环运动 → 编码器反馈 → PID 调参 → 电流限制 → IMU → 巡线 → PS2 遥操 → 系统安全 → FreeRTOS → 仲裁 → ADC → OLED → ESP12F WiFi |

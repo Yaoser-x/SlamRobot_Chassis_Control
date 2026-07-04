@@ -74,14 +74,14 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 | --- | --- |
 | Debug | `build/Debug/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
 | Release | `build/Release/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
-| Host 测试 | `test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]`、`test_motor_driver_gpio[.exe]`、`test_system_monitor[.exe]`、`test_chassis_control_current_limit[.exe]` |
+| Host 测试 | `test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]`、`test_motor_driver_gpio[.exe]`、`test_system_monitor[.exe]`、`test_chassis_control_current_limit[.exe]`、`test_imu_pipeline[.exe]` |
 
 ### 2.4 当前构建验证
 
 ```
 Debug:  RAM   79.3 KB / 128 KB (60.5%)
         FLASH 132.8 KB / 512 KB (25.3%)
-        Host 测试 6/6 通过 (CI host-tests)
+        Host 测试 7/7 通过 (CI host-tests)
 ```
 
 ---
@@ -100,7 +100,7 @@ Debug:  RAM   79.3 KB / 128 KB (60.5%)
 | 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc` |
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
-| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（6 个 target），通过后输出测试摘要 |
+| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（7 个 target），通过后输出测试摘要 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
@@ -223,10 +223,10 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | ADC/电流/电压 | ✅ 完成 | 五通道 DMA 采样 |
 | BMI270 IMU | ✅ 完成 | 配置表/校准/姿态估计/诊断 |
 | PS2 手柄 | ✅ 完成 | bit-bang 协议/宏指令/巡线切换 |
-| ESP12F 协议 | ✅ 完成 | 帧协议/烧录桥 |
+| ESP12F 协议 | ✅ 完成 | upper_protocol 帧协议通信 + 烧录透传桥 |
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
-| ESP12F 网页固件 | 🔲 待烧录 | 需 ESP8266 固件开发 |
+| ESP12F 网页固件 | ✅ 完成 | 固定 AP + WebSocket 摇杆 + upper_protocol 帧协议 + 网页遥控 |
 | OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 自检 + 模块在线状态 |
 | 上位机 (RPI) 对接 | 🔲 待对接 | 协议已就绪 |
 

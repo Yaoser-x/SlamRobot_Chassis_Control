@@ -1,23 +1,29 @@
-# Lab 13: ESP12F WiFi 桥接与远程控制
+# Lab 13: ESP12F WiFi 帧协议通信与远程控制
 
 ## 实验目标
 
-1. **知识**：理解 STM32↔ESP8266 的 UART 协议帧结构、透明烧录桥原理、AT 指令与二进制协议的取舍
+1. **知识**：理解 STM32↔ESP8266 的 UART 帧协议结构、upper_protocol 二进制帧格式、烧录桥原理
 2. **技能**：能通过 `espflash` 命令建立 STM32→ESP8266 烧录通道，用 `esptool.py` 烧录 ESP8266 固件
-3. **素养**：理解嵌入式系统中"桥接"模式的设计——如何在生产通信和固件更新两种截然不同的需求间安全切换
+3. **素养**：理解嵌入式系统中"协议通信"与"透明桥接"两种模式的设计——正常通信用帧协议，固件更新用透传桥
 
 ## 实验原理
 
 ### 1. ESP12F 通信架构
 
 ```
-PC (USART1) ←──→ STM32F407 ←──→ ESP12F (USART2, WiFi)
-   115200           UART桥          115200
+正常模式:
+  手机网页 ──WiFi──→ ESP12F ──upper_protocol帧──→ STM32F407
+                     (USART2)                      │
+                                                   ↓
+                                              CONTROL_SOURCE_ESP12F
+
+烧录模式 (espflash on):
+  PC (esptool.py) ──bin──→ USART1 ──透明桥──→ USART2 ──→ ESP12F BootROM
 ```
 
-**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 USART2 发送给 STM32，STM32 通过 `upper_protocol` 帧解析后提交至 `CONTROL_SOURCE_ESP12F`。
+**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 `upper_protocol` 帧协议发送给 STM32（`App/protocol/esp12f_comm.c` 解析），提交至 `CONTROL_SOURCE_ESP12F`。这不是桥接，而是标准的帧协议通信。
 
-**烧录模式** (`espflash on`)：USART1 和 USART2 之间建立透明桥——STM32 将 PC 发来的二进制流直传给 ESP12F，同时将 ESP12F 的回复直传给 PC。此模式下调试台暂停命令解析（避免二进制流被误当作文本命令）。
+**烧录模式** (`espflash on`)：USART1 和 USART2 之间建立透明桥——STM32 将 PC 发来的二进制流直传给 ESP12F，同时将 ESP12F 的回复直传给 PC。此模式下调试台暂停命令解析（避免二进制流被误当作文本命令）。**桥接仅用于烧录固件，正常通信不使用桥接。**
 
 ### 2. 透明烧录桥
 

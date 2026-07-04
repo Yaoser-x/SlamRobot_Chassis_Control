@@ -34,7 +34,7 @@
 `ControlManager_GetCommand()` 按优先级数组 `{UPPER, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
 
 1. 检查源命令的 `enable` 标志
-2. 按控制源验证命令年龄：UPPER/PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
+2. 按控制源验证命令年龄：UPPER 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
 3. 命中即返回，不再检查更低优先级源
 4. 若所有源均未命中，返回空命令（`enable=0`），底盘停止
 
@@ -88,7 +88,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUart_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
 | **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
-| **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 256W (1024B) | `LineUart_Update` + `LineUart_RequestAnalog` + `LineControl_Update`：帧解析、传感器查询、P 控制提交 |
+| **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 1024W (4096B) | `LineUart_Update` + `LineUart_RequestAnalog` + `LineControl_Update`：帧解析、传感器查询、P 控制提交 |
 | **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `Esp12fComm_Update`：ESP12F 协议收发与烧录桥 |
 | **debugTask** | `Task_Usart1DebugConsole` | BelowNormal | 10ms | `osDelay` | 2048W (8192B) | `ResetTrace_TaskHeartbeat` + 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
 | **ledTask** | `Task_Led` | Low (osPriorityLow) | 50ms | `osDelayUntil` | 128W (512B) | `LedStatus_TaskStep`：TEST_LED 状态闪烁 |

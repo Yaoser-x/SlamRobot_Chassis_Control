@@ -32,7 +32,7 @@ return empty_cmd                                   ← 全部未命中 → 停�
 
 ### 3. 超时退让
 
-每个控制源的命令携带 `timestamp_ms`（发送时刻的 tick）。代码按源使用独立超时：UPPER/PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms。命令超过对应窗口后自动失效，仲裁跳过此源，不会永久锁死。
+每个控制源的命令携带 `timestamp_ms`（发送时刻的 tick）。代码按源使用独立超时：UPPER 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms。命令超过对应窗口后自动失效，仲裁跳过此源，不会永久锁死。
 
 ```
 场景: PS2 手柄突然断开

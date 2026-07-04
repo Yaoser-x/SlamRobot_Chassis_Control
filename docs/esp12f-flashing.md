@@ -12,7 +12,7 @@ STM32 同时控制 ESP12F 的 `EN`、`RST`、`IO0` 引脚，管理启动模式�
 
 **约束**：第一版固定波特率 `115200 8N1`，不使用高速上传。确认硬件串口稳定后再考虑动态高速烧录。
 
-**固件源码**：`firmware/esp12f/F407_ESP12F.ino`（Arduino 工程），编译和功能说明见 [`firmware/esp12f/README.md`](../firmware/esp12f/README.md)。
+**固件源码**：`firmware/esp12f/F407_ESP12F/F407_ESP12F.ino`（Arduino 工程），编译和功能说明见 [`firmware/esp12f/README.md`](../firmware/esp12f/README.md)。
 
 ---
 

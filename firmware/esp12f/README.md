@@ -2,7 +2,7 @@
 
 ## 文件说明
 
-- `F407_ESP12F.ino` — ESP8266 Arduino 固件，实现固定 AP + 网页遥控
+- `F407_ESP12F/F407_ESP12F.ino` — ESP8266 Arduino 固件，实现固定 AP + 网页遥控
 
 ## 功能特性
 

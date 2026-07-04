@@ -41,7 +41,7 @@
 | | [Lab 10 控制源仲裁与优先级抢占](lab10_control_arbitration.md) | 多源优先级、超时退让、安全拒绝 | Lab 01/07 |
 | **系统** | [Lab 11 ADC 采样与电池监测](lab11_adc_battery.md) | 分压网络、分流电阻、EMA 滤波、校准 | — |
 | | [Lab 12 OLED 显示与 I2C 自检](lab12_oled_i2c.md) | I2C 总线扫描、SSD1306、POST 自检 | — |
-| | [Lab 13 ESP12F WiFi 桥接与远程控制](lab13_esp12f_wifi.md) | 协议帧、UART 透明桥、ESP8266 烧录 | — |
+| | [Lab 13 ESP12F WiFi 帧协议通信与远程控制](lab13_esp12f_wifi.md) | upper_protocol 帧协议、UART 透明桥、ESP8266 烧录 | — |
 
 ## 教学路线建议
 
