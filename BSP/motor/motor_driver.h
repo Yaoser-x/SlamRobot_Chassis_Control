@@ -43,6 +43,7 @@ typedef struct
   int16_t output_permille[MOTOR_ID_COUNT];
   int16_t requested_pwm[MOTOR_ID_COUNT];
   int16_t applied_pwm[MOTOR_ID_COUNT];
+  int16_t effective_pwm[MOTOR_ID_COUNT];
   int8_t current_ph_dir[MOTOR_ID_COUNT];
   int8_t pending_dir[MOTOR_ID_COUNT];
   motor_driver_phase_t phase[MOTOR_ID_COUNT];
@@ -53,6 +54,9 @@ typedef struct
   uint8_t tim8_break_flag;
   uint32_t tim1_break_count;
   uint32_t tim8_break_count;
+  uint32_t fault_edge_count[MOTOR_ID_COUNT];
+  uint32_t fault_last_change_ms[MOTOR_ID_COUNT];
+  uint32_t fault_low_since_ms[MOTOR_ID_COUNT];
 } motor_driver_state_t;
 
 typedef float (*motor_speed_getter_t)(motor_id_t motor);

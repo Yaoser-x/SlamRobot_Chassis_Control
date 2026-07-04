@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "chassis_task_timing.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,6 +29,9 @@ typedef struct
   float right_current_a;
   uint32_t error_flags;
   uint32_t latched_error_flags;
+  uint32_t task_last_heartbeat_ms[CHASSIS_TASK_TIMING_COUNT];
+  uint32_t task_timeout_count[CHASSIS_TASK_TIMING_COUNT];
+  uint8_t task_timed_out[CHASSIS_TASK_TIMING_COUNT];
   uint8_t control_mode;
 } system_monitor_state_t;
 

@@ -110,3 +110,54 @@ uint8_t EncoderMath_DeltaAccepted(int32_t delta,
                                                  wheel_radius_m);
   return (EncoderMath_AbsF(current_speed - history_speed) <= spike_reject_mps) ? 1U : 0U;
 }
+
+uint8_t EncoderMath_RecordDeltaOrRebuild(encoder_speed_window_t *window,
+                                         int32_t delta,
+                                         uint32_t dt_ms,
+                                         float counts_per_rev,
+                                         float wheel_radius_m,
+                                         float max_abs_mps,
+                                         float spike_reject_mps,
+                                         uint8_t min_samples,
+                                         uint8_t rebuild_after_rejects,
+                                         uint8_t *reject_streak,
+                                         uint16_t *rebuild_count)
+{
+  uint8_t accepted;
+
+  accepted = EncoderMath_DeltaAccepted(delta,
+                                       window,
+                                       dt_ms,
+                                       counts_per_rev,
+                                       wheel_radius_m,
+                                       max_abs_mps,
+                                       spike_reject_mps,
+                                       min_samples);
+  if (accepted != 0U)
+  {
+    EncoderMath_SpeedWindowPush(window, delta, dt_ms);
+    if (reject_streak != 0)
+    {
+      *reject_streak = 0U;
+    }
+    return 1U;
+  }
+
+  if (reject_streak != 0)
+  {
+    (*reject_streak)++;
+    if (rebuild_after_rejects != 0U && *reject_streak >= rebuild_after_rejects)
+    {
+      EncoderMath_SpeedWindowReset(window);
+      EncoderMath_SpeedWindowPush(window, delta, dt_ms);
+      *reject_streak = 0U;
+      if (rebuild_count != 0)
+      {
+        (*rebuild_count)++;
+      }
+      return 1U;
+    }
+  }
+
+  return 0U;
+}

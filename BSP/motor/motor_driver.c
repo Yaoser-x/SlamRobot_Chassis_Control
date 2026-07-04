@@ -2,6 +2,7 @@
 
 #include "bsp_config.h"
 #include "chassis_layout.h"
+#include "cmsis_os2.h"
 #include "main.h"
 #include "tim.h"
 
@@ -50,6 +51,8 @@ static motor_runtime_t motor_runtime[MOTOR_ID_COUNT];
 static motor_driver_state_t motor_state;
 static uint8_t phase_switch_gap_calls;
 
+static void MotorDriver_UpdateEffectivePwmAll(void);
+
 static void MotorDriver_UpdateBreakStatus(void)
 {
   uint8_t tim1_break_flag = (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
@@ -81,12 +84,36 @@ static void MotorDriver_UpdateBreakStatus(void)
   {
     motor_state.tim8_break_count++;
   }
+  MotorDriver_UpdateEffectivePwmAll();
   __set_PRIMASK(primask);
 }
 
 static uint8_t MotorDriver_IsValidMotor(motor_id_t motor)
 {
   return ((uint32_t)motor < MOTOR_ID_COUNT) ? 1U : 0U;
+}
+
+static int16_t MotorDriver_ComputeEffectivePwm(motor_id_t motor)
+{
+  uint32_t index = (uint32_t)motor;
+
+  if (MotorDriver_IsValidMotor(motor) == 0U ||
+      ChassisLayout_MotorEnabled(motor) == 0U ||
+      motor_state.fault_active[index] != 0U ||
+      motor_state.tim1_moe_active == 0U ||
+      motor_state.tim1_break_flag != 0U)
+  {
+    return 0;
+  }
+  return motor_runtime[index].applied_pwm;
+}
+
+static void MotorDriver_UpdateEffectivePwmAll(void)
+{
+  for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    motor_state.effective_pwm[i] = MotorDriver_ComputeEffectivePwm((motor_id_t)i);
+  }
 }
 
 static int16_t MotorDriver_ClampPositivePermille(int16_t permille)
@@ -197,6 +224,7 @@ static void MotorDriver_RecordRuntime(motor_id_t motor)
   motor_state.output_permille[(uint32_t)motor] = runtime->applied_pwm;
   motor_state.requested_pwm[(uint32_t)motor] = runtime->requested_pwm;
   motor_state.applied_pwm[(uint32_t)motor] = runtime->applied_pwm;
+  motor_state.effective_pwm[(uint32_t)motor] = MotorDriver_ComputeEffectivePwm(motor);
   motor_state.current_ph_dir[(uint32_t)motor] = runtime->current_ph_dir;
   motor_state.pending_dir[(uint32_t)motor] = runtime->pending_dir;
   motor_state.phase[(uint32_t)motor] = runtime->phase;
@@ -466,6 +494,7 @@ void MotorDriver_StopAll(motor_stop_mode_t mode)
 void MotorDriver_UpdateFaults(void)
 {
   uint8_t fault_active[MOTOR_ID_COUNT];
+  uint32_t now_ms = osKernelGetTickCount();
   uint32_t primask;
 
   MotorDriver_UpdateBreakStatus();
@@ -486,8 +515,20 @@ void MotorDriver_UpdateFaults(void)
   __disable_irq();
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
+    uint8_t previous = motor_state.fault_active[i];
     motor_state.fault_active[i] = fault_active[i];
+    if (previous != fault_active[i])
+    {
+      motor_state.fault_edge_count[i]++;
+      motor_state.fault_last_change_ms[i] = now_ms;
+      motor_state.fault_low_since_ms[i] = (fault_active[i] != 0U) ? now_ms : 0U;
+    }
+    else if (fault_active[i] == 0U)
+    {
+      motor_state.fault_low_since_ms[i] = 0U;
+    }
   }
+  MotorDriver_UpdateEffectivePwmAll();
   __set_PRIMASK(primask);
 }
 

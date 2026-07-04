@@ -8,6 +8,7 @@
 #include "encoder_driver.h"
 #include "esp12f_flash_bridge.h"
 #include "line_control.h"
+#include "motor_driver.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -150,6 +151,7 @@ static void Esp12fComm_SendStatus(uint32_t now_ms)
   upper_status_payload_t status = {0};
   chassis_control_state_t chassis_state;
   encoder_state_t encoder_state;
+  motor_driver_state_t motor_state;
   system_monitor_state_t monitor_state;
   uint8_t payload_len;
   uint16_t frame_len;
@@ -167,6 +169,7 @@ static void Esp12fComm_SendStatus(uint32_t now_ms)
 
   ChassisControl_GetState(&chassis_state);
   EncoderDriver_GetState(&encoder_state);
+  MotorDriver_GetState(&motor_state);
   SystemMonitor_GetState(&monitor_state);
 
   status.battery_voltage = monitor_state.battery_voltage;
@@ -196,7 +199,7 @@ static void Esp12fComm_SendStatus(uint32_t now_ms)
     status.encoder_count[i] = encoder_state.count[i];
     status.motor_current_a[i] = monitor_state.motor_current_a[i];
     status.motor_target_mps[i] = chassis_state.motor_target_mps[i];
-    status.motor_output_permille[i] = chassis_state.motor_output_permille[i];
+    status.motor_output_permille[i] = motor_state.effective_pwm[i];
     if (ChassisLayout_MotorEnabled(motor) != 0U)
     {
       status.motor_enabled_mask |= (uint8_t)(1U << i);

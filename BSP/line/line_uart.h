@@ -23,8 +23,14 @@ typedef struct
   uint32_t rx_frames;
   uint32_t overflow_count;
   uint32_t rx_protocol_errors;
+  uint32_t tx_frames;
+  uint32_t tx_busy_drops;
+  uint32_t tx_failures;
+  uint32_t uart_errors;
+  uint32_t dma_restarts;
   uint16_t last_frame_len;
   uint8_t  last_frame[32];
+  uint8_t  tx_busy;
 } line_uart_state_t;
 
 typedef struct
@@ -41,6 +47,8 @@ void     LineUart_GetState(line_uart_state_t *state);
 uint8_t  LineUart_GetSensorData(line_sensor_data_t *data);
 void     LineUart_InitSensor(void);
 void     LineUart_RequestAnalog(void);
+void     LineUart_OnTxCplt(void);
+void     LineUart_OnUartError(void);
 
 #ifdef __cplusplus
 }

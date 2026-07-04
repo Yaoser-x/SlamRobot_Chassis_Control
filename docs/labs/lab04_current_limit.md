@@ -2,26 +2,25 @@
 
 ## 实验目标
 
-1. **知识**：理解分流电阻测流原理、ADC 采样窗口统计、EMA 低通滤波、过流去抖保护机制
+1. **知识**：理解 DRV8874 IPROPI 电流镜采样、ADC 采样窗口统计、EMA 低通滤波、过流去抖保护机制
 2. **技能**：能通过 `status`/`log 1 adc adcraw` 观察稳定电流和窗口统计，分析空载/带载/堵转三种工况下的电流特征
 3. **素养**：理解电机电流与负载的对应关系，建立"电流即力矩"的电机控制直觉
 
 ## 实验原理
 
-### 1. 分流电阻测流
+### 1. IPROPI 电流镜测流
 
 DRV8874 的 IPROPI 引脚输出与电机电流成比例的电压，经 ADC 采样后换算：
 
 ```
-I_motor = abs(V_adc − V_zero) / (R_shunt × Gain)
-         = abs(ADC_raw − ADC_zero_raw) / 4095 × 3.3 / 1.0
+I_motor = max(V_adc - V_zero, 0) / MOTOR_CURRENT_VOLTS_PER_AMP
+         = max(ADC_raw - ADC_zero_raw, 0) / 4095 × 3.3 / 1.0
 ```
 
 参数（`chassis_config.h`）：
 
 | 参数 | 符号 | 默认值 |
 |------|------|--------|
-| 分流电阻 | `MOTOR_CURRENT_SHUNT_OHM` | 0.1 Ω |
 | 上电零点采样 | `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | 256 |
 | 电压-电流比 | `MOTOR_CURRENT_VOLTS_PER_AMP` | 1.0 V/A |
 | 实时电流节流 | `MOTOR_CURRENT_LIMIT_A` | 0.0 A（关闭） |
@@ -36,9 +35,10 @@ I_motor = abs(V_adc − V_zero) / (R_shunt × Gain)
 ADC1 由 TIM8 TRGO 触发约 2kHz 采样；`AdcMonitor_Update()` 每 20ms 取走一批样本并计算：
 
 ```
-I_mean    = mean(abs(raw - zero))
-I_rms     = sqrt(mean((raw - zero)^2))
-I_peak    = max(abs(raw - zero))
+delta     = max(raw - zero, 0)
+I_mean    = mean(delta)
+I_rms     = sqrt(mean(delta^2))
+I_peak    = max(delta)
 I_trimmed = 去掉窗口最大/最小后的均值
 ```
 

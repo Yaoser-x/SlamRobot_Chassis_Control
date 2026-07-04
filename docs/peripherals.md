@@ -86,7 +86,6 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | `ADC_MONITOR_RESOLUTION_COUNTS` | `4095.0f` | 12-bit 满量程 |
 | `ADC_MONITOR_BATTERY_FILTER_ALPHA` | `0.10f` | 电池电压 EMA 滤波系数 |
 | `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | `256U` | 上电电流零点采样次数 |
-| `MOTOR_CURRENT_SHUNT_OHM` | `0.1f` | 电流采样电阻 |
 | `MOTOR_CURRENT_VOLTS_PER_AMP` | `1.0f` | 电流传感器实测初始标定 (1.0V/A) |
 | `MOTOR_CURRENT_FILTER_ALPHA` | `0.25f` | 电流窗口 trimmed 值的 EMA 滤波系数 |
 | `MOTOR_CURRENT_LIMIT_A` | `0.0f` | 实时 PWM 电流节流阈值；0 表示关闭 |

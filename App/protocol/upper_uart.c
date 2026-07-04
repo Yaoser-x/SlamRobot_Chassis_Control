@@ -8,6 +8,7 @@
 #include "encoder_driver.h"
 #include "imu_bmi270.h"
 #include "line_control.h"
+#include "motor_driver.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -34,6 +35,7 @@ static uint32_t upper_last_status_ms;
 static uint32_t upper_last_rx_timestamp_ms;
 static upper_uart_state_t upper_state;
 static uint8_t upper_parser_idle_cycles;
+static uint16_t upper_last_write_pos;
 static uint8_t upper_imu_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint8_t upper_imu_payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
 static uint32_t upper_last_imu_status_ms;
@@ -45,6 +47,29 @@ static void UpperUart_ResetParser(void)
   upper_rx_state = UPPER_RX_WAIT_HEAD0;
   upper_frame_len = 0U;
   upper_frame_index = 0U;
+}
+
+static void UpperUart_ClearUartFlags(void)
+{
+  __HAL_UART_CLEAR_OREFLAG(&huart3);
+  __HAL_UART_CLEAR_NEFLAG(&huart3);
+  __HAL_UART_CLEAR_FEFLAG(&huart3);
+  __HAL_UART_CLEAR_PEFLAG(&huart3);
+}
+
+static void UpperUart_RestartRxDma(uint8_t count_restart)
+{
+  (void)HAL_UART_DMAStop(&huart3);
+  UpperUart_ClearUartFlags();
+  upper_rx_read_pos = 0U;
+  upper_last_write_pos = 0U;
+  upper_parser_idle_cycles = 0U;
+  UpperUart_ResetParser();
+  (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
+  if (count_restart != 0U)
+  {
+    upper_state.rx_resync_restarts++;
+  }
 }
 
 static void UpperUart_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len)
@@ -126,6 +151,7 @@ static void UpperUart_ProcessByte(uint8_t byte)
           UpperUart_HandleFrame(cmd, payload, payload_len);
           /* Record RX timestamp for OLED module online detection */
           upper_last_rx_timestamp_ms = osKernelGetTickCount();
+          upper_state.last_valid_frame_ms = upper_last_rx_timestamp_ms;
         }
         else
         {
@@ -165,14 +191,28 @@ static void UpperUart_PollRx(void)
       if (upper_parser_idle_cycles >= UPPER_PARSER_TIMEOUT_CYCLES)
       {
         upper_state.rx_timeout_resets++;
-        UpperUart_ResetParser();
-        upper_parser_idle_cycles = 0U;
+        UpperUart_RestartRxDma(1U);
       }
     }
     return;
   }
 
   upper_parser_idle_cycles = 0U;
+  {
+    uint16_t unread = (write_pos >= upper_rx_read_pos) ?
+                      (uint16_t)(write_pos - upper_rx_read_pos) :
+                      (uint16_t)(UPPER_UART_RX_BUFFER_SIZE - upper_rx_read_pos + write_pos);
+    uint16_t advanced = (write_pos >= upper_last_write_pos) ?
+                        (uint16_t)(write_pos - upper_last_write_pos) :
+                        (uint16_t)(UPPER_UART_RX_BUFFER_SIZE - upper_last_write_pos + write_pos);
+    if (advanced > 0U && unread >= (UPPER_UART_RX_BUFFER_SIZE - UPPER_PROTOCOL_MAX_FRAME))
+    {
+      upper_state.rx_overwrite_count++;
+      UpperUart_RestartRxDma(1U);
+      return;
+    }
+    upper_last_write_pos = write_pos;
+  }
   while (upper_rx_read_pos != write_pos)
   {
     UpperUart_ProcessByte(upper_rx_dma_buffer[upper_rx_read_pos]);
@@ -189,6 +229,7 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   upper_status_payload_t status = {0};
   chassis_control_state_t chassis_state;
   encoder_state_t encoder_state;
+  motor_driver_state_t motor_state;
   system_monitor_state_t monitor_state;
   uint8_t payload_len;
   uint16_t frame_len;
@@ -206,6 +247,7 @@ static void UpperUart_SendStatus(uint32_t now_ms)
 
   ChassisControl_GetState(&chassis_state);
   EncoderDriver_GetState(&encoder_state);
+  MotorDriver_GetState(&motor_state);
   SystemMonitor_GetState(&monitor_state);
 
   status.battery_voltage = monitor_state.battery_voltage;
@@ -235,7 +277,7 @@ static void UpperUart_SendStatus(uint32_t now_ms)
     status.encoder_count[i] = encoder_state.count[i];
     status.motor_current_a[i] = monitor_state.motor_current_a[i];
     status.motor_target_mps[i] = chassis_state.motor_target_mps[i];
-    status.motor_output_permille[i] = chassis_state.motor_output_permille[i];
+    status.motor_output_permille[i] = motor_state.effective_pwm[i];
     if (ChassisLayout_MotorEnabled(motor) != 0U)
     {
       status.motor_enabled_mask |= (uint8_t)(1U << i);
@@ -253,6 +295,7 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   if (upper_state.rx_checksum_errors > 0U)  { status.comm_health_flags |= UPPER_COMM_HEALTH_CRC_ERR; }
   if (upper_state.rx_timeout_resets > 0U)   { status.comm_health_flags |= UPPER_COMM_HEALTH_TIMEOUT; }
   if (upper_state.tx_busy_drops > 0U)       { status.comm_health_flags |= UPPER_COMM_HEALTH_TX_DROP; }
+  if (upper_state.rx_overwrite_count > 0U)  { status.comm_health_flags |= UPPER_COMM_HEALTH_TIMEOUT; }
 
   payload_len = UpperProtocol_BuildStatusPayload(&status, upper_status_payload, sizeof(upper_status_payload));
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_STATUS, upper_status_payload, payload_len, upper_tx_frame, sizeof(upper_tx_frame));
@@ -272,6 +315,7 @@ static void UpperUart_SendStatus(uint32_t now_ms)
 void UpperUart_Init(void)
 {
   upper_rx_read_pos = 0U;
+  upper_last_write_pos = 0U;
   upper_last_status_ms = 0U;
   upper_state = (upper_uart_state_t){0};
   upper_last_rx_timestamp_ms = 0U;
@@ -372,13 +416,20 @@ void UpperUart_GetState(upper_uart_state_t *state)
 void UpperUart_OnUartError(void)
 {
   upper_state.uart_errors++;
-  upper_rx_read_pos = 0U;
-  upper_parser_idle_cycles = 0U;
-  UpperUart_ResetParser();
-  (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
+  UpperUart_RestartRxDma(1U);
 }
 
 uint32_t UpperUart_GetLastRxTimestamp(void)
 {
   return upper_last_rx_timestamp_ms;
+}
+
+void UpperUart_OnDmaHalf(void)
+{
+  upper_state.rx_dma_half_count++;
+}
+
+void UpperUart_OnDmaFull(void)
+{
+  upper_state.rx_dma_full_count++;
 }

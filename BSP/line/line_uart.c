@@ -28,9 +28,12 @@ static uint8_t           line_frame_buf[LINE_SENSOR_FRAME_LEN];
 static uint8_t           line_frame_index;
 static uint8_t           line_data_len;
 static uint8_t           line_data_idx;
+static uint8_t           line_tx_busy;
 
 /* 最近一次成功解析的传感器数据 */
 static line_sensor_data_t line_sensor_data;
+static const uint8_t line_manual_mode_cmd = 0x00U;
+static const uint8_t line_analog_query_cmd = LINE_SENSOR_CMD_ANALOG;
 
 /* ---------- 校验和 ---------- */
 
@@ -44,6 +47,57 @@ static uint8_t LineUart_ComputeChecksum(const uint8_t *buf, uint8_t data_len)
     sum += buf[i];
   }
   return (uint8_t)(~sum);
+}
+
+static void LineUart_ResetParser(void)
+{
+  line_rx_state = LINE_RX_WAIT_HEAD0;
+  line_frame_index = 0U;
+  line_data_len = 0U;
+  line_data_idx = 0U;
+}
+
+static void LineUart_ClearUartFlags(void)
+{
+  __HAL_UART_CLEAR_OREFLAG(&huart4);
+  __HAL_UART_CLEAR_NEFLAG(&huart4);
+  __HAL_UART_CLEAR_FEFLAG(&huart4);
+  __HAL_UART_CLEAR_PEFLAG(&huart4);
+}
+
+static void LineUart_RestartRxDma(uint8_t count_restart)
+{
+  (void)HAL_UART_DMAStop(&huart4);
+  LineUart_ClearUartFlags();
+  line_rx_read_pos = 0U;
+  LineUart_ResetParser();
+  (void)HAL_UART_Receive_DMA(&huart4, line_rx_dma_buffer, LINE_UART_RX_BUFFER_SIZE);
+  if (count_restart != 0U)
+  {
+    line_state.dma_restarts++;
+  }
+}
+
+static void LineUart_SendByteAsync(const uint8_t *cmd)
+{
+  if (line_tx_busy != 0U)
+  {
+    line_state.tx_busy_drops++;
+    return;
+  }
+
+  line_tx_busy = 1U;
+  line_state.tx_busy = 1U;
+  if (HAL_UART_Transmit_IT(&huart4, (uint8_t *)cmd, 1U) == HAL_OK)
+  {
+    line_state.tx_frames++;
+  }
+  else
+  {
+    line_tx_busy = 0U;
+    line_state.tx_busy = 0U;
+    line_state.tx_failures++;
+  }
 }
 
 /* ---------- 帧解析 ---------- */
@@ -163,10 +217,8 @@ static void LineUart_ProcessByte(uint8_t byte)
 void LineUart_Init(void)
 {
   line_rx_read_pos = 0U;
-  line_rx_state = LINE_RX_WAIT_HEAD0;
-  line_frame_index = 0U;
-  line_data_len = 0U;
-  line_data_idx = 0U;
+  line_tx_busy = 0U;
+  LineUart_ResetParser();
   line_state = (line_uart_state_t){0};
   line_sensor_data = (line_sensor_data_t){0};
   (void)HAL_UART_Receive_DMA(&huart4, line_rx_dma_buffer, LINE_UART_RX_BUFFER_SIZE);
@@ -224,13 +276,24 @@ void LineUart_InitSensor(void)
    *       之后用 LineUart_RequestAnalog() 发送 0x02 请求 21 字节模拟量帧。
    * 参考：HiWonder Arduino UART 例程
    */
-  uint8_t cmd = 0x00U;
-  (void)HAL_UART_Transmit(&huart4, &cmd, 1U, 100U);
+  LineUart_SendByteAsync(&line_manual_mode_cmd);
 }
 
 void LineUart_RequestAnalog(void)
 {
   /* 发送 0x02 请求模拟量帧，传感器返回 21 字节: 0x55 0xAA 0x02 0x10 CH1..CH8 CHECKSUM */
-  uint8_t query = 0x02U;
-  (void)HAL_UART_Transmit(&huart4, &query, 1U, 100U);
+  LineUart_SendByteAsync(&line_analog_query_cmd);
+}
+
+void LineUart_OnTxCplt(void)
+{
+  line_tx_busy = 0U;
+  line_state.tx_busy = 0U;
+}
+
+void LineUart_OnUartError(void)
+{
+  line_state.uart_errors++;
+  LineUart_OnTxCplt();
+  LineUart_RestartRxDma(1U);
 }

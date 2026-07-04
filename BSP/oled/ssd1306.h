@@ -28,6 +28,8 @@ void SSD1306_DrawString(uint8_t x, uint8_t page, const char *str,
 void SSD1306_FillRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t on);
 void SSD1306_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h,
                              uint8_t percent);
+uint32_t SSD1306_GetI2cErrorCount(void);
+uint32_t SSD1306_GetI2cRecoveryCount(void);
 
 #ifdef __cplusplus
 }

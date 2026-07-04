@@ -8,12 +8,59 @@
 #include <string.h>
 
 static uint8_t framebuffer[SSD1306_WIDTH * SSD1306_PAGES];
+static uint8_t dirty_page_mask = (uint8_t)((1U << SSD1306_PAGES) - 1U);
+static uint8_t i2c_consecutive_failures;
+static uint32_t i2c_error_count;
+static uint32_t i2c_recovery_count;
+
+#define SSD1306_I2C_RECOVERY_THRESHOLD 3U
+
+static void SSD1306_MarkPageDirty(uint8_t page)
+{
+  if (page < SSD1306_PAGES)
+  {
+    dirty_page_mask |= (uint8_t)(1U << page);
+  }
+}
+
+static void SSD1306_MarkAllDirty(void)
+{
+  dirty_page_mask = (uint8_t)((1U << SSD1306_PAGES) - 1U);
+}
+
+static void SSD1306_RecoverI2c(void)
+{
+  (void)HAL_I2C_DeInit(&hi2c1);
+  (void)HAL_I2C_Init(&hi2c1);
+  i2c_consecutive_failures = 0U;
+  i2c_recovery_count++;
+}
+
+static uint8_t SSD1306_RecordI2cStatus(HAL_StatusTypeDef status)
+{
+  if (status == HAL_OK)
+  {
+    i2c_consecutive_failures = 0U;
+    return 1U;
+  }
+
+  i2c_error_count++;
+  if (i2c_consecutive_failures < 255U)
+  {
+    i2c_consecutive_failures++;
+  }
+  if (i2c_consecutive_failures >= SSD1306_I2C_RECOVERY_THRESHOLD)
+  {
+    SSD1306_RecoverI2c();
+  }
+  return 0U;
+}
 
 /* --- Internal I2C command write --- */
-static void SSD1306_WriteCmd(uint8_t cmd)
+static uint8_t SSD1306_WriteCmd(uint8_t cmd)
 {
-  HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1),
-                    0x00, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 10);
+  return SSD1306_RecordI2cStatus(HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1),
+                                                   0x00, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 10));
 }
 
 /* --- Initialization sequence --- */
@@ -72,6 +119,7 @@ void SSD1306_Init(void)
 void SSD1306_Clear(void)
 {
   memset(framebuffer, 0x00, sizeof(framebuffer));
+  SSD1306_MarkAllDirty();
 }
 
 /* --- Full screen refresh (page-mode bulk write, 8 transactions) --- */
@@ -81,17 +129,27 @@ void SSD1306_Refresh(void)
 
   for (page = 0; page < SSD1306_PAGES; page++)
   {
+    if ((dirty_page_mask & (uint8_t)(1U << page)) == 0U)
+    {
+      continue;
+    }
     /* Set page address (0xB0~0xB7) */
-    SSD1306_WriteCmd((uint8_t)(0xB0 | page));
+    if (SSD1306_WriteCmd((uint8_t)(0xB0 | page)) == 0U)
+    {
+      continue;
+    }
     /* Set column address to 0 */
-    SSD1306_WriteCmd(0x00); /* column low nibble */
-    SSD1306_WriteCmd(0x10); /* column high nibble = 0 */
+    if (SSD1306_WriteCmd(0x00) == 0U) { continue; } /* column low nibble */
+    if (SSD1306_WriteCmd(0x10) == 0U) { continue; } /* column high nibble = 0 */
 
     /* Send 128 bytes for this page in ONE I2C transaction */
-    (void)HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1),
-                            0x40, I2C_MEMADD_SIZE_8BIT,
-                            &framebuffer[(uint16_t)page * SSD1306_WIDTH],
-                            SSD1306_WIDTH, 20);
+    if (SSD1306_RecordI2cStatus(HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1),
+                                                  0x40, I2C_MEMADD_SIZE_8BIT,
+                                                  &framebuffer[(uint16_t)page * SSD1306_WIDTH],
+                                                  SSD1306_WIDTH, 20)) != 0U)
+    {
+      dirty_page_mask &= (uint8_t)~(1U << page);
+    }
   }
 }
 
@@ -101,10 +159,19 @@ void SSD1306_SetPixel(uint8_t x, uint8_t y, uint8_t on)
   if (x >= SSD1306_WIDTH || y >= SSD1306_HEIGHT) return;
 
   uint16_t idx = (uint16_t)(y / 8) * SSD1306_WIDTH + x;
+  uint8_t old = framebuffer[idx];
   if (on)
+  {
     framebuffer[idx] |= (uint8_t)(1U << (y & 0x07));
+  }
   else
+  {
     framebuffer[idx] &= (uint8_t)(~(1U << (y & 0x07)));
+  }
+  if (framebuffer[idx] != old)
+  {
+    SSD1306_MarkPageDirty((uint8_t)(y / 8U));
+  }
 }
 
 /* --- Draw character (page-major font format) --- */
@@ -129,9 +196,23 @@ void SSD1306_DrawChar(uint8_t x, uint8_t page, char ch,
                         + (uint16_t)pg * font_w + col;
       uint16_t fb_idx = (uint16_t)page_y * SSD1306_WIDTH + col_x;
 
-      framebuffer[fb_idx] = font[font_idx];
+      if (framebuffer[fb_idx] != font[font_idx])
+      {
+        framebuffer[fb_idx] = font[font_idx];
+        SSD1306_MarkPageDirty(page_y);
+      }
     }
   }
+}
+
+uint32_t SSD1306_GetI2cErrorCount(void)
+{
+  return i2c_error_count;
+}
+
+uint32_t SSD1306_GetI2cRecoveryCount(void)
+{
+  return i2c_recovery_count;
 }
 
 /* --- Draw ASCII string (8x16 font default) --- */

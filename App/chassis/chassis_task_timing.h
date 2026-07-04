@@ -21,6 +21,13 @@ typedef enum
   CHASSIS_TASK_TIMING_COUNT
 } chassis_task_timing_id_t;
 
+typedef struct
+{
+  uint32_t last_heartbeat_ms[CHASSIS_TASK_TIMING_COUNT];
+  uint32_t timeout_count[CHASSIS_TASK_TIMING_COUNT];
+  uint8_t timed_out[CHASSIS_TASK_TIMING_COUNT];
+} chassis_task_health_t;
+
 uint32_t ChassisTaskTiming_NextWake(uint32_t previous_wake_ms,
                                     uint32_t now_ms,
                                     uint32_t period_ms,
@@ -29,6 +36,9 @@ void ChassisTaskTiming_DelayUntil(chassis_task_timing_id_t task,
                                   uint32_t *next_wake_ms,
                                   uint32_t period_ms);
 uint32_t ChassisTaskTiming_GetMissedCount(chassis_task_timing_id_t task);
+void ChassisTaskTiming_Heartbeat(chassis_task_timing_id_t task, uint32_t now_ms);
+void ChassisTaskTiming_UpdateTimeouts(uint32_t now_ms);
+void ChassisTaskTiming_GetHealth(chassis_task_health_t *health);
 void ChassisTaskTiming_Reset(void);
 
 #ifdef __cplusplus

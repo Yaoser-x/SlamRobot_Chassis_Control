@@ -39,6 +39,12 @@ uint32_t osKernelGetTickCount(void)
   return fake_tick_ms;
 }
 
+int32_t osDelayUntil(uint32_t ticks)
+{
+  fake_tick_ms = ticks;
+  return 0;
+}
+
 void AdcMonitor_Update(void)
 {
 }

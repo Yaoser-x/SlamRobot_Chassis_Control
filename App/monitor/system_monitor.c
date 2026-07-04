@@ -109,6 +109,7 @@ void SystemMonitor_Update(void)
   uint8_t estop_active;
   uint8_t fault_stop_active;
   uint8_t active_source;
+  chassis_task_health_t task_health;
   system_monitor_state_t next_state;
   uint8_t previous_overcurrent_count[MOTOR_ID_COUNT];
   uint8_t next_overcurrent_count[MOTOR_ID_COUNT];
@@ -120,6 +121,7 @@ void SystemMonitor_Update(void)
   uint32_t primask;
 
   now_ms = osKernelGetTickCount();
+  ChassisTaskTiming_UpdateTimeouts(now_ms);
   AdcMonitor_Update();
   MotorDriver_UpdateFaults();
   AdcMonitor_GetState(&adc_state);
@@ -128,6 +130,7 @@ void SystemMonitor_Update(void)
   estop_active = ControlManager_IsEmergencyStop();
   fault_stop_active = ControlManager_IsFaultStop();
   active_source = ControlManager_GetActiveSource();
+  ChassisTaskTiming_GetHealth(&task_health);
 
   primask = __get_PRIMASK();
   __disable_irq();
@@ -140,7 +143,7 @@ void SystemMonitor_Update(void)
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     uint8_t active = (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
-                      motor_state.output_permille[i] != 0) ? 1U : 0U;
+                      motor_state.effective_pwm[i] != 0) ? 1U : 0U;
     if (active != 0U)
     {
       inactive_since_ms[i] = now_ms;
@@ -173,6 +176,12 @@ void SystemMonitor_Update(void)
   next_state.left_current_a = adc_state.left_current_a;
   next_state.right_current_a = adc_state.right_current_a;
   next_state.control_mode = active_source;
+  for (uint8_t i = 0U; i < (uint8_t)CHASSIS_TASK_TIMING_COUNT; ++i)
+  {
+    next_state.task_last_heartbeat_ms[i] = task_health.last_heartbeat_ms[i];
+    next_state.task_timeout_count[i] = task_health.timeout_count[i];
+    next_state.task_timed_out[i] = task_health.timed_out[i];
+  }
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     next_state.motor_current_a[i] = adc_state.current_a[i];
@@ -225,6 +234,12 @@ void SystemMonitor_Update(void)
     monitor_state.motor_current_a[i] = next_state.motor_current_a[i];
   }
   monitor_state.control_mode = next_state.control_mode;
+  for (uint8_t i = 0U; i < (uint8_t)CHASSIS_TASK_TIMING_COUNT; ++i)
+  {
+    monitor_state.task_last_heartbeat_ms[i] = next_state.task_last_heartbeat_ms[i];
+    monitor_state.task_timeout_count[i] = next_state.task_timeout_count[i];
+    monitor_state.task_timed_out[i] = next_state.task_timed_out[i];
+  }
   monitor_state.latched_error_flags |= new_latched_flags;
   latched_after_commit = monitor_state.latched_error_flags;
   monitor_state.error_flags = next_state.error_flags | latched_after_commit;

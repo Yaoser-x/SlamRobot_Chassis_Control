@@ -26,6 +26,16 @@ static encoder_speed_window_t speed_window[MOTOR_ID_COUNT];
 static uint32_t last_update_ms;
 static uint8_t has_last_update;
 
+static float EncoderDriver_AbsF(float value)
+{
+  return (value < 0.0f) ? -value : value;
+}
+
+static int32_t EncoderDriver_AbsI32(int32_t value)
+{
+  return (value < 0) ? -value : value;
+}
+
 int32_t EncoderDriver_DiffCount(uint32_t now, uint32_t last, uint32_t period)
 {
   return EncoderMath_DiffCount(now, last, period);
@@ -96,6 +106,7 @@ void EncoderDriver_Update(uint32_t now_ms)
       encoder_state.delta[i] = 0;
       encoder_state.speed_mps[i] = 0.0f;
       encoder_state.speed_valid[i] = 0U;
+      encoder_state.reject_streak[i] = 0U;
       EncoderMath_SpeedWindowReset(&speed_window[i]);
       continue;
     }
@@ -110,24 +121,27 @@ void EncoderDriver_Update(uint32_t now_ms)
       encoder_state.count[i] += delta[i];
       encoder_state.speed_mps[i] = 0.0f;
       encoder_state.speed_valid[i] = 0U;
+      encoder_state.reject_streak[i] = 0U;
       EncoderMath_SpeedWindowReset(&speed_window[i]);
       valid_all = 0U;
     }
     else
     {
-      if (EncoderMath_DeltaAccepted(delta[i],
-                                    &speed_window[i],
-                                    dt_ms,
-                                    counts_per_rev,
-                                    CHASSIS_WHEEL_RADIUS_M,
-                                    CHASSIS_ENCODER_MAX_ABS_MPS,
-                                    CHASSIS_ENCODER_SPIKE_REJECT_MPS,
-                                    CHASSIS_ENCODER_FILTER_MIN_SAMPLES) != 0U)
+      if (EncoderMath_RecordDeltaOrRebuild(&speed_window[i],
+                                           delta[i],
+                                           dt_ms,
+                                           counts_per_rev,
+                                           CHASSIS_WHEEL_RADIUS_M,
+                                           CHASSIS_ENCODER_MAX_ABS_MPS,
+                                           CHASSIS_ENCODER_SPIKE_REJECT_MPS,
+                                           CHASSIS_ENCODER_FILTER_MIN_SAMPLES,
+                                           CHASSIS_ENCODER_REBUILD_REJECTS,
+                                           &encoder_state.reject_streak[i],
+                                           &encoder_state.window_rebuild_count[i]) != 0U)
       {
         encoder_state.delta[i] = delta[i];
         encoder_state.count[i] += delta[i];
         encoder_state.consecutive_anomalies[i] = 0U;
-        EncoderMath_SpeedWindowPush(&speed_window[i], delta[i], dt_ms);
       }
       else
       {
@@ -174,6 +188,7 @@ void EncoderDriver_Update(uint32_t now_ms)
   encoder_state.right_speed_mps = (right_count != 0U) ? (right_speed_sum / (float)right_count) : 0.0f;
   encoder_state.left_speed_valid = (left_count != 0U) ? 1U : 0U;
   encoder_state.right_speed_valid = (right_count != 0U) ? 1U : 0U;
+  encoder_state.side_consistency_flags = 0UL;
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
@@ -189,6 +204,100 @@ void EncoderDriver_Update(uint32_t now_ms)
         encoder_state.speed_valid[i] == 0U)
     {
       encoder_state.right_speed_valid = 0U;
+    }
+  }
+  if (left_count >= 2U)
+  {
+    float left_a_speed = 0.0f;
+    float left_b_speed = 0.0f;
+    int32_t left_a_count = 0;
+    int32_t left_b_count = 0;
+    int32_t left_a_delta = 0;
+    int32_t left_b_delta = 0;
+    uint8_t found = 0U;
+
+    for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+      if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+          ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)
+      {
+        if (found == 0U)
+        {
+          left_a_speed = encoder_state.speed_mps[i];
+          left_a_count = encoder_state.count[i];
+          left_a_delta = encoder_state.delta[i];
+        }
+        else
+        {
+          left_b_speed = encoder_state.speed_mps[i];
+          left_b_count = encoder_state.count[i];
+          left_b_delta = encoder_state.delta[i];
+        }
+        found++;
+      }
+    }
+    if (found >= 2U)
+    {
+      if (EncoderDriver_AbsF(left_a_speed - left_b_speed) > CHASSIS_ENCODER_SIDE_SPEED_DIFF_MPS)
+      {
+        encoder_state.side_consistency_flags |= ENCODER_SIDE_CONSISTENCY_LEFT_SPEED;
+      }
+      if (EncoderDriver_AbsI32(left_a_count - left_b_count) > CHASSIS_ENCODER_SIDE_COUNT_DIFF)
+      {
+        encoder_state.side_consistency_flags |= ENCODER_SIDE_CONSISTENCY_LEFT_COUNT;
+      }
+      if (left_a_delta != 0 && left_b_delta != 0 &&
+          ((left_a_delta > 0 && left_b_delta < 0) || (left_a_delta < 0 && left_b_delta > 0)))
+      {
+        encoder_state.side_consistency_flags |= ENCODER_SIDE_CONSISTENCY_LEFT_DIRECTION;
+      }
+    }
+  }
+  if (right_count >= 2U)
+  {
+    float right_a_speed = 0.0f;
+    float right_b_speed = 0.0f;
+    int32_t right_a_count = 0;
+    int32_t right_b_count = 0;
+    int32_t right_a_delta = 0;
+    int32_t right_b_delta = 0;
+    uint8_t found = 0U;
+
+    for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+      if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+          ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_RIGHT)
+      {
+        if (found == 0U)
+        {
+          right_a_speed = encoder_state.speed_mps[i];
+          right_a_count = encoder_state.count[i];
+          right_a_delta = encoder_state.delta[i];
+        }
+        else
+        {
+          right_b_speed = encoder_state.speed_mps[i];
+          right_b_count = encoder_state.count[i];
+          right_b_delta = encoder_state.delta[i];
+        }
+        found++;
+      }
+    }
+    if (found >= 2U)
+    {
+      if (EncoderDriver_AbsF(right_a_speed - right_b_speed) > CHASSIS_ENCODER_SIDE_SPEED_DIFF_MPS)
+      {
+        encoder_state.side_consistency_flags |= ENCODER_SIDE_CONSISTENCY_RIGHT_SPEED;
+      }
+      if (EncoderDriver_AbsI32(right_a_count - right_b_count) > CHASSIS_ENCODER_SIDE_COUNT_DIFF)
+      {
+        encoder_state.side_consistency_flags |= ENCODER_SIDE_CONSISTENCY_RIGHT_COUNT;
+      }
+      if (right_a_delta != 0 && right_b_delta != 0 &&
+          ((right_a_delta > 0 && right_b_delta < 0) || (right_a_delta < 0 && right_b_delta > 0)))
+      {
+        encoder_state.side_consistency_flags |= ENCODER_SIDE_CONSISTENCY_RIGHT_DIRECTION;
+      }
     }
   }
   if (encoder_state.left_speed_valid == 0U || encoder_state.right_speed_valid == 0U)

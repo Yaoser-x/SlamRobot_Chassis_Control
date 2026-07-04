@@ -1,5 +1,6 @@
 #include "esp12f_comm.h"
 #include "esp12f_flash_bridge.h"
+#include "line_uart.h"
 #include "upper_uart.h"
 #include "usart1_debug_console.h"
 #include "usart.h"
@@ -9,6 +10,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
   {
     Esp12fFlashBridge_OnRxCplt(huart);
+  }
+  else if (huart == &huart3)
+  {
+    UpperUart_OnDmaFull();
   }
   else if (huart == &huart1)
   {
@@ -20,11 +25,23 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   }
 }
 
+void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == &huart3)
+  {
+    UpperUart_OnDmaHalf();
+  }
+}
+
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
   if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
   {
     Esp12fFlashBridge_OnTxCplt(huart);
+  }
+  else if (huart == &huart4)
+  {
+    LineUart_OnTxCplt();
   }
 }
 
@@ -45,6 +62,10 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   else if (huart == &huart3)
   {
     UpperUart_OnUartError();
+  }
+  else if (huart == &huart4)
+  {
+    LineUart_OnUartError();
   }
 }
 

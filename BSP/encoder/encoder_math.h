@@ -34,6 +34,17 @@ uint8_t EncoderMath_DeltaAccepted(int32_t delta,
                                   float max_abs_mps,
                                   float spike_reject_mps,
                                   uint8_t min_samples);
+uint8_t EncoderMath_RecordDeltaOrRebuild(encoder_speed_window_t *window,
+                                         int32_t delta,
+                                         uint32_t dt_ms,
+                                         float counts_per_rev,
+                                         float wheel_radius_m,
+                                         float max_abs_mps,
+                                         float spike_reject_mps,
+                                         uint8_t min_samples,
+                                         uint8_t rebuild_after_rejects,
+                                         uint8_t *reject_streak,
+                                         uint16_t *rebuild_count);
 
 #ifdef __cplusplus
 }

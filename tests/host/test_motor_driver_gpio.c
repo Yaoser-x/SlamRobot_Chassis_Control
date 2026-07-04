@@ -20,6 +20,7 @@ static GPIO_PinState gpio_state_c[16];
 static GPIO_PinState gpio_state_d[16];
 static uint8_t pwm_start_count_tim1;
 static uint8_t pwm_start_count_tim8;
+static uint32_t fake_tick_ms;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -34,6 +35,11 @@ void __disable_irq(void)
 void __set_PRIMASK(uint32_t primask)
 {
   fake_primask = primask;
+}
+
+uint32_t osKernelGetTickCount(void)
+{
+  return fake_tick_ms;
 }
 
 static uint8_t pin_index(uint16_t pin)
@@ -144,6 +150,7 @@ static GPIO_PinState gpio_c_state(uint16_t pin)
 static void reset_fake_hw(void)
 {
   fake_primask = 0U;
+  fake_tick_ms = 100U;
   tim1_instance = (TIM_TypeDef){ .ARR = 8399U, .BDTR = TIM_BDTR_MOE };
   tim8_instance = (TIM_TypeDef){ .ARR = 8399U, .BDTR = TIM_BDTR_MOE };
   for (uint8_t i = 0U; i < 16U; ++i)
@@ -172,6 +179,7 @@ static void test_motor_driver_uses_gpio_for_phase(void)
   require_int(HostTimGetCompare(&htim8, TIM_CHANNEL_3) == 0U, "M3 PH does not write TIM8 CCR");
   require_int(state.requested_pwm[MOTOR_ID_M3] == 300, "M3 state records requested signed PWM");
   require_int(state.applied_pwm[MOTOR_ID_M3] == 15, "M3 state records ramped signed PWM");
+  require_int(state.effective_pwm[MOTOR_ID_M3] == 15, "M3 effective PWM mirrors applied when outputs active");
   require_int(state.output_permille[MOTOR_ID_M3] == 15, "legacy output mirrors applied signed PWM");
   require_int(state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_RUN, "M3 enters run phase");
 
@@ -337,6 +345,46 @@ static void test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely
   require_int(state.applied_pwm[MOTOR_ID_M3] == -15, "M3 restart ramps PWM after PH settle");
 }
 
+static void test_motor_driver_effective_pwm_and_fault_edges(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  }
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 300, "M3 applied before break");
+  require_int(state.effective_pwm[MOTOR_ID_M3] == 300, "M3 effective before break");
+
+  tim1_instance.BDTR &= ~TIM_BDTR_MOE;
+  fake_tick_ms += 5U;
+  MotorDriver_GetState(&state);
+  require_int(state.applied_pwm[MOTOR_ID_M3] == 300, "M3 applied preserved while break active");
+  require_int(state.effective_pwm[MOTOR_ID_M3] == 0, "M3 effective zero while TIM1 MOE inactive");
+
+  tim1_instance.BDTR |= TIM_BDTR_MOE;
+  gpio_state_d[14] = GPIO_PIN_RESET;
+  fake_tick_ms += 5U;
+  MotorDriver_UpdateFaults();
+  MotorDriver_GetState(&state);
+  require_int(state.fault_active[MOTOR_ID_M2] != 0U, "logical M2 fault follows crossed PD14 pin");
+  require_int(state.fault_edge_count[MOTOR_ID_M2] == 1U, "fault falling edge counted");
+  require_int(state.fault_low_since_ms[MOTOR_ID_M2] != 0U, "fault low timestamp captured");
+
+  gpio_state_d[14] = GPIO_PIN_SET;
+  fake_tick_ms += 5U;
+  MotorDriver_UpdateFaults();
+  MotorDriver_GetState(&state);
+  require_int(state.fault_active[MOTOR_ID_M2] == 0U, "fault release sampled");
+  require_int(state.fault_edge_count[MOTOR_ID_M2] == 2U, "fault rising edge counted");
+  require_int(state.fault_low_since_ms[MOTOR_ID_M2] == 0U, "fault low timestamp cleared");
+  require_int(state.fault_last_change_ms[MOTOR_ID_M2] != 0U, "fault last change timestamp captured");
+}
+
 int main(void)
 {
   test_motor_driver_uses_gpio_for_phase();
@@ -344,5 +392,6 @@ int main(void)
   test_motor_driver_reverses_only_after_brake_and_phase_settle();
   test_motor_driver_serializes_phase_switches();
   test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely();
+  test_motor_driver_effective_pwm_and_fault_edges();
   return 0;
 }

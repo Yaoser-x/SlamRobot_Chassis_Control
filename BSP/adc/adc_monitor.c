@@ -2,6 +2,7 @@
 
 #include "adc.h"
 #include "bsp_config.h"
+#include "chassis_config.h"
 #include "chassis_layout.h"
 #include "tim.h"
 
@@ -16,6 +17,7 @@ static volatile uint16_t adc_window_delta_max[MOTOR_ID_COUNT];
 static volatile uint32_t adc_window_raw_count;
 static volatile uint32_t adc_window_delta_count;
 static volatile uint8_t adc_samples_ready;
+static volatile uint8_t adc_dma_error_latched;
 static adc_monitor_state_t adc_state;
 static uint8_t current_filter_initialized;
 static uint8_t battery_filter_initialized;
@@ -207,6 +209,7 @@ void AdcMonitor_Init(void)
   }
   AdcMonitor_ResetWindowAccumulators();
   adc_samples_ready = 0U;
+  adc_dma_error_latched = 0U;
   current_filter_initialized = 0U;
   battery_filter_initialized = 0U;
   current_zero_valid = 0U;
@@ -240,6 +243,7 @@ void AdcMonitor_Update(void)
   uint8_t zero_valid;
   uint16_t zero_sample_count;
   uint8_t next_current_valid;
+  uint8_t dma_error_latched;
   uint32_t primask;
   uint8_t left_count = 0U;
   uint8_t right_count = 0U;
@@ -266,6 +270,8 @@ void AdcMonitor_Update(void)
   samples_ready = adc_samples_ready;
   raw_sample_count = adc_window_raw_count;
   delta_sample_count = adc_window_delta_count;
+  dma_error_latched = adc_dma_error_latched;
+  adc_dma_error_latched = 0U;
   AdcMonitor_ResetWindowAccumulators();
   zero_valid = current_zero_valid;
   zero_sample_count = current_zero_sample_count;
@@ -294,8 +300,49 @@ void AdcMonitor_Update(void)
   next_state.samples_ready = samples_ready;
   next_state.current_zero_valid = zero_valid;
   next_state.current_zero_sample_count = zero_sample_count;
+  next_state.raw_sample_count = AdcMonitor_ClampU16(raw_sample_count);
+  next_state.missed_window_count = adc_state.missed_window_count;
+  if (CHASSIS_ADC_PERIOD_MS > 0U)
+  {
+    next_state.sample_rate_hz_milli = (uint32_t)((raw_sample_count * 1000000UL) / CHASSIS_ADC_PERIOD_MS);
+  }
+  if (samples_ready != 0U)
+  {
+    next_state.valid_flags |= ADC_MONITOR_VALID_SAMPLES_READY;
+  }
+  if (zero_valid != 0U)
+  {
+    next_state.valid_flags |= ADC_MONITOR_VALID_CURRENT_ZERO_READY;
+  }
+  if (samples_ready == 0U)
+  {
+    next_state.invalid_reason_flags |= ADC_MONITOR_INVALID_NOT_READY;
+  }
+  if (zero_valid == 0U)
+  {
+    next_state.invalid_reason_flags |= ADC_MONITOR_INVALID_ZERO_CALIBRATING;
+  }
+  if (raw_sample_count == 0UL)
+  {
+    next_state.invalid_reason_flags |= ADC_MONITOR_INVALID_NO_NEW_SAMPLE;
+    if (zero_valid != 0U)
+    {
+      next_state.missed_window_count = AdcMonitor_ClampU16((uint32_t)next_state.missed_window_count + 1UL);
+    }
+  }
+  if (dma_error_latched != 0U)
+  {
+    next_state.invalid_reason_flags |= ADC_MONITOR_INVALID_DMA_ERROR;
+  }
+  if (zero_valid != 0U && delta_sample_count == 0UL)
+  {
+    next_state.invalid_reason_flags |= ADC_MONITOR_INVALID_SAMPLE_RATE;
+  }
   next_current_valid = (samples_ready != 0U &&
                         zero_valid != 0U &&
+                        raw_sample_count != 0UL &&
+                        delta_sample_count != 0UL &&
+                        dma_error_latched == 0U &&
                         ADC_MONITOR_CALIBRATION_ENABLED != 0U &&
                         MOTOR_CURRENT_VOLTS_PER_AMP > 0.0f) ? 1U : 0U;
   next_state.current_valid = next_current_valid;
@@ -393,7 +440,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
     if (zero_valid != 0U)
     {
       uint16_t zero_raw = current_zero_raw[i];
-      uint16_t delta = (raw >= zero_raw) ? (uint16_t)(raw - zero_raw) : (uint16_t)(zero_raw - raw);
+      uint16_t delta = (raw >= zero_raw) ? (uint16_t)(raw - zero_raw) : 0U;
       adc_window_delta_sum[i] += delta;
       adc_window_delta_sq_sum[i] += (uint64_t)delta * (uint64_t)delta;
       if (adc_window_delta_count == 0UL)
@@ -435,4 +482,12 @@ void AdcMonitor_GetState(adc_monitor_state_t *state)
   __disable_irq();
   *state = adc_state;
   __set_PRIMASK(primask);
+}
+
+void HAL_ADC_ErrorCallback(ADC_HandleTypeDef *hadc)
+{
+  if (hadc == &hadc1)
+  {
+    adc_dma_error_latched = 1U;
+  }
 }

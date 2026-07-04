@@ -9,6 +9,14 @@
 extern "C" {
 #endif
 
+#define ADC_MONITOR_VALID_SAMPLES_READY       (1UL << 0)
+#define ADC_MONITOR_VALID_CURRENT_ZERO_READY  (1UL << 1)
+#define ADC_MONITOR_INVALID_NOT_READY         (1UL << 0)
+#define ADC_MONITOR_INVALID_ZERO_CALIBRATING  (1UL << 1)
+#define ADC_MONITOR_INVALID_NO_NEW_SAMPLE     (1UL << 2)
+#define ADC_MONITOR_INVALID_DMA_ERROR         (1UL << 3)
+#define ADC_MONITOR_INVALID_SAMPLE_RATE       (1UL << 4)
+
 typedef struct
 {
   uint16_t raw_current[MOTOR_ID_COUNT];
@@ -25,6 +33,11 @@ typedef struct
   float right_current_a;
   uint16_t current_zero_sample_count;
   uint16_t current_sample_count[MOTOR_ID_COUNT];
+  uint16_t raw_sample_count;
+  uint16_t missed_window_count;
+  uint32_t sample_rate_hz_milli;
+  uint32_t valid_flags;
+  uint32_t invalid_reason_flags;
   uint8_t samples_ready;
   uint8_t current_zero_valid;
   uint8_t current_valid;

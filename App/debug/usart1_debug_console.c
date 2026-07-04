@@ -270,6 +270,7 @@ static size_t DebugConsole_WriteFieldData(char *tx,
   adc_monitor_state_t adc;
   encoder_state_t enc;
   chassis_control_state_t cs;
+  motor_driver_state_t motor_state;
   system_monitor_state_t mon;
   imu_bmi270_state_t imu;
   ps2_control_state_t ps2;
@@ -283,6 +284,7 @@ static size_t DebugConsole_WriteFieldData(char *tx,
     case LOG_FLD_MOTOR:
       EncoderDriver_GetState(&enc);
       ChassisControl_GetState(&cs);
+      MotorDriver_GetState(&motor_state);
       DebugConsole_GetMotorLogSpeed(now_ms, &enc, motor_log_speed_mps);
       pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos,
         "%ld,%ld,%ld,%ld,%d,%d,%d,%d",
@@ -290,10 +292,10 @@ static size_t DebugConsole_WriteFieldData(char *tx,
         (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M2]),
         (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M3]),
         (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M4]),
-        cs.motor_output_permille[MOTOR_ID_M1],
-        cs.motor_output_permille[MOTOR_ID_M2],
-        cs.motor_output_permille[MOTOR_ID_M3],
-        cs.motor_output_permille[MOTOR_ID_M4]);
+        motor_state.effective_pwm[MOTOR_ID_M1],
+        motor_state.effective_pwm[MOTOR_ID_M2],
+        motor_state.effective_pwm[MOTOR_ID_M3],
+        motor_state.effective_pwm[MOTOR_ID_M4]);
       break;
 
     case LOG_FLD_ADC:
@@ -463,9 +465,24 @@ static void DebugConsole_PrintHelp(void)
     "\r\n");
 }
 
-static void DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t missed)
+static void DebugConsole_PrintTaskStatus(const char *name,
+                                         osThreadId_t handle,
+                                         uint32_t missed,
+                                         chassis_task_timing_id_t task)
 {
   char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  chassis_task_health_t health = {0};
+  uint32_t last_heartbeat = 0U;
+  uint32_t timeout_count = 0U;
+  uint8_t timed_out = 0U;
+
+  if ((uint32_t)task < (uint32_t)CHASSIS_TASK_TIMING_COUNT)
+  {
+    ChassisTaskTiming_GetHealth(&health);
+    last_heartbeat = health.last_heartbeat_ms[task];
+    timeout_count = health.timeout_count[task];
+    timed_out = health.timed_out[task];
+  }
 
   if (handle == NULL)
   {
@@ -474,11 +491,14 @@ static void DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, 
   else
   {
     (void)snprintf(tx, sizeof(tx),
-                   "RTOS %-10s state=%ld stack_free=%luB missed=%lu\r\n",
+                   "RTOS %-10s state=%ld stack_free=%luB missed=%lu hb=%lu timeout=%lu to=%u\r\n",
                    name,
                    (long)osThreadGetState(handle),
                    (unsigned long)osThreadGetStackSpace(handle),
-                   (unsigned long)missed);
+                   (unsigned long)missed,
+                   (unsigned long)last_heartbeat,
+                   (unsigned long)timeout_count,
+                   timed_out);
   }
   DebugConsole_Write(tx);
 }
@@ -502,17 +522,17 @@ static void DebugConsole_PrintRtosStatus(void)
                  (unsigned long)osKernelGetTickCount());
   DebugConsole_Write(tx);
 
-  DebugConsole_PrintTaskStatus("default", defaultTaskHandle, 0U);
-  DebugConsole_PrintTaskStatus("safety", safetyTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_SAFETY));
-  DebugConsole_PrintTaskStatus("motor", motorTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_MOTOR));
-  DebugConsole_PrintTaskStatus("rpi", rpiCommTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_RPI));
-  DebugConsole_PrintTaskStatus("imu", imuTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_IMU));
-  DebugConsole_PrintTaskStatus("line", lineTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LINE));
-  DebugConsole_PrintTaskStatus("esp", espTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_ESP));
-  DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U);
-  DebugConsole_PrintTaskStatus("ps2", ps2TaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_PS2));
-  DebugConsole_PrintTaskStatus("led", ledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LED));
-  DebugConsole_PrintTaskStatus("oled", oledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_OLED));
+  DebugConsole_PrintTaskStatus("default", defaultTaskHandle, 0U, CHASSIS_TASK_TIMING_COUNT);
+  DebugConsole_PrintTaskStatus("safety", safetyTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_SAFETY), CHASSIS_TASK_TIMING_SAFETY);
+  DebugConsole_PrintTaskStatus("motor", motorTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_MOTOR), CHASSIS_TASK_TIMING_MOTOR);
+  DebugConsole_PrintTaskStatus("rpi", rpiCommTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_RPI), CHASSIS_TASK_TIMING_RPI);
+  DebugConsole_PrintTaskStatus("imu", imuTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_IMU), CHASSIS_TASK_TIMING_IMU);
+  DebugConsole_PrintTaskStatus("line", lineTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LINE), CHASSIS_TASK_TIMING_LINE);
+  DebugConsole_PrintTaskStatus("esp", espTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_ESP), CHASSIS_TASK_TIMING_ESP);
+  DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U, CHASSIS_TASK_TIMING_COUNT);
+  DebugConsole_PrintTaskStatus("ps2", ps2TaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_PS2), CHASSIS_TASK_TIMING_PS2);
+  DebugConsole_PrintTaskStatus("led", ledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LED), CHASSIS_TASK_TIMING_LED);
+  DebugConsole_PrintTaskStatus("oled", oledTaskHandle, ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_OLED), CHASSIS_TASK_TIMING_OLED);
 
   (void)snprintf(tx, sizeof(tx),
                  "RTOS comm upper_tx=%lu upper_drop=%lu esp_tx=%lu esp_drop=%lu dbg_rx_ovf=%lu\r\n",
@@ -628,27 +648,35 @@ static void DebugConsole_PrintStatus(void)
                  (long)DebugConsole_Milli(chassis_state.right_target_mps),
                  (long)DebugConsole_Milli(chassis_state.left_actual_mps),
                  (long)DebugConsole_Milli(chassis_state.right_actual_mps),
-                 chassis_state.motor_output_permille[MOTOR_ID_M1],
-                 chassis_state.motor_output_permille[MOTOR_ID_M2],
-                 chassis_state.motor_output_permille[MOTOR_ID_M3],
-                 chassis_state.motor_output_permille[MOTOR_ID_M4],
+                 motor_state.effective_pwm[MOTOR_ID_M1],
+                 motor_state.effective_pwm[MOTOR_ID_M2],
+                 motor_state.effective_pwm[MOTOR_ID_M3],
+                 motor_state.effective_pwm[MOTOR_ID_M4],
                  chassis_state.output_enabled,
                  ControlManager_IsEmergencyStop(),
                  ControlManager_IsFaultStop());
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "BREAK tim1 moe=%u bif=%u count=%lu tim8 moe=%u bif=%u count=%lu\r\n",
+                 "BREAK tim1 moe=%u bif=%u count=%lu tim8 moe=%u bif=%u count=%lu edge=%lu,%lu,%lu,%lu low=%lu,%lu,%lu,%lu\r\n",
                  motor_state.tim1_moe_active,
                  motor_state.tim1_break_flag,
                  (unsigned long)motor_state.tim1_break_count,
                  motor_state.tim8_moe_active,
                  motor_state.tim8_break_flag,
-                 (unsigned long)motor_state.tim8_break_count);
+                 (unsigned long)motor_state.tim8_break_count,
+                 (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M1],
+                 (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M2],
+                 (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M3],
+                 (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M4],
+                 (unsigned long)motor_state.fault_low_since_ms[MOTOR_ID_M1],
+                 (unsigned long)motor_state.fault_low_since_ms[MOTOR_ID_M2],
+                 (unsigned long)motor_state.fault_low_since_ms[MOTOR_ID_M3],
+                 (unsigned long)motor_state.fault_low_since_ms[MOTOR_ID_M4]);
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "ADC vbat=%ldmV raw=%u m1=%ldmA raw=%u z=%u m2=%ldmA raw=%u z=%u m3=%ldmA raw=%u z=%u m4=%ldmA raw=%u z=%u cal=%u/%u valid=%u\r\n",
+                 "ADC vbat=%ldmV raw=%u m1=%ldmA raw=%u z=%u m2=%ldmA raw=%u z=%u m3=%ldmA raw=%u z=%u m4=%ldmA raw=%u z=%u cal=%u/%u valid=%u flags=0x%08lX invalid=0x%08lX raw_n=%u miss=%u rate_mHz=%lu\r\n",
                  (long)DebugConsole_Milli(adc_state.battery_voltage),
                  adc_state.raw_battery,
                  (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M1]), adc_state.raw_current[MOTOR_ID_M1], adc_state.current_zero_raw[MOTOR_ID_M1],
@@ -657,7 +685,12 @@ static void DebugConsole_PrintStatus(void)
                  (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M4]), adc_state.raw_current[MOTOR_ID_M4], adc_state.current_zero_raw[MOTOR_ID_M4],
                  adc_state.current_zero_sample_count,
                  (uint16_t)ADC_MONITOR_CURRENT_ZERO_SAMPLES,
-                 adc_state.current_valid);
+                 adc_state.current_valid,
+                 (unsigned long)adc_state.valid_flags,
+                 (unsigned long)adc_state.invalid_reason_flags,
+                 adc_state.raw_sample_count,
+                 adc_state.missed_window_count,
+                 (unsigned long)adc_state.sample_rate_hz_milli);
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
@@ -734,6 +767,7 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
   encoder_state_t encoder_state;
   chassis_control_state_t chassis_state;
   system_monitor_state_t monitor_state;
+  motor_driver_state_t motor_state;
   imu_bmi270_state_t imu_state;
   ps2_control_state_t ps2_state;
   line_uart_state_t line_state;
@@ -744,6 +778,7 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
   EncoderDriver_GetState(&encoder_state);
   DebugConsole_GetMotorLogSpeed(now_ms, &encoder_state, motor_log_speed_mps);
   ChassisControl_GetState(&chassis_state);
+  MotorDriver_GetState(&motor_state);
   SystemMonitor_GetState(&monitor_state);
   ImuBmi270_GetState(&imu_state);
   Ps2Control_GetState(&ps2_state);
@@ -757,10 +792,10 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M2]),
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M3]),
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M4]),
-                 chassis_state.motor_output_permille[MOTOR_ID_M1],
-                 chassis_state.motor_output_permille[MOTOR_ID_M2],
-                 chassis_state.motor_output_permille[MOTOR_ID_M3],
-                 chassis_state.motor_output_permille[MOTOR_ID_M4],
+                 motor_state.effective_pwm[MOTOR_ID_M1],
+                 motor_state.effective_pwm[MOTOR_ID_M2],
+                 motor_state.effective_pwm[MOTOR_ID_M3],
+                 motor_state.effective_pwm[MOTOR_ID_M4],
                  (long)DebugConsole_Milli(adc_state.battery_voltage),
                  (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M1]),
                  (long)DebugConsole_Milli(adc_state.current_a[MOTOR_ID_M2]),

@@ -63,6 +63,40 @@ target_include_directories(test_adc_monitor PRIVATE
 
 add_test(NAME adc_monitor COMMAND test_adc_monitor)
 
+add_executable(test_line_uart
+    test_line_uart.c
+    ../../BSP/line/line_uart.c
+)
+
+target_include_directories(test_line_uart PRIVATE
+    .
+    ../../BSP/line
+)
+
+add_test(NAME line_uart COMMAND test_line_uart)
+
+add_executable(test_upper_uart
+    test_upper_uart.c
+    ../../App/protocol/upper_uart.c
+    ../../App/protocol/upper_protocol.c
+)
+
+target_include_directories(test_upper_uart PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../App/protocol
+    ../../App/monitor
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/encoder
+    ../../BSP/imu
+    ../../BSP/line
+    ../../BSP/motor
+)
+
+add_test(NAME upper_uart COMMAND test_upper_uart)
+
 add_executable(test_motor_driver_gpio
     test_motor_driver_gpio.c
     ../../BSP/chassis_layout.c
@@ -82,6 +116,7 @@ add_test(NAME motor_driver_gpio COMMAND test_motor_driver_gpio)
 add_executable(test_system_monitor
     test_system_monitor.c
     ../../App/monitor/system_monitor.c
+    ../../App/chassis/chassis_task_timing.c
 )
 
 target_include_directories(test_system_monitor PRIVATE
@@ -117,6 +152,20 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
 )
 
 add_test(NAME chassis_control_current_limit COMMAND test_chassis_control_current_limit)
+
+add_executable(test_oled_ssd1306
+    test_oled_ssd1306.c
+    ../../BSP/oled/ssd1306.c
+)
+
+target_include_directories(test_oled_ssd1306 PRIVATE
+  .
+  ../../BSP
+  ../../App/chassis
+  ../../BSP/oled
+)
+
+add_test(NAME oled_ssd1306 COMMAND test_oled_ssd1306)
 
 add_executable(test_imu_pipeline
     test_imu_pipeline.c

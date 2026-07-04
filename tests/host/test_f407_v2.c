@@ -482,8 +482,57 @@ static void test_encoder_delta_filter(void)
               "filter rejects isolated spike");
 }
 
+static void test_encoder_reject_streak_rebuilds_window(void)
+{
+  encoder_speed_window_t window;
+  uint8_t reject_streak = 0U;
+  uint16_t rebuild_count = 0U;
+
+  EncoderMath_SpeedWindowReset(&window);
+  EncoderMath_SpeedWindowPush(&window, 45, 10U);
+  EncoderMath_SpeedWindowPush(&window, 44, 10U);
+  EncoderMath_SpeedWindowPush(&window, 46, 10U);
+
+  require_int(EncoderMath_RecordDeltaOrRebuild(&window,
+                                               113,
+                                               10U,
+                                               2464.0f,
+                                               0.035f,
+                                               2.5f,
+                                               0.45f,
+                                               3U,
+                                               3U,
+                                               &reject_streak,
+                                               &rebuild_count) == 0U,
+              "first spike rejected");
+  require_int(window.sample_count == 3U, "first reject keeps old window");
+  require_int(reject_streak == 1U, "first reject streak");
+
+  (void)EncoderMath_RecordDeltaOrRebuild(&window, 114, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U, 3U, &reject_streak, &rebuild_count);
+  require_int(window.sample_count == 3U, "second reject still keeps old window");
+  require_int(reject_streak == 2U, "second reject streak");
+
+  require_int(EncoderMath_RecordDeltaOrRebuild(&window,
+                                               115,
+                                               10U,
+                                               2464.0f,
+                                               0.035f,
+                                               2.5f,
+                                               0.45f,
+                                               3U,
+                                               3U,
+                                               &reject_streak,
+                                               &rebuild_count) != 0U,
+              "third reject rebuilds with current delta");
+  require_int(window.sample_count == 1U, "rebuild starts new window");
+  require_int(window.delta_sum == 115, "rebuild captures current delta");
+  require_int(reject_streak == 0U, "rebuild clears reject streak");
+  require_int(rebuild_count == 1U, "rebuild count increments");
+}
+
 static void test_task_timing_next_wake(void)
 {
+  chassis_task_health_t health;
   uint8_t missed = 0U;
   uint32_t next = ChassisTaskTiming_NextWake(100U, 105U, 10U, &missed);
 
@@ -493,6 +542,19 @@ static void test_task_timing_next_wake(void)
   next = ChassisTaskTiming_NextWake(110U, 125U, 10U, &missed);
   require_int(next == 135U, "miss realigns to now plus period");
   require_int(missed == 1U, "miss detected");
+
+  ChassisTaskTiming_Reset();
+  ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_RPI, 100U);
+  ChassisTaskTiming_UpdateTimeouts(141U);
+  ChassisTaskTiming_GetHealth(&health);
+  require_int(health.timeout_count[CHASSIS_TASK_TIMING_RPI] == 1U, "rpi heartbeat timeout counted");
+  require_int(health.timed_out[CHASSIS_TASK_TIMING_RPI] != 0U, "rpi timeout state set");
+  ChassisTaskTiming_UpdateTimeouts(160U);
+  ChassisTaskTiming_GetHealth(&health);
+  require_int(health.timeout_count[CHASSIS_TASK_TIMING_RPI] == 1U, "timeout counted once until recovery");
+  ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_RPI, 170U);
+  ChassisTaskTiming_GetHealth(&health);
+  require_int(health.timed_out[CHASSIS_TASK_TIMING_RPI] == 0U, "heartbeat clears timeout state");
 }
 
 static void test_imu_state_contract(void)
@@ -661,6 +723,7 @@ int main(void)
   test_encoder_interval_average_speed();
   test_motor_output_logic_phase_enable();
   test_encoder_delta_filter();
+  test_encoder_reject_streak_rebuilds_window();
   test_task_timing_next_wake();
   test_imu_state_contract();
   test_pid_init_and_reset();
