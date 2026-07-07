@@ -54,6 +54,8 @@ struct ChassisStatus {
   int16_t  motor_target_mmps[4];
   int16_t  motor_output_permille[4];
   uint8_t  motor_speed_valid_mask;
+  uint8_t  encoder_anomaly_mask;
+  uint8_t  comm_health_flags;
 };
 
 // ============================================================================
@@ -110,13 +112,13 @@ static uint8_t crc8(const uint8_t *data, uint16_t len) {
 #define PROTO_HEAD_0        0xA5
 #define PROTO_HEAD_1        0x5A
 #define PROTO_VERSION       2
-#define PROTO_MAX_PAYLOAD   64
+#define PROTO_MAX_PAYLOAD   99
 #define CMD_SET_VELOCITY    0x01
 #define CMD_ESTOP           0x02
 #define CMD_LINE_CTRL       0x03
 #define CMD_STATUS          0x81
 #define VELOCITY_PAYLOAD_LEN 10
-#define STATUS_PAYLOAD_LEN  64
+#define STATUS_PAYLOAD_LEN  65
 
 #define STATUS_FLAG_ESTOP           (1U << 0)
 #define STATUS_FLAG_FAULT_STOP      (1U << 1)
@@ -193,7 +195,8 @@ static bool parseStatusFrame(const uint8_t *payload, uint8_t len, ChassisStatus 
   for (int i = 0; i < 4; i++) s.motor_target_mmps[i] = readI16();
   for (int i = 0; i < 4; i++) s.motor_output_permille[i] = readI16();
   s.motor_speed_valid_mask = readU8();
-  (void)readU8();  // reserved
+  s.encoder_anomaly_mask = readU8();
+  s.comm_health_flags = readU8();
   return true;
 }
 

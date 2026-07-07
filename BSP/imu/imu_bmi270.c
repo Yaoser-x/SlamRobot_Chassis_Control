@@ -64,15 +64,26 @@
 #define BMI270_GYRO_CAL_MIN_SAMPLES 50U
 #define BMI270_GYRO_CAL_MAX_SAMPLES 2000U
 #define BMI270_GYRO_CAL_DEFAULT_DELAY_MS 10U
+#define BMI270_GYRO_CAL_SETTLE_MS 30U
 #define BMI270_GYRO_CAL_STILL_SPAN_DPS 5.0f
 #define BMI270_GYRO_CAL_MAX_ABS_DPS 20.0f
+#define BMI270_GYRO_AUTO_CAL_ENABLED 1U
+#define BMI270_GYRO_AUTO_CAL_SAMPLES 500U
+#define BMI270_GYRO_AUTO_CAL_DELAY_MS 10U
+#define BMI270_GYRO_AUTO_CAL_START_DELAY_MS 1000U
+#define BMI270_GYRO_AUTO_CAL_RETRY_MS 2000U
+#define BMI270_GYRO_AUTO_CAL_MAX_ATTEMPTS 5U
 
 static imu_bmi270_state_t imu_state;
 static uint32_t imu_next_init_retry_ms;
+static uint32_t imu_gyro_auto_cal_next_ms;
 static imu_bmi270_profile_id_t imu_selected_profile = IMU_BMI270_PROFILE_PERFORMANCE;
 static imu_bmi270_calibration_t imu_calibration;
 static imu_bmi270_mahony_t imu_fusion;
 static imu_bmi270_mahony_params_t imu_fusion_params;
+static volatile uint8_t imu_gyro_calibration_active;
+
+static void ImuBmi270_ServiceAutoCal(uint32_t now_ms);
 
 static void ImuBmi270_CsLow(void)
 {
@@ -92,6 +103,48 @@ static int16_t ImuBmi270_ReadI16(const uint8_t *data)
 static float ImuBmi270_AbsFloat(float value)
 {
   return (value < 0.0f) ? -value : value;
+}
+
+static void ImuBmi270_UpdateGyroCalDiag(uint8_t reason,
+                                        uint8_t axis,
+                                        const float sum_dps[3],
+                                        const float min_dps[3],
+                                        const float max_dps[3],
+                                        uint16_t sample_count)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  imu_state.gyro_cal_fail_reason = reason;
+  imu_state.gyro_cal_fail_axis = axis;
+  imu_state.gyro_cal_sample_count = sample_count;
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    if (sum_dps != 0 && min_dps != 0 && max_dps != 0 && sample_count != 0U)
+    {
+      imu_state.gyro_cal_mean_dps[i] = sum_dps[i] / (float)sample_count;
+      imu_state.gyro_cal_min_dps[i] = min_dps[i];
+      imu_state.gyro_cal_max_dps[i] = max_dps[i];
+      imu_state.gyro_cal_span_dps[i] = max_dps[i] - min_dps[i];
+    }
+    else
+    {
+      imu_state.gyro_cal_mean_dps[i] = 0.0f;
+      imu_state.gyro_cal_min_dps[i] = 0.0f;
+      imu_state.gyro_cal_max_dps[i] = 0.0f;
+      imu_state.gyro_cal_span_dps[i] = 0.0f;
+    }
+  }
+  __set_PRIMASK(primask);
+}
+
+static void ImuBmi270_ScheduleAutoCal(uint32_t now_ms, uint32_t delay_ms)
+{
+  imu_gyro_auto_cal_next_ms = now_ms + delay_ms;
+  if (imu_state.gyro_auto_cal_enabled != 0U && imu_state.gyro_calibrated == 0U)
+  {
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_WAIT;
+  }
 }
 
 static float ImuBmi270_Filter(float previous, float input, float alpha)
@@ -373,6 +426,11 @@ static uint8_t ImuBmi270_ReadRawFrame(int16_t accel_raw[3], int16_t gyro_raw[3])
   gyro_raw[0] = ImuBmi270_ReadI16(&data[6]);
   gyro_raw[1] = ImuBmi270_ReadI16(&data[8]);
   gyro_raw[2] = ImuBmi270_ReadI16(&data[10]);
+  if (ImuBmi270_RawFrameHasSignal(accel_raw, gyro_raw) == 0U)
+  {
+    ImuBmi270_SetError(IMU_BMI270_ERROR_INVALID_FRAME);
+    return 0U;
+  }
   return 1U;
 }
 
@@ -621,7 +679,12 @@ void ImuBmi270_Init(void)
   imu_state.profile = (uint8_t)imu_selected_profile;
   imu_state.init_state = IMU_BMI270_INIT_STATE_RESET;
   imu_state.quaternion[0] = 1.0f;
+  imu_state.gyro_auto_cal_enabled = BMI270_GYRO_AUTO_CAL_ENABLED;
+  imu_state.gyro_auto_cal_state = (BMI270_GYRO_AUTO_CAL_ENABLED != 0U) ?
+    IMU_BMI270_GYRO_AUTO_CAL_WAIT : IMU_BMI270_GYRO_AUTO_CAL_DISABLED;
   imu_next_init_retry_ms = 0U;
+  imu_gyro_auto_cal_next_ms = 0U;
+  imu_gyro_calibration_active = 0U;
   (void)ImuBmi270Calibration_Load(&imu_calibration);
   imu_fusion_params = ImuBmi270Mahony_DefaultParams();
   ImuBmi270Mahony_Init(&imu_fusion);
@@ -632,6 +695,14 @@ uint8_t ImuBmi270_SetEnabled(uint8_t enabled)
 {
   imu_state.enabled = (enabled != 0U) ? 1U : 0U;
   imu_state.init_state = (enabled != 0U) ? imu_state.init_state : IMU_BMI270_INIT_STATE_DISABLED;
+  if (enabled == 0U)
+  {
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_DISABLED;
+  }
+  else if (imu_state.gyro_auto_cal_enabled != 0U && imu_state.gyro_calibrated == 0U)
+  {
+    ImuBmi270_ScheduleAutoCal(HAL_GetTick(), BMI270_GYRO_AUTO_CAL_START_DELAY_MS);
+  }
   return 1U;
 }
 
@@ -645,6 +716,9 @@ uint8_t ImuBmi270_SetProfile(imu_bmi270_profile_id_t profile)
   imu_state.profile = (uint8_t)profile;
   imu_state.online = 0U;
   imu_state.filter_initialized = 0U;
+  imu_state.gyro_calibrated = 0U;
+  imu_state.gyro_auto_cal_attempts = 0U;
+  ImuBmi270_ScheduleAutoCal(HAL_GetTick(), BMI270_GYRO_AUTO_CAL_START_DELAY_MS);
   return 1U;
 }
 
@@ -677,6 +751,8 @@ uint8_t ImuBmi270_ConfigNow(void)
 {
   const imu_bmi270_profile_t *profile = ImuBmi270Profile_Get(imu_selected_profile);
 
+  imu_state.online = 0U;
+  imu_state.sensor_time_valid = 0U;
   imu_state.init_state = IMU_BMI270_INIT_STATE_PROBE;
   if (ImuBmi270_WriteReg(BMI270_REG_CMD, BMI270_CMD_SOFT_RESET) == 0U)
   {
@@ -687,6 +763,7 @@ uint8_t ImuBmi270_ConfigNow(void)
   {
     return 0U;
   }
+  imu_state.online = 0U;
 
   if (ImuBmi270_WriteReg(BMI270_REG_PWR_CONF, profile->pwr_conf) == 0U)
   {
@@ -709,10 +786,16 @@ uint8_t ImuBmi270_ConfigNow(void)
     return 0U;
   }
   imu_state.enabled = 1U;
+  imu_state.online = 1U;
   imu_state.filter_initialized = 0U;
   imu_state.profile = (uint8_t)imu_selected_profile;
   imu_state.init_state = IMU_BMI270_INIT_STATE_SAMPLING;
   ImuBmi270Mahony_Init(&imu_fusion);
+  if (imu_state.gyro_calibrated == 0U)
+  {
+    imu_state.gyro_auto_cal_attempts = 0U;
+    ImuBmi270_ScheduleAutoCal(HAL_GetTick(), BMI270_GYRO_AUTO_CAL_START_DELAY_MS);
+  }
   ImuBmi270_SetError(IMU_BMI270_ERROR_NONE);
   return 1U;
 }
@@ -921,9 +1004,16 @@ static uint8_t ImuBmi270_UpdateFifo(void)
     }
     if (samples[i].accel_valid != 0U && samples[i].gyro_valid != 0U)
     {
-      ImuBmi270_ProcessMeasurement(samples[i].accel_raw, samples[i].gyro_raw,
-                                   sample_time, sample_time_valid, 0.0f);
-      any_processed = 1U;
+      if (ImuBmi270_RawFrameHasSignal(samples[i].accel_raw, samples[i].gyro_raw) != 0U)
+      {
+        ImuBmi270_ProcessMeasurement(samples[i].accel_raw, samples[i].gyro_raw,
+                                     sample_time, sample_time_valid, 0.0f);
+        any_processed = 1U;
+      }
+      else
+      {
+        ImuBmi270_SetError(IMU_BMI270_ERROR_INVALID_FRAME);
+      }
     }
   }
 
@@ -932,15 +1022,18 @@ static uint8_t ImuBmi270_UpdateFifo(void)
 
 uint8_t ImuBmi270_Update(void)
 {
-  uint32_t now_ms;
+  uint32_t now_ms = HAL_GetTick();
 
+  if (imu_gyro_calibration_active != 0U)
+  {
+    return 1U;
+  }
   if (imu_state.enabled == 0U)
   {
     return 1U;
   }
   if (imu_state.online == 0U)
   {
-    now_ms = HAL_GetTick();
     if ((int32_t)(now_ms - imu_next_init_retry_ms) < 0)
     {
       imu_state.init_state = IMU_BMI270_INIT_STATE_RETRY_WAIT;
@@ -953,6 +1046,8 @@ uint8_t ImuBmi270_Update(void)
       return 0U;
     }
   }
+
+  ImuBmi270_ServiceAutoCal(HAL_GetTick());
 
   if (ImuBmi270_UpdateFifo() != 0U)
   {
@@ -979,8 +1074,11 @@ uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms)
   int16_t accel_raw[3];
   int16_t gyro_raw[3];
   float sum[3] = {0.0f, 0.0f, 0.0f};
+  float accel_sum_g[3] = {0.0f, 0.0f, 0.0f};
   float min_dps[3] = {0.0f, 0.0f, 0.0f};
   float max_dps[3] = {0.0f, 0.0f, 0.0f};
+  imu_bmi270_quaternion_t calibrated_q;
+  uint8_t calibrated_q_valid = 0U;
   uint32_t primask;
 
   if (samples == 0U)
@@ -1000,21 +1098,39 @@ uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms)
     samples = BMI270_GYRO_CAL_MAX_SAMPLES;
   }
 
+  imu_gyro_calibration_active = 1U;
+  HAL_Delay(BMI270_GYRO_CAL_SETTLE_MS);
+  ImuBmi270_UpdateGyroCalDiag(IMU_BMI270_GYRO_CAL_FAIL_NONE, 0xFFU, 0, 0, 0, 0U);
+
   if (imu_state.online == 0U && ImuBmi270_ConfigNow() == 0U)
   {
+    ImuBmi270_UpdateGyroCalDiag(IMU_BMI270_GYRO_CAL_FAIL_CONFIG, 0xFFU, 0, 0, 0, 0U);
+    imu_gyro_calibration_active = 0U;
     return 0U;
   }
 
   for (uint16_t sample = 0U; sample < samples; ++sample)
   {
+    uint8_t fail_axis = 0xFFU;
+
     if (ImuBmi270_ReadRawFrame(accel_raw, gyro_raw) == 0U)
     {
+      ImuBmi270_UpdateGyroCalDiag(IMU_BMI270_GYRO_CAL_FAIL_READ,
+                                  0xFFU,
+                                  sum,
+                                  min_dps,
+                                  max_dps,
+                                  sample);
+      imu_gyro_calibration_active = 0U;
       return 0U;
     }
 
     for (uint8_t axis = 0U; axis < 3U; ++axis)
     {
       float dps = (float)gyro_raw[axis] / BMI270_GYRO_LSB_PER_DPS;
+      float accel_g = (((float)accel_raw[axis] / BMI270_ACCEL_LSB_PER_G) -
+                       imu_calibration.accel_bias_g[axis]) *
+                      imu_calibration.accel_scale[axis];
 
       if (sample == 0U)
       {
@@ -1029,22 +1145,64 @@ uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms)
       {
         max_dps[axis] = dps;
       }
-      if (ImuBmi270_AbsFloat(dps) > BMI270_GYRO_CAL_MAX_ABS_DPS)
-      {
-        return 0U;
-      }
       sum[axis] += dps;
+      if (fail_axis == 0xFFU && ImuBmi270_AbsFloat(dps) > BMI270_GYRO_CAL_MAX_ABS_DPS)
+      {
+        fail_axis = axis;
+      }
+      accel_sum_g[axis] += accel_g;
+    }
+
+    if (fail_axis != 0xFFU)
+    {
+      ImuBmi270_UpdateGyroCalDiag(IMU_BMI270_GYRO_CAL_FAIL_ABS,
+                                  fail_axis,
+                                  sum,
+                                  min_dps,
+                                  max_dps,
+                                  (uint16_t)(sample + 1U));
+      imu_gyro_calibration_active = 0U;
+      return 0U;
     }
 
     HAL_Delay(delay_ms);
   }
 
-  for (uint8_t i = 0U; i < 3U; ++i)
+  ImuBmi270_UpdateGyroCalDiag(IMU_BMI270_GYRO_CAL_FAIL_NONE,
+                              0xFFU,
+                              sum,
+                              min_dps,
+                              max_dps,
+                              samples);
   {
-    if ((max_dps[i] - min_dps[i]) > BMI270_GYRO_CAL_STILL_SPAN_DPS)
+    uint8_t span_axis = 0xFFU;
+
+    if (ImuBmi270_GyroCalSpanWithinLimit(min_dps,
+                                         max_dps,
+                                         BMI270_GYRO_CAL_STILL_SPAN_DPS,
+                                         &span_axis) == 0U)
     {
+      ImuBmi270_UpdateGyroCalDiag(IMU_BMI270_GYRO_CAL_FAIL_SPAN,
+                                  span_axis,
+                                  sum,
+                                  min_dps,
+                                  max_dps,
+                                  samples);
+      imu_gyro_calibration_active = 0U;
       return 0U;
     }
+  }
+
+  {
+    float sensor_accel_g[3];
+    float body_accel_g[3];
+
+    for (uint8_t i = 0U; i < 3U; ++i)
+    {
+      sensor_accel_g[i] = accel_sum_g[i] / (float)samples;
+    }
+    ImuBmi270Coordinate_Apply(imu_calibration.sensor_to_body, sensor_accel_g, body_accel_g);
+    calibrated_q_valid = ImuBmi270Quaternion_FromAccel(body_accel_g, &calibrated_q);
   }
 
   primask = __get_PRIMASK();
@@ -1058,10 +1216,75 @@ uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms)
   }
   imu_state.gyro_calibrated = 1U;
   imu_state.filter_initialized = 0U;
+  imu_state.gyro_auto_cal_last_result = 1U;
+  if (imu_state.gyro_auto_cal_enabled != 0U)
+  {
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_DONE;
+  }
+  if (calibrated_q_valid != 0U)
+  {
+    imu_fusion.q = calibrated_q;
+    imu_fusion.integral[0] = 0.0f;
+    imu_fusion.integral[1] = 0.0f;
+    imu_fusion.integral[2] = 0.0f;
+    imu_fusion.accel_weight = 1.0f;
+    imu_fusion.status_flags = 0UL;
+    imu_fusion.initialized = 1U;
+  }
+  else
+  {
+    ImuBmi270Mahony_Init(&imu_fusion);
+  }
   __set_PRIMASK(primask);
 
   ImuBmi270_SetError(IMU_BMI270_ERROR_NONE);
+  imu_gyro_calibration_active = 0U;
   return 1U;
+}
+
+static void ImuBmi270_ServiceAutoCal(uint32_t now_ms)
+{
+  if (imu_state.gyro_calibrated != 0U)
+  {
+    if (imu_state.gyro_auto_cal_enabled != 0U)
+    {
+      imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_DONE;
+    }
+    return;
+  }
+
+  if (ImuBmi270_AutoCalDue(imu_state.gyro_auto_cal_enabled,
+                           imu_state.online,
+                           imu_state.gyro_calibrated,
+                           imu_state.gyro_auto_cal_attempts,
+                           BMI270_GYRO_AUTO_CAL_MAX_ATTEMPTS,
+                           now_ms,
+                           imu_gyro_auto_cal_next_ms) == 0U)
+  {
+    return;
+  }
+
+  imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_RUNNING;
+  imu_state.gyro_auto_cal_attempts++;
+  imu_state.gyro_auto_cal_last_result = 0U;
+  if (ImuBmi270_CalibrateGyro(BMI270_GYRO_AUTO_CAL_SAMPLES,
+                              BMI270_GYRO_AUTO_CAL_DELAY_MS) != 0U)
+  {
+    imu_state.gyro_auto_cal_last_result = 1U;
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_DONE;
+    return;
+  }
+
+  imu_state.gyro_auto_cal_last_result = 0U;
+  if (imu_state.gyro_auto_cal_attempts >= BMI270_GYRO_AUTO_CAL_MAX_ATTEMPTS)
+  {
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_FAILED;
+  }
+  else
+  {
+    ImuBmi270_ScheduleAutoCal(HAL_GetTick(), BMI270_GYRO_AUTO_CAL_RETRY_MS);
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_RETRY_WAIT;
+  }
 }
 
 void ImuBmi270_ClearCalibration(void)
@@ -1078,7 +1301,10 @@ void ImuBmi270_ClearCalibration(void)
   }
   imu_state.gyro_calibrated = 0U;
   imu_state.filter_initialized = 0U;
+  imu_state.gyro_auto_cal_attempts = 0U;
+  imu_state.gyro_auto_cal_last_result = 0U;
   __set_PRIMASK(primask);
+  ImuBmi270_ScheduleAutoCal(HAL_GetTick(), BMI270_GYRO_AUTO_CAL_START_DELAY_MS);
 }
 
 void ImuBmi270_GetState(imu_bmi270_state_t *state)

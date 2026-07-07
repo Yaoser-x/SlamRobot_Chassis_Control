@@ -49,6 +49,7 @@ void ImuBmi270Mahony_Update(imu_bmi270_mahony_t *fusion,
                             const imu_bmi270_mahony_params_t *params);
 float ImuBmi270Quaternion_Norm(const imu_bmi270_quaternion_t *q);
 void ImuBmi270Quaternion_Normalize(imu_bmi270_quaternion_t *q);
+uint8_t ImuBmi270Quaternion_FromAccel(const float accel_g[3], imu_bmi270_quaternion_t *q);
 void ImuBmi270Quaternion_ToEulerDeg(const imu_bmi270_quaternion_t *q, float euler_deg[3]);
 
 #ifdef __cplusplus

@@ -1,5 +1,7 @@
 #include "imu_bmi270_math.h"
 
+#include "imu_bmi270.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -13,6 +15,64 @@ static float ImuBmi270Math_InvSqrt(float value)
     return 0.0f;
   }
   return 1.0f / sqrtf(value);
+}
+
+uint8_t ImuBmi270_RawFrameHasSignal(const int16_t accel_raw[3], const int16_t gyro_raw[3])
+{
+  if (accel_raw == 0 || gyro_raw == 0)
+  {
+    return 0U;
+  }
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    if (accel_raw[i] != 0 || gyro_raw[i] != 0)
+    {
+      return 1U;
+    }
+  }
+  return 0U;
+}
+
+uint8_t ImuBmi270_GyroCalSpanWithinLimit(const float min_dps[3],
+                                         const float max_dps[3],
+                                         float max_span_dps,
+                                         uint8_t *axis)
+{
+  if (min_dps == 0 || max_dps == 0)
+  {
+    return 0U;
+  }
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    if ((max_dps[i] - min_dps[i]) > max_span_dps)
+    {
+      if (axis != 0)
+      {
+        *axis = i;
+      }
+      return 0U;
+    }
+  }
+  return 1U;
+}
+
+uint8_t ImuBmi270_AutoCalDue(uint8_t enabled,
+                             uint8_t online,
+                             uint8_t calibrated,
+                             uint8_t attempts,
+                             uint8_t max_attempts,
+                             uint32_t now_ms,
+                             uint32_t next_ms)
+{
+  if (enabled == 0U || online == 0U || calibrated != 0U)
+  {
+    return 0U;
+  }
+  if (attempts >= max_attempts)
+  {
+    return 0U;
+  }
+  return (((int32_t)(now_ms - next_ms)) >= 0) ? 1U : 0U;
 }
 
 void ImuBmi270Coordinate_Apply(const float matrix[3][3], const float in[3], float out[3])
@@ -105,6 +165,52 @@ void ImuBmi270Quaternion_Normalize(imu_bmi270_quaternion_t *q)
   q->x *= inv_norm;
   q->y *= inv_norm;
   q->z *= inv_norm;
+}
+
+uint8_t ImuBmi270Quaternion_FromAccel(const float accel_g[3], imu_bmi270_quaternion_t *q)
+{
+  float ax;
+  float ay;
+  float az;
+  float norm;
+  float roll;
+  float pitch;
+  float cr;
+  float sr;
+  float cp;
+  float sp;
+
+  if (accel_g == 0 || q == 0)
+  {
+    return 0U;
+  }
+
+  ax = accel_g[0];
+  ay = accel_g[1];
+  az = accel_g[2];
+  norm = sqrtf((ax * ax) + (ay * ay) + (az * az));
+  if (norm <= 0.000001f)
+  {
+    return 0U;
+  }
+
+  ax /= norm;
+  ay /= norm;
+  az /= norm;
+  roll = atan2f(ay, az);
+  pitch = atan2f(-ax, sqrtf((ay * ay) + (az * az)));
+
+  cr = cosf(roll * 0.5f);
+  sr = sinf(roll * 0.5f);
+  cp = cosf(pitch * 0.5f);
+  sp = sinf(pitch * 0.5f);
+
+  q->w = cr * cp;
+  q->x = sr * cp;
+  q->y = cr * sp;
+  q->z = -sr * sp;
+  ImuBmi270Quaternion_Normalize(q);
+  return 1U;
 }
 
 void ImuBmi270Mahony_Update(imu_bmi270_mahony_t *fusion,

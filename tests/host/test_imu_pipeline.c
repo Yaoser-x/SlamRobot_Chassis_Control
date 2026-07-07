@@ -1,5 +1,6 @@
 #include "imu_bmi270_calibration.h"
 #include "imu_bmi270_fifo.h"
+#include "imu_bmi270.h"
 #include "imu_bmi270_math.h"
 #include "imu_bmi270_profile.h"
 #include "imu_bmi270_time.h"
@@ -33,8 +34,8 @@ static void test_fifo_header_sensor_time_and_overflow(void)
 {
   const uint8_t fifo[] = {
     0x8CU,
-    0x01U, 0x00U, 0x02U, 0x00U, 0x03U, 0x00U,
     0x04U, 0x00U, 0x05U, 0x00U, 0x06U, 0x00U,
+    0x01U, 0x00U, 0x02U, 0x00U, 0x03U, 0x00U,
     0x44U, 0x10U, 0x20U, 0x30U,
     0x40U, 0x02U,
     0x80U
@@ -49,9 +50,9 @@ static void test_fifo_header_sensor_time_and_overflow(void)
               "fifo parser accepts regular, sensortime, skip, overread frames");
   require_int(result.sample_count == 1U, "fifo parser returns one sample");
   require_int(samples[0].accel_raw[0] == 1 && samples[0].accel_raw[2] == 3,
-              "fifo parser decodes accel little endian");
+              "fifo parser decodes accel after gyro in combined frame");
   require_int(samples[0].gyro_raw[0] == 4 && samples[0].gyro_raw[2] == 6,
-              "fifo parser decodes gyro after accel");
+              "fifo parser decodes gyro first in combined frame");
   require_int(result.sensor_time_valid == 1U && result.sensor_time == 0x302010UL,
               "fifo parser decodes 24-bit sensor time");
   require_int((result.flags & IMU_BMI270_FIFO_PARSE_SKIP_FRAME) != 0U,
@@ -76,6 +77,58 @@ static void test_sensor_time_delta_and_validation(void)
               "sensor time rejects zero dt");
   require_int(ImuBmi270Time_DeltaSeconds(0x010010UL, 0x000010UL, 0.02f, &dt_s) == 0U,
               "sensor time rejects abnormal dt");
+}
+
+static void test_raw_frame_signal_guard_rejects_all_zero_frame(void)
+{
+  const int16_t zero_accel[3] = {0, 0, 0};
+  const int16_t zero_gyro[3] = {0, 0, 0};
+  const int16_t accel_with_signal[3] = {0, 0, 1};
+  const int16_t gyro_with_signal[3] = {0, -1, 0};
+
+  require_int(ImuBmi270_RawFrameHasSignal(zero_accel, zero_gyro) == 0U,
+              "raw frame guard rejects all-zero accel and gyro");
+  require_int(ImuBmi270_RawFrameHasSignal(accel_with_signal, zero_gyro) == 1U,
+              "raw frame guard accepts nonzero accel");
+  require_int(ImuBmi270_RawFrameHasSignal(zero_accel, gyro_with_signal) == 1U,
+              "raw frame guard accepts nonzero gyro");
+  require_int(ImuBmi270_RawFrameHasSignal(0, zero_gyro) == 0U,
+              "raw frame guard rejects null accel pointer");
+  require_int(ImuBmi270_RawFrameHasSignal(zero_accel, 0) == 0U,
+              "raw frame guard rejects null gyro pointer");
+}
+
+static void test_gyro_cal_span_limit_reports_first_unstable_axis(void)
+{
+  const float stable_min[3] = {-1.0f, -2.0f, -0.5f};
+  const float stable_max[3] = {1.0f, 2.0f, 0.5f};
+  const float unstable_min[3] = {-1.0f, -2.0f, -0.5f};
+  const float unstable_max[3] = {1.0f, 3.5f, 7.0f};
+  uint8_t axis = 99U;
+
+  require_int(ImuBmi270_GyroCalSpanWithinLimit(stable_min, stable_max, 5.0f, &axis) == 1U,
+              "gyro cal span accepts axes at or below limit");
+  require_int(ImuBmi270_GyroCalSpanWithinLimit(unstable_min, unstable_max, 5.0f, &axis) == 0U,
+              "gyro cal span rejects first axis above limit");
+  require_int(axis == 1U, "gyro cal span reports first unstable axis");
+  require_int(ImuBmi270_GyroCalSpanWithinLimit(0, stable_max, 5.0f, &axis) == 0U,
+              "gyro cal span rejects null min pointer");
+}
+
+static void test_auto_cal_scheduler_waits_for_online_uncalibrated_due_state(void)
+{
+  require_int(ImuBmi270_AutoCalDue(1U, 1U, 0U, 0U, 3U, 1000UL, 1000UL) == 1U,
+              "auto cal runs when online uncalibrated and due");
+  require_int(ImuBmi270_AutoCalDue(1U, 1U, 0U, 0U, 3U, 999UL, 1000UL) == 0U,
+              "auto cal waits until due time");
+  require_int(ImuBmi270_AutoCalDue(0U, 1U, 0U, 0U, 3U, 1000UL, 1000UL) == 0U,
+              "auto cal respects disabled flag");
+  require_int(ImuBmi270_AutoCalDue(1U, 0U, 0U, 0U, 3U, 1000UL, 1000UL) == 0U,
+              "auto cal waits for online IMU");
+  require_int(ImuBmi270_AutoCalDue(1U, 1U, 1U, 0U, 3U, 1000UL, 1000UL) == 0U,
+              "auto cal skips already calibrated IMU");
+  require_int(ImuBmi270_AutoCalDue(1U, 1U, 0U, 3U, 3U, 1000UL, 1000UL) == 0U,
+              "auto cal stops at max attempts");
 }
 
 static void test_profile_register_values_are_named_and_checkable(void)
@@ -149,13 +202,33 @@ static void test_mahony_static_and_yaw_continuity(void)
               "mahony degrades accel correction on abnormal acceleration norm");
 }
 
+static void test_quaternion_initializes_roll_pitch_from_accel(void)
+{
+  imu_bmi270_quaternion_t q;
+  float accel[3] = {0.010f, -0.002f, 0.995f};
+  float euler[3] = {0.0f, 0.0f, 0.0f};
+
+  require_int(ImuBmi270Quaternion_FromAccel(accel, &q) == 1U,
+              "quaternion initializes from nonzero accel");
+  ImuBmi270Quaternion_ToEulerDeg(&q, euler);
+  require_close(euler[0], -0.115f, 0.02f, "accel init sets roll from gravity");
+  require_close(euler[1], -0.576f, 0.02f, "accel init sets pitch from gravity");
+  require_close(euler[2], 0.0f, 0.02f, "accel init resets yaw reference");
+  require_int(ImuBmi270Quaternion_FromAccel(0, &q) == 0U,
+              "quaternion accel init rejects null accel");
+}
+
 int main(void)
 {
   test_fifo_header_sensor_time_and_overflow();
   test_sensor_time_delta_and_validation();
+  test_raw_frame_signal_guard_rejects_all_zero_frame();
+  test_gyro_cal_span_limit_reports_first_unstable_axis();
+  test_auto_cal_scheduler_waits_for_online_uncalibrated_due_state();
   test_profile_register_values_are_named_and_checkable();
   test_coordinate_mapping_and_calibration_defaults();
   test_mahony_static_and_yaw_continuity();
+  test_quaternion_initializes_roll_pitch_from_accel();
 
   if (failures != 0)
   {

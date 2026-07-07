@@ -128,15 +128,26 @@ uint8_t ImuBmi270Fifo_Parse(const uint8_t *fifo,
       imu_bmi270_fifo_sample_t *sample = &samples[result->sample_count];
       uint16_t cursor = offset;
 
-      if (accel != 0U)
+      if (accel != 0U && gyro != 0U)
+      {
+        sample->gyro_raw[0] = ImuBmi270Fifo_ReadI16(&fifo[cursor]);
+        sample->gyro_raw[1] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 2U]);
+        sample->gyro_raw[2] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 4U]);
+        sample->gyro_valid = 1U;
+        cursor = (uint16_t)(cursor + 6U);
+        sample->accel_raw[0] = ImuBmi270Fifo_ReadI16(&fifo[cursor]);
+        sample->accel_raw[1] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 2U]);
+        sample->accel_raw[2] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 4U]);
+        sample->accel_valid = 1U;
+      }
+      else if (accel != 0U)
       {
         sample->accel_raw[0] = ImuBmi270Fifo_ReadI16(&fifo[cursor]);
         sample->accel_raw[1] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 2U]);
         sample->accel_raw[2] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 4U]);
         sample->accel_valid = 1U;
-        cursor = (uint16_t)(cursor + 6U);
       }
-      if (gyro != 0U)
+      else if (gyro != 0U)
       {
         sample->gyro_raw[0] = ImuBmi270Fifo_ReadI16(&fifo[cursor]);
         sample->gyro_raw[1] = ImuBmi270Fifo_ReadI16(&fifo[cursor + 2U]);

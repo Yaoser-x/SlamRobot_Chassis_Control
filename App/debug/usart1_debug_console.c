@@ -36,6 +36,28 @@
 #define DEBUG_CONSOLE_LOG_PERIOD_MS  500U
 #define DEBUG_CONSOLE_TX_TIMEOUT_MS  100U
 
+/* ────────── 日志级别宏 ────────── */
+#define LOG_INFO(fmt, ...)  do {                          \
+  char _log_tx[DEBUG_CONSOLE_TX_LINE_SIZE];                \
+  (void)snprintf(_log_tx, sizeof(_log_tx),                 \
+                 "[INFO] " fmt "\r\n", ##__VA_ARGS__);     \
+  DebugConsole_Write(_log_tx);                             \
+} while(0)
+
+#define LOG_WARN(fmt, ...)  do {                          \
+  char _log_tx[DEBUG_CONSOLE_TX_LINE_SIZE];                \
+  (void)snprintf(_log_tx, sizeof(_log_tx),                 \
+                 "[WARN] " fmt "\r\n", ##__VA_ARGS__);     \
+  DebugConsole_Write(_log_tx);                             \
+} while(0)
+
+#define LOG_ERR(fmt, ...)   do {                          \
+  char _log_tx[DEBUG_CONSOLE_TX_LINE_SIZE];                \
+  (void)snprintf(_log_tx, sizeof(_log_tx),                 \
+                 "[ERR] " fmt "\r\n", ##__VA_ARGS__);      \
+  DebugConsole_Write(_log_tx);                             \
+} while(0)
+
 static char rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t rx_len;
 static uint8_t stream_mode;
@@ -80,6 +102,25 @@ static void DebugConsole_Write(const char *text)
 static int32_t DebugConsole_Milli(float value)
 {
   return (int32_t)(value * 1000.0f);
+}
+
+static const char *DebugConsole_ImuGyroCalFailReason(uint8_t reason)
+{
+  switch (reason)
+  {
+    case IMU_BMI270_GYRO_CAL_FAIL_NONE:
+      return "none";
+    case IMU_BMI270_GYRO_CAL_FAIL_CONFIG:
+      return "config";
+    case IMU_BMI270_GYRO_CAL_FAIL_READ:
+      return "read";
+    case IMU_BMI270_GYRO_CAL_FAIL_ABS:
+      return "abs";
+    case IMU_BMI270_GYRO_CAL_FAIL_SPAN:
+      return "span";
+    default:
+      return "unknown";
+  }
 }
 
 static int16_t DebugConsole_ClampPermille(int32_t value)
@@ -714,10 +755,13 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu gcal=%u gbias_mdps=%ld,%ld,%ld acc_mg=%ld,%ld,%ld corr_mdps=%ld,%ld,%ld filt_mdps=%ld,%ld,%ld euler_mdeg=%ld,%ld,%ld\r\n",
+                 "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu gcal=%u acal=%u,%u,%u gbias_mdps=%ld,%ld,%ld acc_mg=%ld,%ld,%ld corr_mdps=%ld,%ld,%ld filt_mdps=%ld,%ld,%ld euler_mdeg=%ld,%ld,%ld\r\n",
                  imu_state.enabled, imu_state.online, imu_state.chip_id, imu_state.last_error,
                  (unsigned long)imu_state.error_count,
                  imu_state.gyro_calibrated,
+                 imu_state.gyro_auto_cal_state,
+                 imu_state.gyro_auto_cal_attempts,
+                 imu_state.gyro_auto_cal_last_result,
                  (long)DebugConsole_Milli(imu_state.gyro_bias_dps[0]),
                  (long)DebugConsole_Milli(imu_state.gyro_bias_dps[1]),
                  (long)DebugConsole_Milli(imu_state.gyro_bias_dps[2]),
@@ -903,7 +947,7 @@ static void DebugConsole_HandleLine(char *line)
         stream_mode = 0U;
         log_filter_count = 0U;
         DebugConsole_ResetMotorLogBaseline();
-        DebugConsole_Write("log off\r\n");
+        LOG_INFO("log off");
       }
       else
       {
@@ -946,7 +990,7 @@ static void DebugConsole_HandleLine(char *line)
 
           if (ok == 0U || count == 0U)
           {
-            DebugConsole_Write("unknown field, valid: motor adc adcraw imu errors source ps2 line esp\r\n");
+            LOG_ERR("unknown field, valid: motor adc adcraw imu errors source ps2 line esp");
           }
           else
           {
@@ -966,55 +1010,55 @@ static void DebugConsole_HandleLine(char *line)
   {
     if (DebugConsole_MotorTestAllowed() == 0U)
     {
-      DebugConsole_Write("motor test rejected: estop/fault active\r\n");
+      LOG_WARN("motor test rejected: estop/fault active");
       return;
     }
     debug_velocity_enabled = 0U;
     ControlManager_ClearCommand();
     ChassisControl_OpenLoopTest(DebugConsole_ClampPermille(left), DebugConsole_ClampPermille(right));
-    DebugConsole_Write("side motor test updated\r\n");
+    LOG_INFO("side motor test updated");
   }
   else if (sscanf(line, "left %d", &value) == 1)
   {
     if (DebugConsole_MotorTestAllowed() == 0U)
     {
-      DebugConsole_Write("left test rejected: estop/fault active\r\n");
+      LOG_WARN("left test rejected: estop/fault active");
       return;
     }
     debug_velocity_enabled = 0U;
     ControlManager_ClearCommand();
     ChassisControl_OpenLoopTest(DebugConsole_ClampPermille(value), 0);
-    DebugConsole_Write("left side test updated\r\n");
+    LOG_INFO("left side test updated");
   }
   else if (sscanf(line, "right %d", &value) == 1)
   {
     if (DebugConsole_MotorTestAllowed() == 0U)
     {
-      DebugConsole_Write("right test rejected: estop/fault active\r\n");
+      LOG_WARN("right test rejected: estop/fault active");
       return;
     }
     debug_velocity_enabled = 0U;
     ControlManager_ClearCommand();
     ChassisControl_OpenLoopTest(0, DebugConsole_ClampPermille(value));
-    DebugConsole_Write("right side test updated\r\n");
+    LOG_INFO("right side test updated");
   }
   else if (DebugConsole_ParseMotorId(line, &motor) != 0U && sscanf(&line[3], "%d %d", &lf, &lr) == 2)
   {
     if (DebugConsole_MotorTestAllowed() == 0U)
     {
-      DebugConsole_Write("raw motor test rejected: estop/fault active\r\n");
+      LOG_WARN("raw motor test rejected: estop/fault active");
       return;
     }
     debug_velocity_enabled = 0U;
     ControlManager_ClearCommand();
     ChassisControl_RawMotorInputTest(motor, DebugConsole_ClampPermille(lf), DebugConsole_ClampPermille(lr));
-    DebugConsole_Write("single motor raw test updated\r\n");
+    LOG_INFO("single motor raw test updated");
   }
   else if (sscanf(line, "raw %d %d %d %d", &lf, &lr, &rf, &rr) == 4)
   {
     if (DebugConsole_MotorTestAllowed() == 0U)
     {
-      DebugConsole_Write("raw test rejected: estop/fault active\r\n");
+      LOG_WARN("raw test rejected: estop/fault active");
       return;
     }
     debug_velocity_enabled = 0U;
@@ -1023,7 +1067,7 @@ static void DebugConsole_HandleLine(char *line)
                                 DebugConsole_ClampPermille(lr),
                                 DebugConsole_ClampPermille(rf),
                                 DebugConsole_ClampPermille(rr));
-    DebugConsole_Write("side raw test updated\r\n");
+    LOG_INFO("side raw test updated");
   }
   else if (sscanf(line, "vel %d %d", &linear_mm_s, &angular_mrad_s) == 2 ||
            sscanf(line, "vel %d", &linear_mm_s) == 1)
@@ -1039,11 +1083,11 @@ static void DebugConsole_HandleLine(char *line)
     if (ControlManager_SetCommand(&debug_velocity_cmd) == CONTROL_COMMAND_ACCEPTED)
     {
       debug_velocity_enabled = 1U;
-      DebugConsole_Write("velocity command accepted\r\n");
+      LOG_INFO("velocity command accepted");
     }
     else
     {
-      DebugConsole_Write("velocity command rejected\r\n");
+      LOG_WARN("velocity command rejected");
     }
   }
   else if (strcmp(line, "stop") == 0)
@@ -1052,21 +1096,25 @@ static void DebugConsole_HandleLine(char *line)
     ChassisControl_OpenLoopTest(0, 0);
     ChassisControl_RawInputTest(0, 0, 0, 0);
     ControlManager_ClearCommand();
-    DebugConsole_Write("chassis stopped\r\n");
+    LOG_INFO("chassis stopped");
   }
   else if (sscanf(line, "estop %d", &value) == 1)
   {
     ControlManager_SetEmergencyStop((value != 0) ? 1U : 0U);
-    DebugConsole_Write((value != 0) ? "estop set\r\n" : "estop cleared\r\n");
+    LOG_INFO("estop %s", (value != 0) ? "set" : "cleared");
   }
   else if (strcmp(line, "clearfault") == 0)
   {
     SystemMonitor_ClearLatchedFaults(0xFFFFFFFFUL);
-    DebugConsole_Write("fault clear requested\r\n");
+    LOG_INFO("fault clear requested");
   }
   else if (strcmp(line, "imutest") == 0)
   {
-    DebugConsole_Write((ImuBmi270_ProbeNow() != 0U) ? "bmi270 probe ok\r\n" : "bmi270 probe failed\r\n");
+    if (ImuBmi270_ProbeNow() != 0U) {
+      LOG_INFO("bmi270 probe ok");
+    } else {
+      LOG_WARN("bmi270 probe failed");
+    }
   }
   else if (strcmp(line, "imudiag") == 0)
   {
@@ -1075,7 +1123,7 @@ static void DebugConsole_HandleLine(char *line)
 
     if (ImuBmi270_Diagnose(&diag) == 0U)
     {
-      DebugConsole_Write("bmi270 diag failed\r\n");
+      LOG_WARN("bmi270 diag failed");
       return;
     }
 
@@ -1092,53 +1140,81 @@ static void DebugConsole_HandleLine(char *line)
   }
   else if (strcmp(line, "imuinit") == 0)
   {
-    DebugConsole_Write((ImuBmi270_ConfigNow() != 0U) ? "bmi270 init ok\r\n" : "bmi270 init failed\r\n");
+    imu_bmi270_state_t imu_state;
+
+    if (ImuBmi270_ConfigNow() != 0U) {
+      LOG_INFO("bmi270 init ok");
+    } else {
+      ImuBmi270_GetState(&imu_state);
+      LOG_WARN("bmi270 init failed init=%u err=%u chip=0x%02X online=%u",
+               imu_state.init_state,
+               imu_state.last_error,
+               imu_state.chip_id,
+               imu_state.online);
+    }
   }
   else if ((strcmp(line, "imucal") == 0) || (sscanf(line, "imucal %d", &value) == 1))
   {
-    char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
     uint16_t samples = (value > 0) ? (uint16_t)value : 0U;
     imu_bmi270_state_t imu_state;
 
-    DebugConsole_Write("bmi270 gyro calibration: keep still\r\n");
+    LOG_INFO("bmi270 gyro calibration: keep still");
     if (ImuBmi270_CalibrateGyro(samples, 10U) == 0U)
     {
-      DebugConsole_Write("bmi270 gyro calibration failed: keep still and retry\r\n");
+      ImuBmi270_GetState(&imu_state);
+      LOG_WARN("bmi270 gyro calibration failed reason=%s axis=%u samples=%u mean_mdps=%ld,%ld,%ld span_mdps=%ld,%ld,%ld min_mdps=%ld,%ld,%ld max_mdps=%ld,%ld,%ld init=%u err=%u chip=0x%02X online=%u",
+               DebugConsole_ImuGyroCalFailReason(imu_state.gyro_cal_fail_reason),
+               imu_state.gyro_cal_fail_axis,
+               imu_state.gyro_cal_sample_count,
+               (long)DebugConsole_Milli(imu_state.gyro_cal_mean_dps[0]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_mean_dps[1]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_mean_dps[2]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_span_dps[0]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_span_dps[1]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_span_dps[2]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_min_dps[0]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_min_dps[1]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_min_dps[2]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_max_dps[0]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_max_dps[1]),
+               (long)DebugConsole_Milli(imu_state.gyro_cal_max_dps[2]),
+               imu_state.init_state,
+               imu_state.last_error,
+               imu_state.chip_id,
+               imu_state.online);
       return;
     }
 
     ImuBmi270_GetState(&imu_state);
-    (void)snprintf(tx, sizeof(tx),
-                   "bmi270 gyro calibration ok bias_mdps=%ld,%ld,%ld\r\n",
-                   (long)DebugConsole_Milli(imu_state.gyro_bias_dps[0]),
-                   (long)DebugConsole_Milli(imu_state.gyro_bias_dps[1]),
-                   (long)DebugConsole_Milli(imu_state.gyro_bias_dps[2]));
-    DebugConsole_Write(tx);
+    LOG_INFO("bmi270 gyro calibration ok bias_mdps=%ld,%ld,%ld",
+             (long)DebugConsole_Milli(imu_state.gyro_bias_dps[0]),
+             (long)DebugConsole_Milli(imu_state.gyro_bias_dps[1]),
+             (long)DebugConsole_Milli(imu_state.gyro_bias_dps[2]));
   }
   else if (strcmp(line, "imucalclear") == 0)
   {
     ImuBmi270_ClearCalibration();
-    DebugConsole_Write("bmi270 gyro calibration cleared\r\n");
+    LOG_INFO("bmi270 gyro calibration cleared");
   }
   else if (sscanf(line, "imu %d", &value) == 1)
   {
     (void)ImuBmi270_SetEnabled((value != 0) ? 1U : 0U);
-    DebugConsole_Write((value != 0) ? "imu enabled\r\n" : "imu disabled\r\n");
+    LOG_INFO("imu %s", (value != 0) ? "enabled" : "disabled");
   }
   else if (strcmp(line, "espreset") == 0)
   {
     Esp12fComm_ResetModule();
-    DebugConsole_Write("esp12f reset\r\n");
+    LOG_INFO("esp12f reset");
   }
   else if (strcmp(line, "espisolate") == 0)
   {
     Esp12fComm_Isolate();
-    DebugConsole_Write("esp12f isolated until board reset\r\n");
+    LOG_INFO("esp12f isolated until board reset");
   }
   else if (sscanf(line, "espboot %d", &value) == 1)
   {
     Esp12fComm_SetDownloadMode((value != 0) ? 1U : 0U);
-    DebugConsole_Write((value != 0) ? "esp12f download mode\r\n" : "esp12f normal boot mode\r\n");
+    LOG_INFO("esp12f %s", (value != 0) ? "download mode" : "normal boot mode");
   }
   else if (strcmp(line, "espflash on") == 0)
   {
@@ -1146,17 +1222,17 @@ static void DebugConsole_HandleLine(char *line)
     debug_velocity_enabled = 0U;
     if (Esp12fFlashBridge_Enable(1U) != 0U)
     {
-      DebugConsole_Write("esp12f flash bridge on: close this terminal and use esptool/Arduino at 115200\r\n");
+      LOG_INFO("esp12f flash bridge on: close this terminal and use esptool/Arduino at 115200");
     }
     else
     {
-      DebugConsole_Write("esp12f flash bridge failed: UART RX not ready\r\n");
+      LOG_ERR("esp12f flash bridge failed: UART RX not ready");
     }
   }
   else if (strcmp(line, "espflash off") == 0)
   {
     Esp12fFlashBridge_Disable();
-    DebugConsole_Write("esp12f flash bridge off, normal boot requested\r\n");
+    LOG_INFO("esp12f flash bridge off, normal boot requested");
   }
   else if (strcmp(line, "espflash status") == 0)
   {
@@ -1168,18 +1244,18 @@ static void DebugConsole_HandleLine(char *line)
     debug_velocity_enabled = 0U;
     if (Esp12fFlashBridge_Enable(0U) != 0U)
     {
-      DebugConsole_Write("AT passthrough active: IO0=high, USART1<->USART2 bridge open.\r\n"
-                         "Type AT commands directly. Auto-exit after 30s idle.\r\n");
+      LOG_INFO("AT passthrough active: IO0=high, USART1<->USART2 bridge open.\r\n"
+               "Type AT commands directly. Auto-exit after 30s idle.");
     }
     else
     {
-      DebugConsole_Write("AT passthrough failed: UART RX not ready\r\n");
+      LOG_ERR("AT passthrough failed: UART RX not ready");
     }
   }
   else if (strcmp(line, "espat off") == 0)
   {
     Esp12fFlashBridge_Disable();
-    DebugConsole_Write("AT passthrough off, normal boot requested\r\n");
+    LOG_INFO("AT passthrough off, normal boot requested");
   }
   else if (strcmp(line, "line") == 0)
   {
@@ -1188,12 +1264,12 @@ static void DebugConsole_HandleLine(char *line)
   else if (strcmp(line, "line on") == 0)
   {
     LineControl_Enable(1U);
-    DebugConsole_Write("line tracking enabled\r\n");
+    LOG_INFO("line tracking enabled");
   }
   else if (strcmp(line, "line off") == 0)
   {
     LineControl_Enable(0U);
-    DebugConsole_Write("line tracking disabled\r\n");
+    LOG_INFO("line tracking disabled");
   }
   else if (strcmp(line, "i2cscan") == 0)
   {
@@ -1220,7 +1296,7 @@ static void DebugConsole_HandleLine(char *line)
   }
   else
   {
-    DebugConsole_Write("unknown command, type help\r\n");
+    LOG_ERR("unknown command, type help");
   }
 }
 
@@ -1254,7 +1330,7 @@ static void DebugConsole_PollRx(void)
     else
     {
       rx_len = 0U;
-      DebugConsole_Write("line too long\r\n");
+      LOG_WARN("line too long");
     }
   }
 }
@@ -1341,7 +1417,7 @@ void Task_Usart1DebugConsole(void *argument)
       if (ControlManager_SetCommand(&debug_velocity_cmd) != CONTROL_COMMAND_ACCEPTED)
       {
         debug_velocity_enabled = 0U;
-        DebugConsole_Write("velocity command stopped\r\n");
+        LOG_WARN("velocity command stopped");
       }
     }
 
