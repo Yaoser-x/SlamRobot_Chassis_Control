@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/control/control_manager.c
     App/control/line_control.c
     App/control/ps2_control.c
+    App/current/current_guard.c
     App/debug/reset_trace.c
     App/debug/usart1_debug_console.c
     App/display/oled_ui.c
@@ -85,6 +86,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis
     App/control
+    App/current
     App/debug
     App/display
     App/monitor

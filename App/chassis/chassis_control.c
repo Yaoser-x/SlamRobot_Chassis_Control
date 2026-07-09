@@ -5,6 +5,7 @@
 #include "chassis_layout.h"
 #include "chassis_math.h"
 #include "control_manager.h"
+#include "current_guard.h"
 #include "encoder_driver.h"
 #include "main.h"
 #include "motor_driver.h"
@@ -156,31 +157,12 @@ static int16_t ChassisControl_MpsToPermille(float target_mps)
   return ChassisControl_ClampPermille(permille);
 }
 
-static int16_t ChassisControl_ApplyCurrentLimit(int16_t permille, float current_a, uint8_t *limited)
+static int16_t ChassisControl_ApplyCurrentLimit(motor_id_t motor,
+                                                int16_t permille,
+                                                const adc_monitor_state_t *adc_state,
+                                                uint8_t *limited)
 {
-  int32_t scaled;
-  int32_t abs_scaled;
-
-  if (limited != 0)
-  {
-    *limited = 0U;
-  }
-  if (MOTOR_CURRENT_LIMIT_A <= 0.0f || current_a <= MOTOR_CURRENT_LIMIT_A || permille == 0)
-  {
-    return permille;
-  }
-
-  scaled = (int32_t)((float)permille * (MOTOR_CURRENT_LIMIT_A / current_a));
-  if (limited != 0)
-  {
-    *limited = 1U;
-  }
-  abs_scaled = (scaled < 0) ? -scaled : scaled;
-  if (abs_scaled < CHASSIS_PWM_DEADBAND_PERMILLE)
-  {
-    return 0;
-  }
-  return ChassisControl_ClampPermille(scaled);
+  return ChassisControl_ClampPermille(CurrentGuard_ApplyMotorLimit(motor, permille, adc_state, 0U, limited));
 }
 
 static void ChassisControl_SetMotorOutput(motor_id_t motor, int16_t permille)
@@ -201,12 +183,10 @@ static void ChassisControl_SetMotorOutput(motor_id_t motor, int16_t permille)
 
   AdcMonitor_GetState(&adc_state);
   chassis_state.motor_current_limited[motor] = 0U;
-  if (adc_state.current_valid != 0U)
-  {
-    applied = ChassisControl_ApplyCurrentLimit(applied,
-                                                adc_state.current_a[motor],
-                                                &chassis_state.motor_current_limited[motor]);
-  }
+  applied = ChassisControl_ApplyCurrentLimit(motor,
+                                             applied,
+                                             &adc_state,
+                                             &chassis_state.motor_current_limited[motor]);
   chassis_state.motor_output_permille[motor] = applied;
   MotorDriver_SetPermille(motor, applied);
 }
@@ -417,6 +397,7 @@ void ChassisControl_Init(void)
   {
     PidController_Init(&pid_motor[i], &pid_params[i]);
   }
+  CurrentGuard_Init();
   chassis_state = (chassis_control_state_t){0};
   open_loop_test_enabled = 0U;
   raw_input_test_enabled = 0U;
@@ -497,12 +478,10 @@ void ChassisControl_Step(uint32_t now_ms)
       {
         int16_t target = ChassisControl_ClampPermille((int32_t)raw_forward[i] - (int32_t)raw_reverse[i]);
         int16_t applied = target;
-        if (adc_state.current_valid != 0U)
-        {
-          applied = ChassisControl_ApplyCurrentLimit(applied,
-                                                     adc_state.current_a[i],
-                                                     &chassis_state.motor_current_limited[i]);
-        }
+        applied = ChassisControl_ApplyCurrentLimit((motor_id_t)i,
+                                                   applied,
+                                                   &adc_state,
+                                                   &chassis_state.motor_current_limited[i]);
         MotorDriver_SetPermille((motor_id_t)i, applied);
         chassis_state.motor_output_permille[i] = applied;
       }

@@ -107,6 +107,12 @@ static float raw_delta_to_current(uint16_t raw_delta)
          (ADC_MONITOR_RESOLUTION_COUNTS * MOTOR_CURRENT_VOLTS_PER_AMP);
 }
 
+static float raw_delta_to_m2_current(uint16_t raw_delta)
+{
+  return ((float)raw_delta * ADC_MONITOR_VREF_V) /
+         (ADC_MONITOR_RESOLUTION_COUNTS * MOTOR_CURRENT_VOLTS_PER_AMP_M2);
+}
+
 static void test_current_zero_requires_startup_samples(void)
 {
   adc_monitor_state_t state = {0};
@@ -130,12 +136,14 @@ static void test_current_zero_requires_startup_samples(void)
   require_int(state.samples_ready != 0U, "adc samples ready");
   require_int(state.current_zero_valid == 0U, "zero not ready before sample target");
   require_int(state.current_valid == 0U, "current invalid before zero");
+  require_int(state.current_control_valid == 0U, "current control invalid before zero");
 
   push_adc_sample(100U, 110U, 120U, 130U, 2700U);
   AdcMonitor_Update();
   AdcMonitor_GetState(&state);
   require_int(state.current_zero_valid != 0U, "zero ready at sample target");
   require_int(state.current_valid == 0U, "current invalid until post-zero delta window");
+  require_int(state.current_control_valid == 0U, "current control invalid until post-zero delta window");
   require_int(state.current_zero_raw[MOTOR_ID_M1] == 100U, "m1 zero raw");
   require_int(state.current_zero_raw[MOTOR_ID_M2] == 110U, "m2 zero raw");
   require_int(state.current_zero_raw[MOTOR_ID_M3] == 120U, "m3 zero raw");
@@ -146,6 +154,9 @@ static void test_current_zero_requires_startup_samples(void)
   AdcMonitor_Update();
   AdcMonitor_GetState(&state);
   require_int(state.current_valid != 0U, "current valid after post-zero sample");
+  require_int(state.current_control_valid == 0U, "single-sample current is not control-valid");
+  require_int((state.invalid_reason_flags & ADC_MONITOR_INVALID_WINDOW_TOO_SMALL) != 0U,
+              "single-sample current reports small window");
 
   for (uint8_t i = 0U; i < 19U; ++i)
   {
@@ -158,11 +169,59 @@ static void test_current_zero_requires_startup_samples(void)
   require_close(state.current_mean_a[MOTOR_ID_M2], 0.0f, 0.0001f, "m2 negative drift window mean zero");
   require_close(state.current_rms_a[MOTOR_ID_M2], 0.0f, 0.0001f, "m2 negative drift window rms zero");
   require_close(state.current_peak_a[MOTOR_ID_M2], 0.0f, 0.0001f, "m2 negative drift peak zero");
+  require_close(state.current_signed_mean_a[MOTOR_ID_M2], -raw_delta_to_m2_current(10U), 0.001f,
+                "m2 signed mean preserves negative drift");
+  require_int(state.current_control_valid != 0U, "20-sample window is control-valid");
   require_int(state.current_sample_count[MOTOR_ID_M3] == 20U, "m3 window sample count");
   require_close(state.current_mean_a[MOTOR_ID_M3], raw_delta_to_current(14U) + (raw_delta_to_current(1U) * 0.5f), 0.001f, "m3 window mean current");
   require_close(state.current_rms_a[MOTOR_ID_M3], raw_delta_to_current(24U) + (raw_delta_to_current(1U) * 0.3927f), 0.001f, "m3 window rms current");
   require_close(state.current_peak_a[MOTOR_ID_M3], raw_delta_to_current(100U), 0.001f, "m3 window peak current");
   require_close(state.current_a[MOTOR_ID_M3], raw_delta_to_current(10U) * MOTOR_CURRENT_FILTER_ALPHA, 0.001f, "m3 slow current uses trimmed sample");
+}
+
+static void test_current_rezero_requires_fresh_stable_window(void)
+{
+  adc_monitor_state_t state = {0};
+
+  AdcMonitor_Init();
+  for (uint16_t i = 0U; i < ADC_MONITOR_CURRENT_ZERO_SAMPLES; ++i)
+  {
+    push_adc_sample(100U, 110U, 120U, 130U, 2700U);
+  }
+  AdcMonitor_Update();
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    push_adc_sample(100U, 110U, 120U, 130U, 2700U);
+  }
+  AdcMonitor_Update();
+  AdcMonitor_GetState(&state);
+  require_int(state.current_control_valid != 0U, "initial zero becomes control-valid");
+
+  AdcMonitor_RequestCurrentZeroCalibration();
+  AdcMonitor_GetState(&state);
+  require_int(state.current_zero_valid == 0U, "rezero clears zero-valid");
+  require_int(state.current_control_valid == 0U, "rezero clears control-valid");
+
+  for (uint16_t i = 0U; i < ADC_MONITOR_CURRENT_ZERO_SAMPLES; ++i)
+  {
+    uint16_t jitter = (uint16_t)((i & 1U) ? 40U : 0U);
+    push_adc_sample(200U, (uint16_t)(210U + jitter), 220U, 230U, 2700U);
+  }
+  AdcMonitor_Update();
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    push_adc_sample(200U, 210U, 220U, 230U, 2700U);
+  }
+  AdcMonitor_Update();
+  AdcMonitor_GetState(&state);
+
+  require_int(state.current_zero_valid != 0U, "unstable rezero still completes display zero");
+  require_int(state.current_control_valid == 0U, "unstable rezero blocks control-valid");
+  require_int(state.current_zero_span_raw[MOTOR_ID_M2] == 40U, "zero span exports raw jitter");
+  require_int((state.current_quality_flags[MOTOR_ID_M2] & ADC_MONITOR_QUALITY_ZERO_UNSTABLE) != 0U,
+              "unstable zero quality flag set");
+  require_int((state.invalid_reason_flags & ADC_MONITOR_INVALID_ZERO_UNSTABLE) != 0U,
+              "unstable zero invalid reason set");
 }
 
 static void test_current_validity_tracks_missing_windows(void)
@@ -179,8 +238,10 @@ static void test_current_validity_tracks_missing_windows(void)
   AdcMonitor_Update();
   AdcMonitor_GetState(&state);
   require_int(state.current_valid != 0U, "current valid after calibrated sample window");
+  require_int(state.current_control_valid == 0U, "one-sample calibrated window is not control-valid");
   require_int(state.raw_sample_count == 1U, "raw sample count exported");
-  require_int(state.invalid_reason_flags == 0U, "valid window has no invalid reason");
+  require_int((state.invalid_reason_flags & ADC_MONITOR_INVALID_WINDOW_TOO_SMALL) != 0U,
+              "small valid window has invalid reason for control");
 
   fake_tick += 20U;
   AdcMonitor_Update();
@@ -219,6 +280,7 @@ static void test_battery_voltage_is_filtered(void)
 int main(void)
 {
   test_current_zero_requires_startup_samples();
+  test_current_rezero_requires_fresh_stable_window();
   test_current_validity_tracks_missing_windows();
   test_battery_voltage_is_filtered();
   (void)printf("PASS: adc monitor host tests\n");

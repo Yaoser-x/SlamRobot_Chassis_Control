@@ -59,6 +59,9 @@ log 1 imu                      仅时间戳 + IMU 20 列
 log 1 motor imu                时间戳 + motor(8 列) + imu(20 列)，按输入顺序
 log 1 motor adc line           时间戳 + motor + adc + line，按输入顺序
 log 1 motor adc adcraw         电机速度/PWM + 稳定电流 + ADC 窗口统计
+adccal show                    打印电流零点/质量/灰度保护计数
+adccal zero                    在全部有效电机停止后重新学习零点
+adccal plan m2 500             用 M2 当前读数和已知 500mA 负载估算比例常量
 ```
 
 ### 3.2 可用字段
@@ -67,7 +70,7 @@ log 1 motor adc adcraw         电机速度/PWM + 稳定电流 + ADC 窗口统�
 | --- | --- | --- | --- |
 | `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisControl_GetState` |
 | `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `AdcMonitor_GetState` 的慢速稳定电流，兼容旧 CSV |
-| `adcraw` | `m*_mean_ma, m*_rms_ma, m*_pk_ma, m*_n` | 16 | 最近 ADC 窗口的均值/RMS/峰值/样本数，用于电流校准 |
+| `adcraw` | `m*_mean_ma, m*_rms_ma, m*_pk_ma, m*_n` | 16 | 最近 ADC 窗口的均值/RMS/峰值/样本数，用于电流校准；不改变旧列顺序 |
 | `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg, imu_stime, imu_q*_milli, imu_quality` | 20 | `ImuBmi270_GetState`（车体坐标系） |
 | `errors` | `errors` | 1 | `SystemMonitor_GetState` |
 | `source` | `source` | 1 | `SystemMonitor_GetState` |
@@ -136,7 +139,13 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ### 5.1 状态查询
 
-- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度）、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
+- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度、`current_control_valid`、`signed_mean/noise/zero_span/quality_flags`）、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
+
+`ADCCAL` 行中的 `valid` 表示电流可显示，`cvalid` 表示可用于保护/控制，`cmask` 是按 M1~M4 位排列的逐路控制有效掩码。`observe` 是 dry-run 阶段观察到超过堵转阈值的累计次数，`would` 是如果打开软件锁停本会锁停的累计次数。`ADCQ` 行中的 `signed` 保留带符号均值，`noise` 为窗口噪声估计，`span` 为零点学习窗口 raw 跨度，`q` 为质量标志。
+
+- **`adccal show`**：打印与 `status` 相同的 ADC 标定/质量摘要。
+- **`adccal zero`**：要求所有启用电机 `effective_pwm == 0`，否则拒绝重新零点并提示先停机。
+- **`adccal plan <motor> <known_mA>`**：在施加已知电流后，根据当前读数估算对应 `MOTOR_CURRENT_VOLTS_PER_AMP_Mx`，只给计划值，不写入 Flash。
 
 `ENC` 行末的 `hw=a,b,c,d` 是按逻辑 M1~M4 排列的原始定时器计数，用于区分“定时器未收到脉冲”和“逻辑计数未更新”。V2.0 映射为 M1=TIM2、M2=TIM4、M3=TIM3、M4=TIM5；CubeMX 中 M2/M3 的旧 label 不代表运行时逻辑顺序。
 

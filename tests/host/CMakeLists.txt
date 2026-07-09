@@ -61,6 +61,17 @@ target_include_directories(test_adc_monitor PRIVATE
     ../../App/chassis
 )
 
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_adc_monitor PRIVATE -fstack-usage)
+    add_test(
+        NAME adc_monitor_stack_budget
+        COMMAND ${CMAKE_COMMAND}
+            -DSTACK_USAGE_DIR=${CMAKE_CURRENT_BINARY_DIR}
+            -DMAX_STACK_BYTES=256
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_adc_monitor_stack.cmake
+    )
+endif()
+
 add_test(NAME adc_monitor COMMAND test_adc_monitor)
 
 add_executable(test_line_uart
@@ -132,10 +143,75 @@ target_include_directories(test_system_monitor PRIVATE
 
 add_test(NAME system_monitor COMMAND test_system_monitor)
 
+add_executable(test_system_monitor_fault_enabled
+    test_system_monitor.c
+    ../../App/monitor/system_monitor.c
+    ../../App/chassis/chassis_task_timing.c
+)
+
+target_include_directories(test_system_monitor_fault_enabled PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../App/monitor
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/encoder
+    ../../BSP/motor
+)
+
+target_compile_definitions(test_system_monitor_fault_enabled PRIVATE
+    MOTOR_ADC_OVERCURRENT_FAULT_ENABLED=1U
+)
+
+add_test(NAME system_monitor_fault_enabled COMMAND test_system_monitor_fault_enabled)
+
+add_executable(test_current_guard
+    test_current_guard.c
+    ../../App/current/current_guard.c
+    ../../BSP/chassis_layout.c
+)
+
+target_include_directories(test_current_guard PRIVATE
+    .
+    ../../App/chassis
+    ../../App/current
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/motor
+)
+
+add_test(NAME current_guard COMMAND test_current_guard)
+
+add_executable(test_current_guard_soft_limit
+    test_current_guard.c
+    ../../App/current/current_guard.c
+    ../../BSP/chassis_layout.c
+)
+
+target_include_directories(test_current_guard_soft_limit PRIVATE
+    .
+    ../../App/chassis
+    ../../App/current
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/motor
+)
+
+target_compile_definitions(test_current_guard_soft_limit PRIVATE
+    CURRENT_GUARD_TEST_SOFT_LIMIT=1
+    MOTOR_CURRENT_GUARD_OBSERVE_ONLY=0U
+    MOTOR_CURRENT_SOFT_LIMIT_ENABLED=1U
+    MOTOR_CURRENT_LIMIT_A=1.0f
+)
+
+add_test(NAME current_guard_soft_limit COMMAND test_current_guard_soft_limit)
+
 add_executable(test_chassis_control_current_limit
     test_chassis_control_current_limit.c
     ../../App/chassis/chassis_control.c
     ../../App/chassis/chassis_math.c
+    ../../App/current/current_guard.c
     ../../BSP/chassis_layout.c
     ../../BSP/pid/pid_controller.c
 )
@@ -143,6 +219,7 @@ add_executable(test_chassis_control_current_limit
 target_include_directories(test_chassis_control_current_limit PRIVATE
     .
     ../../App/chassis
+    ../../App/current
     ../../App/control
     ../../BSP
     ../../BSP/adc

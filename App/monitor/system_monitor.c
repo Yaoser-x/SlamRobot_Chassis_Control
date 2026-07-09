@@ -11,6 +11,8 @@
 
 static system_monitor_state_t monitor_state;
 static uint8_t overcurrent_count[MOTOR_ID_COUNT];
+static uint32_t current_observe_over_limit_count[MOTOR_ID_COUNT];
+static uint32_t current_fault_would_latch_count[MOTOR_ID_COUNT];
 static uint8_t motor_output_active[MOTOR_ID_COUNT];
 static uint8_t startup_blank_armed[MOTOR_ID_COUNT];
 static uint32_t overcurrent_blank_until_ms[MOTOR_ID_COUNT];
@@ -48,7 +50,7 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
     return;
   }
 
-  if (adc_state->current_valid == 0U)
+  if (adc_state->current_control_valid == 0U)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -88,12 +90,44 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
   }
 }
 
+static void SystemMonitor_UpdateCurrentDryRun(const adc_monitor_state_t *adc_state,
+                                              const uint8_t blanked[MOTOR_ID_COUNT])
+{
+  (void)blanked;
+
+  if (adc_state == 0 || adc_state->current_control_valid == 0U)
+  {
+    return;
+  }
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    uint8_t mask = (uint8_t)(1U << i);
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U ||
+        (adc_state->current_control_valid_mask & mask) == 0U ||
+        motor_output_active[i] == 0U)
+    {
+      continue;
+    }
+    if (adc_state->current_a[i] > MOTOR_STALL_CURRENT_A)
+    {
+      current_observe_over_limit_count[i]++;
+      if (MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U ||
+          overcurrent_count[i] + 1U >= MOTOR_OVERCURRENT_DEBOUNCE_COUNT)
+      {
+        current_fault_would_latch_count[i]++;
+      }
+    }
+  }
+}
+
 void SystemMonitor_Init(void)
 {
   monitor_state = (system_monitor_state_t){0};
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     overcurrent_count[i] = 0U;
+    current_observe_over_limit_count[i] = 0UL;
+    current_fault_would_latch_count[i] = 0UL;
     motor_output_active[i] = 0U;
     startup_blank_armed[i] = 1U;
     overcurrent_blank_until_ms[i] = 0U;
@@ -171,10 +205,14 @@ void SystemMonitor_Update(void)
                               SystemMonitor_TimeReached(now_ms, overcurrent_blank_until_ms[i]) == 0U) ? 1U : 0U;
   }
 
+  SystemMonitor_UpdateCurrentDryRun(&adc_state, overcurrent_blanked);
+
   next_state = (system_monitor_state_t){0};
   next_state.battery_voltage = adc_state.battery_voltage;
   next_state.left_current_a = adc_state.left_current_a;
   next_state.right_current_a = adc_state.right_current_a;
+  next_state.current_control_valid = adc_state.current_control_valid;
+  next_state.current_control_valid_mask = adc_state.current_control_valid_mask;
   next_state.control_mode = active_source;
   for (uint8_t i = 0U; i < (uint8_t)CHASSIS_TASK_TIMING_COUNT; ++i)
   {
@@ -185,6 +223,8 @@ void SystemMonitor_Update(void)
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     next_state.motor_current_a[i] = adc_state.current_a[i];
+    next_state.current_observe_over_limit_count[i] = current_observe_over_limit_count[i];
+    next_state.current_fault_would_latch_count[i] = current_fault_would_latch_count[i];
   }
 
   SystemMonitor_UpdateOvercurrentCounters(&adc_state,
@@ -229,9 +269,13 @@ void SystemMonitor_Update(void)
   monitor_state.battery_voltage = next_state.battery_voltage;
   monitor_state.left_current_a = next_state.left_current_a;
   monitor_state.right_current_a = next_state.right_current_a;
+  monitor_state.current_control_valid = next_state.current_control_valid;
+  monitor_state.current_control_valid_mask = next_state.current_control_valid_mask;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     monitor_state.motor_current_a[i] = next_state.motor_current_a[i];
+    monitor_state.current_observe_over_limit_count[i] = next_state.current_observe_over_limit_count[i];
+    monitor_state.current_fault_would_latch_count[i] = next_state.current_fault_would_latch_count[i];
   }
   monitor_state.control_mode = next_state.control_mode;
   for (uint8_t i = 0U; i < (uint8_t)CHASSIS_TASK_TIMING_COUNT; ++i)

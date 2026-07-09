@@ -115,6 +115,8 @@ static void reset_fake_monitor(void)
   fake_active_source = CONTROL_SOURCE_DEBUG;
   fake_set_fault_stop_count = 0U;
   fake_adc_state.current_valid = 1U;
+  fake_adc_state.current_control_valid = 1U;
+  fake_adc_state.current_control_valid_mask = (uint8_t)((1U << MOTOR_ID_M2) | (1U << MOTOR_ID_M3));
   fake_adc_state.battery_voltage = 12.0f;
   fake_encoder_state.speed_valid_all = 1U;
   SystemMonitor_Init();
@@ -128,10 +130,12 @@ static void update_and_advance(uint32_t step_ms)
 
 static void test_adc_overcurrent_does_not_fault_stop_when_software_fault_disabled(void)
 {
+#if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U
   system_monitor_state_t state;
 
   reset_fake_monitor();
   fake_motor_state.output_permille[MOTOR_ID_M2] = 50;
+  fake_motor_state.effective_pwm[MOTOR_ID_M2] = 50;
   fake_adc_state.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
 
   for (uint8_t i = 0U; i < MOTOR_OVERCURRENT_DEBOUNCE_COUNT + 3U; ++i)
@@ -152,6 +156,39 @@ static void test_adc_overcurrent_does_not_fault_stop_when_software_fault_disable
   require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) == 0U,
               "disabled ADC software overcurrent stays clear after startup blank");
   require_int(fake_fault_stop == 0U, "disabled ADC software overcurrent keeps fault stop clear after blank");
+  require_int(state.current_observe_over_limit_count[MOTOR_ID_M2] > 0UL,
+              "disabled ADC software overcurrent records dry-run observations");
+  require_int(state.current_fault_would_latch_count[MOTOR_ID_M2] > 0UL,
+              "disabled ADC software overcurrent records would-latch observations");
+#endif
+}
+
+static void test_adc_overcurrent_faults_when_enabled_and_control_valid(void)
+{
+#if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED != 0U
+  system_monitor_state_t state;
+
+  reset_fake_monitor();
+  fake_motor_state.output_permille[MOTOR_ID_M2] = 50;
+  fake_motor_state.effective_pwm[MOTOR_ID_M2] = 50;
+  fake_adc_state.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
+
+  for (uint8_t i = 0U; i < 12U; ++i)
+  {
+    update_and_advance(20U);
+  }
+  for (uint8_t i = 0U; i < MOTOR_OVERCURRENT_DEBOUNCE_COUNT; ++i)
+  {
+    update_and_advance(20U);
+  }
+  SystemMonitor_GetState(&state);
+
+  require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) != 0U,
+              "enabled ADC software overcurrent latches M2 fault");
+  require_int(fake_fault_stop != 0U, "enabled ADC software overcurrent requests fault stop");
+  require_int(state.current_observe_over_limit_count[MOTOR_ID_M2] > 0UL,
+              "enabled ADC software overcurrent records observations");
+#endif
 }
 
 static void test_drv_fault_is_not_suppressed_by_startup_blanking(void)
@@ -160,6 +197,7 @@ static void test_drv_fault_is_not_suppressed_by_startup_blanking(void)
 
   reset_fake_monitor();
   fake_motor_state.output_permille[MOTOR_ID_M2] = 50;
+  fake_motor_state.effective_pwm[MOTOR_ID_M2] = 50;
   fake_motor_state.fault_active[MOTOR_ID_M2] = 1U;
 
   SystemMonitor_Update();
@@ -172,6 +210,7 @@ static void test_drv_fault_is_not_suppressed_by_startup_blanking(void)
 
 static void test_adc_overcurrent_output_chatter_does_not_fault_when_software_fault_disabled(void)
 {
+#if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U
   system_monitor_state_t state;
 
   reset_fake_monitor();
@@ -180,6 +219,7 @@ static void test_adc_overcurrent_output_chatter_does_not_fault_when_software_fau
   for (uint8_t i = 0U; i < MOTOR_OVERCURRENT_DEBOUNCE_COUNT + 20U; ++i)
   {
     fake_motor_state.output_permille[MOTOR_ID_M2] = ((i & 1U) == 0U) ? 1 : 0;
+    fake_motor_state.effective_pwm[MOTOR_ID_M2] = fake_motor_state.output_permille[MOTOR_ID_M2];
     update_and_advance(20U);
   }
   SystemMonitor_GetState(&state);
@@ -187,11 +227,13 @@ static void test_adc_overcurrent_output_chatter_does_not_fault_when_software_fau
   require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) == 0U,
               "disabled ADC software overcurrent ignores output chatter");
   require_int(fake_fault_stop == 0U, "disabled ADC software overcurrent chatter keeps fault stop clear");
+#endif
 }
 
 int main(void)
 {
   test_adc_overcurrent_does_not_fault_stop_when_software_fault_disabled();
+  test_adc_overcurrent_faults_when_enabled_and_control_valid();
   test_drv_fault_is_not_suppressed_by_startup_blanking();
   test_adc_overcurrent_output_chatter_does_not_fault_when_software_fault_disabled();
   return 0;

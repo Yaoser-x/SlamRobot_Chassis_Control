@@ -44,6 +44,11 @@
 #define FREERTOS_FATAL_STACK_OVERFLOW  2UL
 #define FREERTOS_FATAL_MALLOC_FAILED   3UL
 #define FREERTOS_FATAL_TASK_CREATE     4UL
+#define SAFETY_TASK_STACK_SIZE_BYTES   4096U
+#define SAFETY_TASK_STACK_MIN_BYTES    3072U
+
+_Static_assert(SAFETY_TASK_STACK_SIZE_BYTES >= SAFETY_TASK_STACK_MIN_BYTES,
+               "safetyTask stack is below the monitored-control budget");
 
 /* USER CODE END PD */
 
@@ -98,7 +103,7 @@ const osThreadAttr_t defaultTask_attributes = {
 osThreadId_t safetyTaskHandle;
 const osThreadAttr_t safetyTask_attributes = {
   .name = "safetyTask",
-  .stack_size = 384 * 4,
+  .stack_size = SAFETY_TASK_STACK_SIZE_BYTES,
   .priority = (osPriority_t) osPriorityHigh,
 };
 /* Definitions for motorTask */

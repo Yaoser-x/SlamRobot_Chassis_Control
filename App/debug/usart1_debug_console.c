@@ -3,6 +3,7 @@
 #include "adc_monitor.h"
 #include "chassis_config.h"
 #include "chassis_control.h"
+#include "chassis_layout.h"
 #include "chassis_task_timing.h"
 #include "cmsis_os2.h"
 #include "control_manager.h"
@@ -494,6 +495,7 @@ static void DebugConsole_PrintHelp(void)
     "m1 F R ... m4 F R      raw EN/PH, signed PWM = F-R\r\n"
     "raw LF LR RF RR         left/right EN/PH raw inputs\r\n"
     "vel V [W]              closed-loop mm/s, optional mrad/s\r\n"
+    "adccal show|zero|plan mN known_mA\r\n"
     "stop                   clear tests and commands\r\n"
     "estop 0|1              clear/set emergency stop\r\n"
     "clearfault             clear latched overcurrent/driver faults\r\n"
@@ -504,6 +506,187 @@ static void DebugConsole_PrintHelp(void)
     "espat on|off          bridge USART1 to ESP12F (normal/AT mode)\r\n"
     "i2cscan               scan I2C1 bus for devices\r\n"
     "\r\n");
+}
+
+static float DebugConsole_CurrentScaleForMotor(motor_id_t motor)
+{
+  static const float scales[MOTOR_ID_COUNT] = {
+    MOTOR_CURRENT_VOLTS_PER_AMP_M1,
+    MOTOR_CURRENT_VOLTS_PER_AMP_M2,
+    MOTOR_CURRENT_VOLTS_PER_AMP_M3,
+    MOTOR_CURRENT_VOLTS_PER_AMP_M4,
+  };
+
+  if ((uint32_t)motor >= MOTOR_ID_COUNT)
+  {
+    return MOTOR_CURRENT_VOLTS_PER_AMP;
+  }
+  return scales[(uint32_t)motor];
+}
+
+static uint8_t DebugConsole_ParseMotorToken(const char *token, motor_id_t *motor)
+{
+  if (token == 0 || motor == 0)
+  {
+    return 0U;
+  }
+  if (strcmp(token, "m1") == 0)
+  {
+    *motor = MOTOR_ID_M1;
+    return 1U;
+  }
+  if (strcmp(token, "m2") == 0)
+  {
+    *motor = MOTOR_ID_M2;
+    return 1U;
+  }
+  if (strcmp(token, "m3") == 0)
+  {
+    *motor = MOTOR_ID_M3;
+    return 1U;
+  }
+  if (strcmp(token, "m4") == 0)
+  {
+    *motor = MOTOR_ID_M4;
+    return 1U;
+  }
+  return 0U;
+}
+
+static uint8_t DebugConsole_AllEnabledMotorsStopped(void)
+{
+  motor_driver_state_t motor_state;
+
+  MotorDriver_GetState(&motor_state);
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+        motor_state.effective_pwm[i] != 0)
+    {
+      return 0U;
+    }
+  }
+  return 1U;
+}
+
+static void DebugConsole_PrintAdcCalShow(void)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  adc_monitor_state_t adc_state;
+  system_monitor_state_t monitor_state;
+
+  AdcMonitor_GetState(&adc_state);
+  SystemMonitor_GetState(&monitor_state);
+  (void)snprintf(tx, sizeof(tx),
+                 "ADCCAL cal=%u/%u valid=%u cvalid=%u cmask=0x%02X invalid=0x%08lX raw_n=%u rate_mHz=%lu observe=%lu,%lu,%lu,%lu would=%lu,%lu,%lu,%lu\r\n",
+                 adc_state.current_zero_sample_count,
+                 (uint16_t)ADC_MONITOR_CURRENT_ZERO_SAMPLES,
+                 adc_state.current_valid,
+                 adc_state.current_control_valid,
+                 adc_state.current_control_valid_mask,
+                 (unsigned long)adc_state.invalid_reason_flags,
+                 adc_state.raw_sample_count,
+                 (unsigned long)adc_state.sample_rate_hz_milli,
+                 (unsigned long)monitor_state.current_observe_over_limit_count[MOTOR_ID_M1],
+                 (unsigned long)monitor_state.current_observe_over_limit_count[MOTOR_ID_M2],
+                 (unsigned long)monitor_state.current_observe_over_limit_count[MOTOR_ID_M3],
+                 (unsigned long)monitor_state.current_observe_over_limit_count[MOTOR_ID_M4],
+                 (unsigned long)monitor_state.current_fault_would_latch_count[MOTOR_ID_M1],
+                 (unsigned long)monitor_state.current_fault_would_latch_count[MOTOR_ID_M2],
+                 (unsigned long)monitor_state.current_fault_would_latch_count[MOTOR_ID_M3],
+                 (unsigned long)monitor_state.current_fault_would_latch_count[MOTOR_ID_M4]);
+  DebugConsole_Write(tx);
+  (void)snprintf(tx, sizeof(tx),
+                 "ADCQ m1 signed=%ld noise=%ld span=%u q=0x%08lX m2 signed=%ld noise=%ld span=%u q=0x%08lX m3 signed=%ld noise=%ld span=%u q=0x%08lX m4 signed=%ld noise=%ld span=%u q=0x%08lX\r\n",
+                 (long)DebugConsole_Milli(adc_state.current_signed_mean_a[MOTOR_ID_M1]),
+                 (long)DebugConsole_Milli(adc_state.current_noise_a[MOTOR_ID_M1]),
+                 adc_state.current_zero_span_raw[MOTOR_ID_M1],
+                 (unsigned long)adc_state.current_quality_flags[MOTOR_ID_M1],
+                 (long)DebugConsole_Milli(adc_state.current_signed_mean_a[MOTOR_ID_M2]),
+                 (long)DebugConsole_Milli(adc_state.current_noise_a[MOTOR_ID_M2]),
+                 adc_state.current_zero_span_raw[MOTOR_ID_M2],
+                 (unsigned long)adc_state.current_quality_flags[MOTOR_ID_M2],
+                 (long)DebugConsole_Milli(adc_state.current_signed_mean_a[MOTOR_ID_M3]),
+                 (long)DebugConsole_Milli(adc_state.current_noise_a[MOTOR_ID_M3]),
+                 adc_state.current_zero_span_raw[MOTOR_ID_M3],
+                 (unsigned long)adc_state.current_quality_flags[MOTOR_ID_M3],
+                 (long)DebugConsole_Milli(adc_state.current_signed_mean_a[MOTOR_ID_M4]),
+                 (long)DebugConsole_Milli(adc_state.current_noise_a[MOTOR_ID_M4]),
+                 adc_state.current_zero_span_raw[MOTOR_ID_M4],
+                 (unsigned long)adc_state.current_quality_flags[MOTOR_ID_M4]);
+  DebugConsole_Write(tx);
+}
+
+static void DebugConsole_HandleAdcCal(char *args)
+{
+  char *cmd = strtok(args, " \t");
+
+  if (cmd == 0 || strcmp(cmd, "show") == 0)
+  {
+    DebugConsole_PrintAdcCalShow();
+    return;
+  }
+  if (strcmp(cmd, "zero") == 0)
+  {
+    if (DebugConsole_AllEnabledMotorsStopped() == 0U)
+    {
+      LOG_WARN("adccal zero rejected: stop enabled motors first");
+      return;
+    }
+    AdcMonitor_RequestCurrentZeroCalibration();
+    LOG_INFO("adc current zero calibration restarted");
+    return;
+  }
+  if (strcmp(cmd, "plan") == 0)
+  {
+    char *motor_token = strtok(0, " \t");
+    char *known_token = strtok(0, " \t");
+    motor_id_t motor = MOTOR_ID_M1;
+    int known_ma;
+    adc_monitor_state_t adc_state;
+    float measured_a;
+    float known_a;
+    float current_scale;
+    float suggested_scale;
+
+    if (DebugConsole_ParseMotorToken(motor_token, &motor) == 0U || known_token == 0)
+    {
+      DebugConsole_Write("usage: adccal plan m1|m2|m3|m4 known_mA\r\n");
+      return;
+    }
+    known_ma = atoi(known_token);
+    if (known_ma <= 0)
+    {
+      LOG_WARN("adccal plan rejected: known_mA must be positive");
+      return;
+    }
+    AdcMonitor_GetState(&adc_state);
+    measured_a = adc_state.current_signed_mean_a[motor];
+    if (measured_a < 0.0f)
+    {
+      measured_a = -measured_a;
+    }
+    if (measured_a < 0.001f)
+    {
+      measured_a = adc_state.current_mean_a[motor];
+    }
+    if (measured_a < 0.001f)
+    {
+      LOG_WARN("adccal plan rejected: measured current too small");
+      return;
+    }
+    known_a = (float)known_ma / 1000.0f;
+    current_scale = DebugConsole_CurrentScaleForMotor(motor);
+    suggested_scale = current_scale * (measured_a / known_a);
+    LOG_INFO("adccal m%u measured=%ldmA known=%dmA current_scale_mV_per_A=%ld suggested_mV_per_A=%ld",
+             (unsigned int)motor + 1U,
+             (long)DebugConsole_Milli(measured_a),
+             known_ma,
+             (long)DebugConsole_Milli(current_scale),
+             (long)DebugConsole_Milli(suggested_scale));
+    return;
+  }
+  DebugConsole_Write("usage: adccal show | adccal zero | adccal plan mN known_mA\r\n");
 }
 
 static void DebugConsole_PrintTaskStatus(const char *name,
@@ -733,6 +916,7 @@ static void DebugConsole_PrintStatus(void)
                  adc_state.missed_window_count,
                  (unsigned long)adc_state.sample_rate_hz_milli);
   DebugConsole_Write(tx);
+  DebugConsole_PrintAdcCalShow();
 
   (void)snprintf(tx, sizeof(tx),
                  "ADCWIN m1 mean=%ld rms=%ld pk=%ld n=%u m2 mean=%ld rms=%ld pk=%ld n=%u m3 mean=%ld rms=%ld pk=%ld n=%u m4 mean=%ld rms=%ld pk=%ld n=%u\r\n",
@@ -925,6 +1109,15 @@ static void DebugConsole_HandleLine(char *line)
   else if (strcmp(line, "rtos") == 0)
   {
     DebugConsole_PrintRtosStatus();
+  }
+  else if (strncmp(line, "adccal", 6) == 0)
+  {
+    char *args = line + 6;
+    while (*args == ' ' || *args == '\t')
+    {
+      args++;
+    }
+    DebugConsole_HandleAdcCal(args);
   }
   else if (strcmp(line, "header") == 0)
   {

@@ -27,12 +27,16 @@ typedef struct
   float motor_current_a[4];
   float left_current_a;
   float right_current_a;
+  uint32_t current_observe_over_limit_count[4];
+  uint32_t current_fault_would_latch_count[4];
   uint32_t error_flags;
   uint32_t latched_error_flags;
   uint32_t task_last_heartbeat_ms[CHASSIS_TASK_TIMING_COUNT];
   uint32_t task_timeout_count[CHASSIS_TASK_TIMING_COUNT];
   uint8_t task_timed_out[CHASSIS_TASK_TIMING_COUNT];
   uint8_t control_mode;
+  uint8_t current_control_valid;
+  uint8_t current_control_valid_mask;
 } system_monitor_state_t;
 
 void SystemMonitor_Init(void);
