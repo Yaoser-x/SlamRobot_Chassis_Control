@@ -301,7 +301,7 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_STATUS, upper_status_payload, payload_len, upper_tx_frame, sizeof(upper_tx_frame));
   if (frame_len > 0U)
   {
-    if (HAL_UART_Transmit_DMA(&huart3, upper_tx_frame, frame_len) == HAL_OK)
+    if (HAL_UART_Transmit_IT(&huart3, upper_tx_frame, frame_len) == HAL_OK)
     {
       upper_state.tx_frames++;
     }
@@ -376,7 +376,7 @@ static void UpperUart_SendImuStatus(uint32_t now_ms)
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_IMU_STATUS, upper_imu_payload, payload_len, upper_imu_tx_frame, sizeof(upper_imu_tx_frame));
   if (frame_len > 0U)
   {
-    if (HAL_UART_Transmit_DMA(&huart3, upper_imu_tx_frame, frame_len) != HAL_OK)
+    if (HAL_UART_Transmit_IT(&huart3, upper_imu_tx_frame, frame_len) != HAL_OK)
     {
       upper_state.tx_busy_drops++;
     }
