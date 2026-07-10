@@ -17,6 +17,16 @@ static float ImuBmi270Math_InvSqrt(float value)
   return 1.0f / sqrtf(value);
 }
 
+uint8_t ImuBmi270_TemperatureRawToC(int16_t raw, float *temperature_c)
+{
+  if (temperature_c == 0 || raw == INT16_MIN)
+  {
+    return 0U;
+  }
+  *temperature_c = 23.0f + ((float)raw / 512.0f);
+  return 1U;
+}
+
 uint8_t ImuBmi270_RawFrameHasSignal(const int16_t accel_raw[3], const int16_t gyro_raw[3])
 {
   if (accel_raw == 0 || gyro_raw == 0)
@@ -75,7 +85,7 @@ uint8_t ImuBmi270_AutoCalDue(uint8_t enabled,
   return (((int32_t)(now_ms - next_ms)) >= 0) ? 1U : 0U;
 }
 
-void ImuBmi270Coordinate_Apply(const float matrix[3][3], const float in[3], float out[3])
+void ImuBmi270Coordinate_Apply(float matrix[3][3], const float in[3], float out[3])
 {
   float tmp[3];
 

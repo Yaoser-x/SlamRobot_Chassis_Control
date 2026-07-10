@@ -28,6 +28,7 @@ static adc_monitor_state_t adc_state;
 static uint8_t current_filter_initialized;
 static uint8_t battery_filter_initialized;
 static uint8_t current_zero_valid;
+static volatile uint8_t current_zero_stationary;
 static uint16_t current_zero_sample_count;
 static uint16_t current_zero_raw[MOTOR_ID_COUNT];
 static uint16_t current_zero_min_raw[MOTOR_ID_COUNT];
@@ -124,12 +125,27 @@ static void AdcMonitor_ResetWindowAccumulators(void)
   }
 }
 
+static void AdcMonitor_ResetCurrentZeroAccumulators(void)
+{
+  current_zero_sample_count = 0U;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    current_zero_raw[i] = 0U;
+    current_zero_min_raw[i] = 0U;
+    current_zero_max_raw[i] = 0U;
+    current_zero_span_raw[i] = 0U;
+    current_zero_sum[i] = 0UL;
+  }
+}
+
 static void AdcMonitor_UpdateCurrentZero(const uint32_t raw_sum[MOTOR_ID_COUNT],
                                          const uint16_t raw_min[MOTOR_ID_COUNT],
                                          const uint16_t raw_max[MOTOR_ID_COUNT],
                                          uint32_t sample_count)
 {
-  if (ADC_MONITOR_CALIBRATION_ENABLED == 0U || current_zero_valid != 0U)
+  if (ADC_MONITOR_CALIBRATION_ENABLED == 0U ||
+      current_zero_valid != 0U ||
+      current_zero_stationary == 0U)
   {
     return;
   }
@@ -267,6 +283,7 @@ void AdcMonitor_Init(void)
   current_filter_initialized = 0U;
   battery_filter_initialized = 0U;
   current_zero_valid = 0U;
+  current_zero_stationary = 0U;
   current_zero_sample_count = 0U;
   if (HAL_ADC_Start_DMA(&hadc1,
                         (uint32_t *)adc_dma_buffer,
@@ -636,6 +653,7 @@ void AdcMonitor_RequestCurrentZeroCalibration(void)
   __disable_irq();
   current_zero_valid = 0U;
   current_zero_sample_count = 0U;
+  current_zero_stationary = 0U;
   current_filter_initialized = 0U;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
@@ -691,6 +709,27 @@ void AdcMonitor_ApplyCurrentZeroCalibration(const uint16_t zero_raw[MOTOR_ID_COU
   adc_state.current_zero_valid = 1U;
   adc_state.current_zero_sample_count = ADC_MONITOR_CURRENT_ZERO_SAMPLES;
   adc_state.current_valid = (adc_state.samples_ready != 0U) ? 1U : 0U;
+  __set_PRIMASK(primask);
+}
+
+void AdcMonitor_SetCurrentZeroStationary(uint8_t stationary)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  current_zero_stationary = (stationary != 0U) ? 1U : 0U;
+  if (current_zero_valid == 0U && current_zero_stationary == 0U)
+  {
+    AdcMonitor_ResetCurrentZeroAccumulators();
+    AdcMonitor_ResetWindowAccumulators();
+    adc_state.current_zero_sample_count = 0U;
+    adc_state.current_zero_valid = 0U;
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+      adc_state.current_zero_raw[i] = 0U;
+      adc_state.current_zero_span_raw[i] = 0U;
+    }
+  }
   __set_PRIMASK(primask);
 }
 

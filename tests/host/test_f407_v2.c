@@ -270,6 +270,16 @@ static void test_imu_status_payload_extended_layout(void)
   require_int(read_u32_le(&payload[93]) == 7UL, "imu last quality counter");
   require_int(payload[97] == (UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_SENSOR_TIME), "imu status flags");
   require_int((int8_t)payload[98] == 25, "imu temperature");
+  imu.temperature_c = -41;
+  require_int(UpperProtocol_BuildImuStatusPayload(&imu, payload, sizeof(payload)) ==
+              UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
+              "negative temperature vector builds");
+  require_int((int8_t)payload[98] == -41, "imu negative temperature is direct celsius");
+  imu.temperature_c = 87;
+  require_int(UpperProtocol_BuildImuStatusPayload(&imu, payload, sizeof(payload)) ==
+              UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
+              "positive temperature vector builds");
+  require_int((int8_t)payload[98] == 87, "imu positive temperature is direct celsius");
 }
 
 static void test_control_priority_timeout_and_reject_stop(void)
@@ -689,6 +699,52 @@ static void test_pid_direction_reversal_resets(void)
   require_close(pid.integral, 0.0f, 0.001f, "pid integral cleared after direction reversal");
 }
 
+static void test_pid_conditional_anti_windup(void)
+{
+  pid_state_t pid = {0};
+  pid_params_t params = { .kp = 0.0f, .ki = 1.0f, .kd = 0.0f,
+                          .integral_limit = 100.0f, .output_limit = 100.0f };
+
+  PidController_Init(&pid, &params);
+  (void)PidController_Step(&pid, 1.0f, 0.0f, 1.0f);
+  require_close(pid.integral, 1.0f, 0.001f, "pid baseline integral");
+  (void)PidController_StepLimited(&pid, 1.0f, 0.0f, 1.0f, 1);
+  require_close(pid.integral, 1.0f, 0.001f, "positive actuator limit freezes positive error");
+  (void)PidController_StepLimited(&pid, -1.0f, 0.0f, 1.0f, 1);
+  require_close(pid.integral, 0.0f, 0.001f, "opposite error unwinds limited integral");
+
+  params.kp = 2.0f;
+  params.output_limit = 1.0f;
+  PidController_Init(&pid, &params);
+  (void)PidController_StepLimited(&pid, 1.0f, 0.0f, 1.0f, 0);
+  require_close(pid.integral, 0.0f, 0.001f, "internal positive saturation freezes positive integral");
+}
+
+static void test_control_dt_uses_measured_period_and_rejects_long_gap(void)
+{
+  uint32_t last_step_ms = 0U;
+  uint8_t initialized = 0U;
+  float dt_s = 0.0f;
+
+  require_int(ChassisMath_ControlDt(100U, &last_step_ms, &initialized, &dt_s) == 1U,
+              "first control step accepted");
+  require_close(dt_s, 0.010f, 0.0001f, "first control step uses 10ms");
+  require_int(ChassisMath_ControlDt(105U, &last_step_ms, &initialized, &dt_s) == 1U,
+              "5ms control step accepted");
+  require_close(dt_s, 0.005f, 0.0001f, "5ms measured dt");
+  require_int(ChassisMath_ControlDt(115U, &last_step_ms, &initialized, &dt_s) == 1U,
+              "10ms control step accepted");
+  require_close(dt_s, 0.010f, 0.0001f, "10ms measured dt");
+  require_int(ChassisMath_ControlDt(145U, &last_step_ms, &initialized, &dt_s) == 1U,
+              "30ms control step accepted");
+  require_close(dt_s, 0.030f, 0.0001f, "30ms measured dt");
+  require_int(ChassisMath_ControlDt(245U, &last_step_ms, &initialized, &dt_s) == 1U,
+              "100ms control step accepted");
+  require_close(dt_s, 0.100f, 0.0001f, "100ms measured dt");
+  require_int(ChassisMath_ControlDt(346U, &last_step_ms, &initialized, &dt_s) == 0U,
+              "gap above 100ms is rejected");
+}
+
 /* ────────── L2: ChassisMath 差速模型测试 ────────── */
 
 static void test_chassis_math_differential(void)
@@ -733,6 +789,8 @@ int main(void)
   test_pid_output_limit();
   test_pid_zero_dt_returns_zero();
   test_pid_direction_reversal_resets();
+  test_pid_conditional_anti_windup();
+  test_control_dt_uses_measured_period_and_rejects_long_gap();
   test_chassis_math_differential();
   (void)printf("PASS: f407_v2 host tests\n");
   return 0;

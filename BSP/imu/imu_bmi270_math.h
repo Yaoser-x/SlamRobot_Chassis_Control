@@ -37,7 +37,7 @@ typedef struct
   uint8_t initialized;
 } imu_bmi270_mahony_t;
 
-void ImuBmi270Coordinate_Apply(const float matrix[3][3], const float in[3], float out[3]);
+void ImuBmi270Coordinate_Apply(float matrix[3][3], const float in[3], float out[3]);
 void ImuBmi270Coordinate_BodyToRos(const float body[3], float ros[3]);
 
 imu_bmi270_mahony_params_t ImuBmi270Mahony_DefaultParams(void);
@@ -51,6 +51,7 @@ float ImuBmi270Quaternion_Norm(const imu_bmi270_quaternion_t *q);
 void ImuBmi270Quaternion_Normalize(imu_bmi270_quaternion_t *q);
 uint8_t ImuBmi270Quaternion_FromAccel(const float accel_g[3], imu_bmi270_quaternion_t *q);
 void ImuBmi270Quaternion_ToEulerDeg(const imu_bmi270_quaternion_t *q, float euler_deg[3]);
+uint8_t ImuBmi270_TemperatureRawToC(int16_t raw, float *temperature_c);
 
 #ifdef __cplusplus
 }

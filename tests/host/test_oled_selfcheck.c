@@ -21,11 +21,13 @@ static void test_rpi_line_and_esp_link_statuses(void)
               "valid recent line frame passes");
   require_int(OLED_SelfCheckLine(1200U, 0U, 1180U, 50U) == OLED_SELFCHECK_FAIL,
               "invalid line frame fails");
-  require_int(OLED_SelfCheckEsp12f(3UL, 0U) == OLED_SELFCHECK_OK,
-              "ESP RX activity passes");
-  require_int(OLED_SelfCheckEsp12f(0UL, 1U) == OLED_SELFCHECK_SKIP,
+  require_int(OLED_SelfCheckEsp12f(1200U, 1000U, 500U, 0U) == OLED_SELFCHECK_OK,
+              "recent ESP frame passes");
+  require_int(OLED_SelfCheckEsp12f(2000U, 1000U, 500U, 0U) == OLED_SELFCHECK_FAIL,
+              "stale ESP frame fails");
+  require_int(OLED_SelfCheckEsp12f(1200U, 0U, 500U, 1U) == OLED_SELFCHECK_SKIP,
               "ESP download mode skips");
-  require_int(OLED_SelfCheckEsp12f(0UL, 0U) == OLED_SELFCHECK_FAIL,
+  require_int(OLED_SelfCheckEsp12f(1200U, 0U, 500U, 0U) == OLED_SELFCHECK_FAIL,
               "ESP no RX fails");
 }
 

@@ -29,6 +29,7 @@ uint32_t UpperUart_GetLastRxTimestamp(void);
 void UpperUart_OnUartError(void);
 void UpperUart_OnDmaHalf(void);
 void UpperUart_OnDmaFull(void);
+void UpperUart_OnTxComplete(void);
 
 #ifdef __cplusplus
 }

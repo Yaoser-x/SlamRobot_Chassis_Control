@@ -20,6 +20,7 @@ extern "C" {
 #define SYSTEM_ERROR_FAULT_STOP       (1UL << 6)
 #define SYSTEM_ERROR_ENCODER_INVALID  (1UL << 7)
 #define SYSTEM_ERROR_DRV_FAULT        (1UL << 8)
+#define SYSTEM_ERROR_TIM_BREAK        (1UL << 9)
 
 typedef struct
 {

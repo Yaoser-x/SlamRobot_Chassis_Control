@@ -18,6 +18,7 @@ static uint8_t fake_estop;
 static uint8_t fake_fault_stop;
 static uint8_t fake_active_source;
 static uint8_t fake_set_fault_stop_count;
+static uint8_t fake_break_clear_allowed;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -68,6 +69,16 @@ void MotorDriver_GetState(motor_driver_state_t *state)
   *state = fake_motor_state;
 }
 
+uint8_t MotorDriver_ClearBreakLatch(void)
+{
+  if (fake_break_clear_allowed == 0U)
+  {
+    return 0U;
+  }
+  fake_motor_state.tim1_break_latched = 0U;
+  return 1U;
+}
+
 uint8_t ControlManager_IsEmergencyStop(void)
 {
   return fake_estop;
@@ -114,6 +125,7 @@ static void reset_fake_monitor(void)
   fake_fault_stop = 0U;
   fake_active_source = CONTROL_SOURCE_DEBUG;
   fake_set_fault_stop_count = 0U;
+  fake_break_clear_allowed = 0U;
   fake_adc_state.current_valid = 1U;
   fake_adc_state.current_control_valid = 1U;
   fake_adc_state.current_control_valid_mask = (uint8_t)((1U << MOTOR_ID_M2) | (1U << MOTOR_ID_M3));
@@ -208,6 +220,30 @@ static void test_drv_fault_is_not_suppressed_by_startup_blanking(void)
   require_int(fake_fault_stop != 0U, "DRV fault requests fault stop during startup blank");
 }
 
+static void test_tim1_break_latches_fault_stop_and_requires_driver_clear(void)
+{
+  system_monitor_state_t state;
+
+  reset_fake_monitor();
+  fake_motor_state.tim1_break_latched = 1U;
+  SystemMonitor_Update();
+  SystemMonitor_GetState(&state);
+  require_int((state.latched_error_flags & SYSTEM_ERROR_TIM_BREAK) != 0U,
+              "TIM1 break latches a system fault");
+  require_int(fake_fault_stop != 0U, "TIM1 break requests fault stop");
+
+  SystemMonitor_ClearLatchedFaults(SYSTEM_ERROR_TIM_BREAK);
+  SystemMonitor_GetState(&state);
+  require_int((state.latched_error_flags & SYSTEM_ERROR_TIM_BREAK) != 0U,
+              "driver-rejected clear preserves system break fault");
+
+  fake_break_clear_allowed = 1U;
+  SystemMonitor_ClearLatchedFaults(SYSTEM_ERROR_TIM_BREAK);
+  SystemMonitor_GetState(&state);
+  require_int((state.latched_error_flags & SYSTEM_ERROR_TIM_BREAK) == 0U,
+              "safe driver clear removes system break fault");
+}
+
 static void test_adc_overcurrent_output_chatter_does_not_fault_when_software_fault_disabled(void)
 {
 #if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U
@@ -235,6 +271,7 @@ int main(void)
   test_adc_overcurrent_does_not_fault_stop_when_software_fault_disabled();
   test_adc_overcurrent_faults_when_enabled_and_control_valid();
   test_drv_fault_is_not_suppressed_by_startup_blanking();
+  test_tim1_break_latches_fault_stop_and_requires_driver_clear();
   test_adc_overcurrent_output_chatter_does_not_fault_when_software_fault_disabled();
   return 0;
 }

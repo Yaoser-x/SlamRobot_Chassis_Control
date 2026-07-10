@@ -50,6 +50,7 @@ typedef struct
   uint8_t sleep_enabled;
   uint8_t tim1_moe_active;
   uint8_t tim1_break_flag;
+  uint8_t tim1_break_latched;
   uint8_t tim8_moe_active;
   uint8_t tim8_break_flag;
   uint32_t tim1_break_count;
@@ -70,6 +71,8 @@ void MotorDriver_StopSide(motor_side_t side, motor_stop_mode_t mode);
 void MotorDriver_StopAll(motor_stop_mode_t mode);
 void MotorDriver_UpdateFaults(void);
 uint8_t MotorDriver_HasFault(void);
+void MotorDriver_OnTim1BreakFromIsr(void);
+uint8_t MotorDriver_ClearBreakLatch(void);
 void MotorDriver_GetState(motor_driver_state_t *state);
 
 #ifdef __cplusplus

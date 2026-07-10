@@ -120,6 +120,7 @@ static void test_current_zero_requires_startup_samples(void)
   uint32_t tim8_start_count = fake_tim8_base_start_count;
 
   AdcMonitor_Init();
+  AdcMonitor_SetCurrentZeroStationary(1U);
   require_int(fake_adc_start_count == start_count + 1U, "adc dma started once");
   require_int(fake_tim8_base_start_count == tim8_start_count + 1U, "tim8 base started once");
   require_int((host_dma_disabled_interrupt_mask & DMA_IT_HT) != 0U, "adc disables half-transfer irq");
@@ -184,6 +185,7 @@ static void test_current_rezero_requires_fresh_stable_window(void)
   adc_monitor_state_t state = {0};
 
   AdcMonitor_Init();
+  AdcMonitor_SetCurrentZeroStationary(1U);
   for (uint16_t i = 0U; i < ADC_MONITOR_CURRENT_ZERO_SAMPLES; ++i)
   {
     push_adc_sample(100U, 110U, 120U, 130U, 2700U);
@@ -198,6 +200,7 @@ static void test_current_rezero_requires_fresh_stable_window(void)
   require_int(state.current_control_valid != 0U, "initial zero becomes control-valid");
 
   AdcMonitor_RequestCurrentZeroCalibration();
+  AdcMonitor_SetCurrentZeroStationary(1U);
   AdcMonitor_GetState(&state);
   require_int(state.current_zero_valid == 0U, "rezero clears zero-valid");
   require_int(state.current_control_valid == 0U, "rezero clears control-valid");
@@ -229,6 +232,7 @@ static void test_current_validity_tracks_missing_windows(void)
   adc_monitor_state_t state = {0};
 
   AdcMonitor_Init();
+  AdcMonitor_SetCurrentZeroStationary(1U);
   for (uint16_t i = 0U; i < ADC_MONITOR_CURRENT_ZERO_SAMPLES; ++i)
   {
     push_adc_sample(100U, 110U, 120U, 130U, 2700U);
@@ -250,6 +254,40 @@ static void test_current_validity_tracks_missing_windows(void)
   require_int((state.invalid_reason_flags & ADC_MONITOR_INVALID_NO_NEW_SAMPLE) != 0U,
               "no new sample reason set");
   require_int(state.missed_window_count == 1U, "missed window count increments");
+}
+
+static void test_current_zero_motion_discards_partial_window(void)
+{
+  adc_monitor_state_t state = {0};
+
+  AdcMonitor_Init();
+  AdcMonitor_SetCurrentZeroStationary(1U);
+  for (uint16_t i = 0U; i < 64U; ++i)
+  {
+    push_adc_sample(100U, 110U, 120U, 130U, 2700U);
+  }
+  AdcMonitor_Update();
+  AdcMonitor_GetState(&state);
+  require_int(state.current_zero_sample_count == 64U, "partial zero samples accumulate while stationary");
+
+  AdcMonitor_SetCurrentZeroStationary(0U);
+  AdcMonitor_GetState(&state);
+  require_int(state.current_zero_sample_count == 0U, "motion clears partial zero samples");
+  require_int(state.current_zero_valid == 0U, "motion keeps zero invalid");
+
+  AdcMonitor_SetCurrentZeroStationary(1U);
+  for (uint16_t i = 0U; i < ADC_MONITOR_CURRENT_ZERO_SAMPLES - 1U; ++i)
+  {
+    push_adc_sample(200U, 210U, 220U, 230U, 2700U);
+  }
+  AdcMonitor_Update();
+  AdcMonitor_GetState(&state);
+  require_int(state.current_zero_valid == 0U, "restart requires a complete fresh zero window");
+  push_adc_sample(200U, 210U, 220U, 230U, 2700U);
+  AdcMonitor_Update();
+  AdcMonitor_GetState(&state);
+  require_int(state.current_zero_valid != 0U, "fresh stationary window completes zero");
+  require_int(state.current_zero_raw[MOTOR_ID_M1] == 200U, "discarded samples do not pollute new zero");
 }
 
 static void test_battery_voltage_is_filtered(void)
@@ -282,6 +320,7 @@ int main(void)
   test_current_zero_requires_startup_samples();
   test_current_rezero_requires_fresh_stable_window();
   test_current_validity_tracks_missing_windows();
+  test_current_zero_motion_discards_partial_window();
   test_battery_voltage_is_filtered();
   (void)printf("PASS: adc monitor host tests\n");
   return 0;

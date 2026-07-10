@@ -1,0 +1,47 @@
+name: F407 HIL Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      port:
+        description: USART1 debug port on the self-hosted runner
+        required: true
+        default: COM6
+      baud:
+        description: USART1 baud rate
+        required: true
+        default: "115200"
+      imu_calibration_scheduling:
+        description: Run the stationary 500-sample IMU scheduling check
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  smoke:
+    name: Read-only board smoke
+    runs-on:
+      - self-hosted
+      - windows
+      - f407-hil
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install serial dependency
+        run: python -m pip install --disable-pip-version-check pyserial==3.5
+
+      - name: Run HIL smoke
+        run: >-
+          python scripts/hil_smoke.py
+          --port "${{ inputs.port }}"
+          --baud "${{ inputs.baud }}"
+
+      - name: Run IMU calibration scheduling check
+        if: ${{ inputs.imu_calibration_scheduling }}
+        run: >-
+          python scripts/hil_imu_calibration.py
+          --port "${{ inputs.port }}"
+          --baud "${{ inputs.baud }}"

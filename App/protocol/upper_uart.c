@@ -8,12 +8,17 @@
 #include "encoder_driver.h"
 #include "imu_bmi270.h"
 #include "line_control.h"
+#include "main.h"
 #include "motor_driver.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
 
+#include <string.h>
+
 #define UPPER_UART_RX_BUFFER_SIZE 128U
+#define UPPER_UART_TX_QUEUE_CAPACITY 4U
+#define UPPER_UART_TX_SLOT_INVALID 0xFFU
 
 typedef enum
 {
@@ -22,6 +27,21 @@ typedef enum
   UPPER_RX_WAIT_LEN,
   UPPER_RX_WAIT_BODY
 } upper_rx_state_t;
+
+typedef enum
+{
+  UPPER_TX_PRIORITY_IMU = 0,
+  UPPER_TX_PRIORITY_STATUS = 1
+} upper_tx_priority_t;
+
+typedef struct
+{
+  uint8_t data[UPPER_PROTOCOL_MAX_FRAME];
+  uint16_t length;
+  uint32_t sequence;
+  uint8_t priority;
+  uint8_t used;
+} upper_tx_slot_t;
 
 static uint8_t upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE] __attribute__((aligned(4)));
 static uint16_t upper_rx_read_pos;
@@ -39,6 +59,10 @@ static uint16_t upper_last_write_pos;
 static uint8_t upper_imu_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint8_t upper_imu_payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
 static uint32_t upper_last_imu_status_ms;
+static upper_tx_slot_t upper_tx_queue[UPPER_UART_TX_QUEUE_CAPACITY];
+static uint8_t upper_tx_queue_count;
+static uint8_t upper_tx_active_slot;
+static uint32_t upper_tx_sequence;
 
 #define UPPER_PARSER_TIMEOUT_CYCLES  20U  /* 20 × 5ms = 100ms 无字节则重置解析器 */
 
@@ -47,6 +71,131 @@ static void UpperUart_ResetParser(void)
   upper_rx_state = UPPER_RX_WAIT_HEAD0;
   upper_frame_len = 0U;
   upper_frame_index = 0U;
+}
+
+static uint8_t UpperUart_SelectNextTxLocked(void)
+{
+  uint8_t selected = UPPER_UART_TX_SLOT_INVALID;
+
+  for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
+  {
+    if (upper_tx_queue[i].used == 0U || i == upper_tx_active_slot)
+    {
+      continue;
+    }
+    if (selected == UPPER_UART_TX_SLOT_INVALID ||
+        upper_tx_queue[i].priority > upper_tx_queue[selected].priority ||
+        (upper_tx_queue[i].priority == upper_tx_queue[selected].priority &&
+         upper_tx_queue[i].sequence < upper_tx_queue[selected].sequence))
+    {
+      selected = i;
+    }
+  }
+  return selected;
+}
+
+static uint8_t UpperUart_DropQueuedImuLocked(void)
+{
+  uint8_t selected = UPPER_UART_TX_SLOT_INVALID;
+
+  for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
+  {
+    if (upper_tx_queue[i].used == 0U ||
+        i == upper_tx_active_slot ||
+        upper_tx_queue[i].priority != UPPER_TX_PRIORITY_IMU)
+    {
+      continue;
+    }
+    if (selected == UPPER_UART_TX_SLOT_INVALID ||
+        upper_tx_queue[i].sequence < upper_tx_queue[selected].sequence)
+    {
+      selected = i;
+    }
+  }
+  if (selected == UPPER_UART_TX_SLOT_INVALID)
+  {
+    return 0U;
+  }
+  upper_tx_queue[selected].used = 0U;
+  upper_tx_queue_count--;
+  upper_state.tx_busy_drops++;
+  return 1U;
+}
+
+static void UpperUart_TryStartTxLocked(void)
+{
+  uint8_t selected;
+  HAL_StatusTypeDef status;
+
+  if (upper_tx_active_slot != UPPER_UART_TX_SLOT_INVALID)
+  {
+    return;
+  }
+  selected = UpperUart_SelectNextTxLocked();
+  if (selected == UPPER_UART_TX_SLOT_INVALID)
+  {
+    return;
+  }
+  status = HAL_UART_Transmit_IT(&huart3,
+                                upper_tx_queue[selected].data,
+                                upper_tx_queue[selected].length);
+  if (status == HAL_OK)
+  {
+    upper_tx_active_slot = selected;
+  }
+  else if (status != HAL_BUSY)
+  {
+    upper_tx_queue[selected].used = 0U;
+    upper_tx_queue_count--;
+    upper_state.tx_busy_drops++;
+  }
+}
+
+static uint8_t UpperUart_EnqueueTx(const uint8_t *frame,
+                                   uint16_t frame_len,
+                                   upper_tx_priority_t priority)
+{
+  uint32_t primask;
+  uint8_t selected = UPPER_UART_TX_SLOT_INVALID;
+
+  if (frame == 0 || frame_len == 0U || frame_len > UPPER_PROTOCOL_MAX_FRAME)
+  {
+    return 0U;
+  }
+  primask = __get_PRIMASK();
+  __disable_irq();
+  if (upper_tx_queue_count >= UPPER_UART_TX_QUEUE_CAPACITY)
+  {
+    if (priority != UPPER_TX_PRIORITY_STATUS || UpperUart_DropQueuedImuLocked() == 0U)
+    {
+      upper_state.tx_busy_drops++;
+      __set_PRIMASK(primask);
+      return 0U;
+    }
+  }
+  for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
+  {
+    if (upper_tx_queue[i].used == 0U)
+    {
+      selected = i;
+      break;
+    }
+  }
+  if (selected == UPPER_UART_TX_SLOT_INVALID)
+  {
+    upper_state.tx_busy_drops++;
+    __set_PRIMASK(primask);
+    return 0U;
+  }
+  memcpy(upper_tx_queue[selected].data, frame, frame_len);
+  upper_tx_queue[selected].length = frame_len;
+  upper_tx_queue[selected].priority = (uint8_t)priority;
+  upper_tx_queue[selected].sequence = upper_tx_sequence++;
+  upper_tx_queue[selected].used = 1U;
+  upper_tx_queue_count++;
+  UpperUart_TryStartTxLocked();
+  __set_PRIMASK(primask);
+  return 1U;
 }
 
 static void UpperUart_ClearUartFlags(void)
@@ -238,12 +387,6 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   {
     return;
   }
-  upper_last_status_ms = now_ms;
-  if (huart3.gState != HAL_UART_STATE_READY)
-  {
-    upper_state.tx_busy_drops++;
-    return;
-  }
 
   ChassisControl_GetState(&chassis_state);
   EncoderDriver_GetState(&encoder_state);
@@ -301,13 +444,9 @@ static void UpperUart_SendStatus(uint32_t now_ms)
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_STATUS, upper_status_payload, payload_len, upper_tx_frame, sizeof(upper_tx_frame));
   if (frame_len > 0U)
   {
-    if (HAL_UART_Transmit_IT(&huart3, upper_tx_frame, frame_len) == HAL_OK)
+    if (UpperUart_EnqueueTx(upper_tx_frame, frame_len, UPPER_TX_PRIORITY_STATUS) != 0U)
     {
-      upper_state.tx_frames++;
-    }
-    else
-    {
-      upper_state.tx_busy_drops++;
+      upper_last_status_ms = now_ms;
     }
   }
 }
@@ -317,7 +456,12 @@ void UpperUart_Init(void)
   upper_rx_read_pos = 0U;
   upper_last_write_pos = 0U;
   upper_last_status_ms = 0U;
+  upper_last_imu_status_ms = 0U;
   upper_state = (upper_uart_state_t){0};
+  memset(upper_tx_queue, 0, sizeof(upper_tx_queue));
+  upper_tx_queue_count = 0U;
+  upper_tx_active_slot = UPPER_UART_TX_SLOT_INVALID;
+  upper_tx_sequence = 0UL;
   upper_last_rx_timestamp_ms = 0U;
   UpperUart_ResetParser();
   (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
@@ -334,7 +478,6 @@ static void UpperUart_SendImuStatus(uint32_t now_ms)
   {
     return;
   }
-  upper_last_imu_status_ms = now_ms;
 
   ImuBmi270_GetState(&imu_state);
   if (imu_state.online == 0U)
@@ -370,15 +513,17 @@ static void UpperUart_SendImuStatus(uint32_t now_ms)
   if (imu_state.gyro_calibrated != 0U) { imu.status_flags |= UPPER_IMU_FLAG_CALIBRATED; }
   if (imu_state.quality_flags != 0UL || imu_state.last_error != IMU_BMI270_ERROR_NONE) { imu.status_flags |= UPPER_IMU_FLAG_ERROR; }
   if (imu_state.sensor_time_valid != 0U) { imu.status_flags |= UPPER_IMU_FLAG_SENSOR_TIME; }
-  imu.temperature_c = (int8_t)((int32_t)imu_state.temperature_c - 40);
+  imu.temperature_c = (int8_t)((imu_state.temperature_c >= 0.0f) ?
+                               (imu_state.temperature_c + 0.5f) :
+                               (imu_state.temperature_c - 0.5f));
 
   payload_len = UpperProtocol_BuildImuStatusPayload(&imu, upper_imu_payload, sizeof(upper_imu_payload));
   frame_len = UpperProtocol_BuildFrame(UPPER_CMD_IMU_STATUS, upper_imu_payload, payload_len, upper_imu_tx_frame, sizeof(upper_imu_tx_frame));
   if (frame_len > 0U)
   {
-    if (HAL_UART_Transmit_IT(&huart3, upper_imu_tx_frame, frame_len) != HAL_OK)
+    if (UpperUart_EnqueueTx(upper_imu_tx_frame, frame_len, UPPER_TX_PRIORITY_IMU) != 0U)
     {
-      upper_state.tx_busy_drops++;
+      upper_last_imu_status_ms = now_ms;
     }
   }
 }
@@ -415,8 +560,22 @@ void UpperUart_GetState(upper_uart_state_t *state)
 
 void UpperUart_OnUartError(void)
 {
+  uint32_t primask;
+
   upper_state.uart_errors++;
   UpperUart_RestartRxDma(1U);
+  primask = __get_PRIMASK();
+  __disable_irq();
+  if (upper_tx_active_slot != UPPER_UART_TX_SLOT_INVALID &&
+      upper_tx_queue[upper_tx_active_slot].used != 0U)
+  {
+    upper_tx_queue[upper_tx_active_slot].used = 0U;
+    upper_tx_queue_count--;
+    upper_state.tx_busy_drops++;
+  }
+  upper_tx_active_slot = UPPER_UART_TX_SLOT_INVALID;
+  UpperUart_TryStartTxLocked();
+  __set_PRIMASK(primask);
 }
 
 uint32_t UpperUart_GetLastRxTimestamp(void)
@@ -432,4 +591,21 @@ void UpperUart_OnDmaHalf(void)
 void UpperUart_OnDmaFull(void)
 {
   upper_state.rx_dma_full_count++;
+}
+
+void UpperUart_OnTxComplete(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  if (upper_tx_active_slot != UPPER_UART_TX_SLOT_INVALID &&
+      upper_tx_queue[upper_tx_active_slot].used != 0U)
+  {
+    upper_tx_queue[upper_tx_active_slot].used = 0U;
+    upper_tx_queue_count--;
+    upper_state.tx_frames++;
+  }
+  upper_tx_active_slot = UPPER_UART_TX_SLOT_INVALID;
+  UpperUart_TryStartTxLocked();
+  __set_PRIMASK(primask);
 }

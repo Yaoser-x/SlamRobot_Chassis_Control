@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Verify that a stationary IMU calibration does not add RTOS task timeouts."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import time
+
+try:
+    import serial
+except ImportError:  # pragma: no cover - user environment check
+    serial = None
+
+from hil_smoke import read_until_idle, send_command
+
+
+MONITORED_TASKS = ("line", "esp", "debug", "led", "oled")
+RTOS_LINE = re.compile(
+    r"^RTOS\s+(?P<task>\w+)\s+.*?timeout=(?P<timeout>\d+)",
+    re.MULTILINE,
+)
+
+
+def timeout_snapshot(text: str) -> dict[str, int]:
+    values = {
+        match.group("task"): int(match.group("timeout"))
+        for match in RTOS_LINE.finditer(text)
+    }
+    missing = [task for task in MONITORED_TASKS if task not in values]
+    if missing:
+        raise AssertionError(f"missing RTOS task lines: {', '.join(missing)}")
+    return {task: values[task] for task in MONITORED_TASKS}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", required=True)
+    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--calibration-timeout", type=float, default=9.0)
+    args = parser.parse_args()
+
+    if serial is None:
+        print("pyserial is required: python -m pip install pyserial", file=sys.stderr)
+        return 2
+
+    with serial.Serial(args.port, args.baud, timeout=0.1) as port:
+        read_until_idle(port, args.timeout)
+        before_text = send_command(port, "rtos", args.timeout)
+        before = timeout_snapshot(before_text)
+        response = send_command(port, "imucal 500", args.timeout)
+        if "calibration accepted" not in response:
+            raise AssertionError(f"IMU calibration was not accepted:\n{response}")
+
+        deadline = time.monotonic() + args.calibration_timeout
+        status_text = ""
+        saw_running = False
+        while time.monotonic() < deadline:
+            status_text = send_command(port, "status", args.timeout)
+            if re.search(r"acal=2,\d+,\d+", status_text):
+                saw_running = True
+            if saw_running and re.search(r"acal=3,\d+,1", status_text):
+                break
+            time.sleep(0.25)
+        if not saw_running or not re.search(r"acal=3,\d+,1", status_text):
+            raise AssertionError("IMU calibration did not finish before timeout")
+
+        after_text = send_command(port, "rtos", args.timeout)
+        after = timeout_snapshot(after_text)
+
+    regressions = {
+        task: (before[task], after[task])
+        for task in MONITORED_TASKS
+        if after[task] != before[task]
+    }
+    if regressions:
+        raise AssertionError(f"task timeout counters changed: {regressions}")
+    print(f"IMU calibration scheduling passed: {after}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

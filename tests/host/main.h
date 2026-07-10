@@ -22,6 +22,7 @@ typedef struct
   uint32_t CCR3;
   uint32_t CCR4;
   uint32_t SR;
+  uint32_t DIER;
   uint32_t BDTR;
 } TIM_TypeDef;
 
@@ -59,7 +60,10 @@ typedef enum
 #define TIM_CHANNEL_3 0x00000008U
 #define TIM_CHANNEL_4 0x0000000CU
 #define TIM_FLAG_BREAK 0x00000080U
+#define TIM_IT_BREAK 0x00000080U
 #define TIM_BDTR_MOE 0x00008000U
+#define TIM1_BKIN_Pin GPIO_PIN_15
+#define TIM1_BKIN_GPIO_Port GPIOE
 
 extern GPIO_TypeDef GPIOA_Instance;
 extern GPIO_TypeDef GPIOC_Instance;
@@ -105,5 +109,6 @@ void HAL_Delay(uint32_t delay_ms);
 #define __HAL_TIM_SET_COMPARE(htim, channel, pulse) HostTimSetCompare((htim), (channel), (pulse))
 #define __HAL_TIM_GET_FLAG(htim, flag) ((((htim)->Instance->SR & (flag)) != 0U) ? 1U : 0U)
 #define __HAL_TIM_CLEAR_FLAG(htim, flag) ((htim)->Instance->SR &= ~(flag))
+#define __HAL_TIM_ENABLE_IT(htim, it) ((htim)->Instance->DIER |= (it))
 
 #endif

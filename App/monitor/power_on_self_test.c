@@ -13,7 +13,9 @@
 #endif
 
 static post_result_t last_post_result;
+#ifndef POWER_ON_SELF_TEST_HOST_TEST
 static uint32_t post_runtime_start_ms;
+#endif
 
 const char *POST_ItemStatusString(post_item_status_t status)
 {

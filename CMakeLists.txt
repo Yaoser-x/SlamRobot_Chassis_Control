@@ -42,8 +42,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# Add sources to executable
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+# Add user-maintained sources to executable
+set(F407_APP_BSP_SOURCES
     App/chassis/chassis_control.c
     App/chassis/chassis_math.c
     App/chassis/chassis_task_timing.c
@@ -56,6 +56,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/debug/usart1_debug_console.c
     App/display/oled_ui.c
     App/display/oled_selfcheck.c
+    App/imu/imu_calibration_gate.c
     App/monitor/system_monitor.c
     App/monitor/power_on_self_test.c
     App/param/param_store.c
@@ -86,6 +87,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/oled/oled_font_data.c
 )
 
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${F407_APP_BSP_SOURCES})
+
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/chassis
@@ -93,6 +96,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/current
     App/debug
     App/display
+    App/imu
     App/monitor
     App/param
     App/protocol
@@ -114,6 +118,15 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
 )
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_property(SOURCE ${F407_APP_BSP_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+    )
+endif()
 
 # Remove wrong libob.a library dependency when using cpp files
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)

@@ -43,6 +43,10 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   {
     LineUart_OnTxCplt();
   }
+  else if (huart == &huart3)
+  {
+    UpperUart_OnTxComplete();
+  }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)

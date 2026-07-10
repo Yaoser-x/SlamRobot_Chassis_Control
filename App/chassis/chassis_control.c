@@ -22,6 +22,8 @@ static float ramped_angular_z;
 static float last_pid_target_mps[MOTOR_ID_COUNT];
 static uint8_t feedback_loss_count[MOTOR_ID_COUNT];
 static pid_state_t pid_motor[MOTOR_ID_COUNT];
+static uint32_t last_control_step_ms;
+static uint8_t control_dt_initialized;
 
 static const pid_params_t pid_params[MOTOR_ID_COUNT] = {
   { CHASSIS_PID_KP_M1, CHASSIS_PID_KI_M1, CHASSIS_PID_KD_M1, CHASSIS_PID_INTEGRAL_LIMIT, CHASSIS_PID_CORRECTION_LIMIT },
@@ -340,11 +342,15 @@ static uint8_t ChassisControl_ShouldFreezePid(motor_driver_phase_t phase)
           phase == MOTOR_DRIVER_PHASE_PH_SETTLE) ? 1U : 0U;
 }
 
-static int16_t ChassisControl_StepMotorPid(motor_id_t motor, float target_mps, float actual_mps, uint8_t speed_valid)
+static int16_t ChassisControl_StepMotorPid(motor_id_t motor,
+                                          float target_mps,
+                                          float actual_mps,
+                                          uint8_t speed_valid,
+                                          float dt_s,
+                                          int8_t actuator_limit_direction)
 {
   int8_t last_sign;
   int8_t target_sign;
-  float dt_s = (float)CHASSIS_CONTROL_PERIOD_MS / 1000.0f;
   float pid_out;
 
   chassis_state.motor_pid_active[motor] = 0U;
@@ -366,7 +372,11 @@ static int16_t ChassisControl_StepMotorPid(motor_id_t motor, float target_mps, f
   last_pid_target_mps[motor] = target_mps;
 
   chassis_state.motor_error_mps[motor] = target_mps - actual_mps;
-  pid_out = PidController_Step(&pid_motor[motor], target_mps, actual_mps, dt_s);
+  pid_out = PidController_StepLimited(&pid_motor[motor],
+                                      target_mps,
+                                      actual_mps,
+                                      dt_s,
+                                      actuator_limit_direction);
   chassis_state.motor_pid_active[motor] = 1U;
   return ChassisControl_ClampPermille((int32_t)ChassisControl_MpsToPermille(target_mps) + (int32_t)pid_out);
 }
@@ -399,6 +409,8 @@ void ChassisControl_Init(void)
   }
   CurrentGuard_Init();
   chassis_state = (chassis_control_state_t){0};
+  last_control_step_ms = 0U;
+  control_dt_initialized = 0U;
   open_loop_test_enabled = 0U;
   raw_input_test_enabled = 0U;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -418,6 +430,7 @@ void ChassisControl_Step(uint32_t now_ms)
   chassis_cmd_t cmd;
   encoder_state_t encoder_state;
   uint8_t valid_cmd;
+  float dt_s;
 
   MotorDriver_UpdateFaults();
   if (MotorDriver_HasFault() != 0U)
@@ -432,10 +445,34 @@ void ChassisControl_Step(uint32_t now_ms)
     chassis_state.motor_speed_valid[i] = encoder_state.speed_valid[i];
   }
 
+  if (ChassisMath_ControlDt(now_ms,
+                            &last_control_step_ms,
+                            &control_dt_initialized,
+                            &dt_s) == 0U)
+  {
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+      PidController_Reset(&pid_motor[i]);
+    }
+    ChassisControl_StopOutput();
+    return;
+  }
+
   if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
   {
     ChassisControl_EmergencyStop();
     return;
+  }
+
+  {
+    adc_monitor_state_t adc_state;
+
+    AdcMonitor_GetState(&adc_state);
+    if (adc_state.current_zero_valid == 0U)
+    {
+      ChassisControl_StopOutput();
+      return;
+    }
   }
 
   if (open_loop_test_enabled != 0U)
@@ -507,8 +544,8 @@ void ChassisControl_Step(uint32_t now_ms)
     float req_right;
     float ramp_left;
     float ramp_right;
-    float linear_step = CHASSIS_SPEED_RAMP_MPS2 * ((float)CHASSIS_CONTROL_PERIOD_MS / 1000.0f);
-    float angular_step = CHASSIS_ANGULAR_RAMP_RPS2 * ((float)CHASSIS_CONTROL_PERIOD_MS / 1000.0f);
+    float linear_step = CHASSIS_SPEED_RAMP_MPS2 * dt_s;
+    float angular_step = CHASSIS_ANGULAR_RAMP_RPS2 * dt_s;
 
     if (ChassisLayout_HasBothSides() == 0U)
     {
@@ -547,6 +584,7 @@ void ChassisControl_Step(uint32_t now_ms)
     {
       int16_t permille;
       int16_t base_permille;
+      int8_t actuator_limit_direction = 0;
       motor_driver_state_t motor_state;
       if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
       {
@@ -559,6 +597,12 @@ void ChassisControl_Step(uint32_t now_ms)
       }
       base_permille = ChassisControl_MpsToPermille(chassis_state.motor_target_mps[i]);
       MotorDriver_GetState(&motor_state);
+      if (chassis_state.motor_current_limited[i] != 0U ||
+          ChassisControl_AbsFloat((float)motor_state.applied_pwm[i]) <
+              ChassisControl_AbsFloat((float)motor_state.requested_pwm[i]))
+      {
+        actuator_limit_direction = ChassisControl_TargetSign(chassis_state.motor_target_mps[i]);
+      }
       if (CHASSIS_PID_ENABLED != 0U)
       {
         uint8_t feedback_usable = ChassisControl_CheckFeedbackUsable((motor_id_t)i,
@@ -577,7 +621,9 @@ void ChassisControl_Step(uint32_t now_ms)
           permille = ChassisControl_StepMotorPid((motor_id_t)i,
                                                  chassis_state.motor_target_mps[i],
                                                  chassis_state.motor_actual_mps[i],
-                                                 feedback_usable);
+                                                 feedback_usable,
+                                                 dt_s,
+                                                 actuator_limit_direction);
         }
       }
       else

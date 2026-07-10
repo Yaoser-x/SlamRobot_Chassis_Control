@@ -4,6 +4,7 @@
 #include "imu_bmi270_math.h"
 #include "imu_bmi270_profile.h"
 #include "imu_bmi270_time.h"
+#include "imu_calibration_gate.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -131,6 +132,159 @@ static void test_auto_cal_scheduler_waits_for_online_uncalibrated_due_state(void
               "auto cal stops at max attempts");
 }
 
+static void test_temperature_conversion_uses_direct_celsius(void)
+{
+  float temperature_c = 0.0f;
+
+  require_int(ImuBmi270_TemperatureRawToC(0, &temperature_c) == 1U,
+              "temperature raw zero is valid");
+  require_close(temperature_c, 23.0f, 0.001f, "temperature raw zero maps to 23C");
+  require_int(ImuBmi270_TemperatureRawToC(INT16_MAX, &temperature_c) == 1U,
+              "maximum positive temperature is valid");
+  require_close(temperature_c, 86.998f, 0.002f, "maximum positive raw maps near 87C");
+  require_int(ImuBmi270_TemperatureRawToC((int16_t)0x8001U, &temperature_c) == 1U,
+              "minimum valid negative temperature is valid");
+  require_close(temperature_c, -40.998f, 0.002f, "minimum valid raw maps near -41C");
+  require_int(ImuBmi270_TemperatureRawToC(INT16_MIN, &temperature_c) == 0U,
+              "0x8000 temperature sentinel is invalid");
+  require_int(ImuBmi270_TemperatureRawToC(0, 0) == 0U,
+              "temperature conversion rejects null output");
+}
+
+static void test_temperature_compensation_uses_calibration_slope(void)
+{
+  imu_bmi270_calibration_t calibration;
+  float bias;
+
+  ImuBmi270Calibration_Default(&calibration);
+  calibration.gyro_bias_dps[0] = 1.0f;
+  calibration.temperature_offset_c = 23.0f;
+  calibration.temperature_gyro_slope_dps_per_c[0] = 0.1f;
+  bias = ImuBmi270Calibration_GyroBiasAtTemperature(&calibration, 0U, 33.0f, 1U);
+  require_close(bias, 2.0f, 0.0001f,
+                "temperature slope adjusts persisted gyro bias");
+  bias = ImuBmi270Calibration_GyroBiasAtTemperature(&calibration, 0U, 33.0f, 0U);
+  require_close(bias, 1.0f, 0.0001f,
+                "invalid temperature keeps base gyro bias");
+}
+
+static void test_nonblocking_gyro_calibration_accumulator(void)
+{
+  imu_bmi270_gyro_cal_accumulator_t accumulator;
+  const float accel_g[3] = {0.0f, 0.0f, 1.0f};
+  const float gyro_1[3] = {1.0f, 2.0f, 3.0f};
+  const float gyro_2[3] = {2.0f, 3.0f, 4.0f};
+  const float gyro_3[3] = {3.0f, 4.0f, 5.0f};
+  const float gyro_abs_fail[3] = {21.0f, 0.0f, 0.0f};
+  float bias_dps[3] = {0.0f, 0.0f, 0.0f};
+  float accel_mean_g[3] = {0.0f, 0.0f, 0.0f};
+
+  ImuBmi270GyroCalAccumulator_Init(&accumulator);
+  require_int(ImuBmi270GyroCalAccumulator_Begin(&accumulator, 3U, 10U) == 1U,
+              "gyro accumulator starts");
+  require_int(ImuBmi270GyroCalAccumulator_Feed(&accumulator, 0U, accel_g, gyro_1,
+                                               20.0f, 5.0f) ==
+                  IMU_BMI270_GYRO_CAL_ACC_COLLECTING,
+              "gyro accumulator accepts first sample");
+  require_int(accumulator.sample_count == 1U, "first gyro sample counted");
+  (void)ImuBmi270GyroCalAccumulator_Feed(&accumulator, 5U, accel_g, gyro_2,
+                                         20.0f, 5.0f);
+  require_int(accumulator.sample_count == 1U, "second sample inside 10ms is skipped");
+  (void)ImuBmi270GyroCalAccumulator_Feed(&accumulator, 10U, accel_g, gyro_2,
+                                         20.0f, 5.0f);
+  require_int(ImuBmi270GyroCalAccumulator_GetResult(&accumulator, bias_dps,
+                                                    accel_mean_g) == 0U,
+              "bias is unavailable before target count");
+  require_int(ImuBmi270GyroCalAccumulator_Feed(&accumulator, 20U, accel_g, gyro_3,
+                                               20.0f, 5.0f) ==
+                  IMU_BMI270_GYRO_CAL_ACC_READY,
+              "gyro accumulator becomes ready at target");
+  require_int(ImuBmi270GyroCalAccumulator_GetResult(&accumulator, bias_dps,
+                                                    accel_mean_g) == 1U,
+              "ready accumulator exposes result");
+  require_close(bias_dps[0], 2.0f, 0.0001f, "gyro mean x");
+  require_close(bias_dps[1], 3.0f, 0.0001f, "gyro mean y");
+  require_close(bias_dps[2], 4.0f, 0.0001f, "gyro mean z");
+  require_close(accel_mean_g[2], 1.0f, 0.0001f, "accel mean z");
+
+  ImuBmi270GyroCalAccumulator_Restart(&accumulator);
+  require_int(accumulator.sample_count == 0U &&
+              accumulator.state == IMU_BMI270_GYRO_CAL_ACC_COLLECTING,
+              "gyro accumulator restart discards samples");
+  require_int(ImuBmi270GyroCalAccumulator_Feed(&accumulator, 30U, accel_g,
+                                               gyro_abs_fail, 20.0f, 5.0f) ==
+                  IMU_BMI270_GYRO_CAL_ACC_FAIL_ABS,
+              "gyro accumulator rejects absolute motion");
+  require_int(accumulator.fail_axis == 0U, "absolute motion reports axis");
+}
+
+static void test_nonblocking_gyro_calibration_rejects_span(void)
+{
+  imu_bmi270_gyro_cal_accumulator_t accumulator;
+  const float accel_g[3] = {0.0f, 0.0f, 1.0f};
+  const float gyro_low[3] = {-3.0f, 0.0f, 0.0f};
+  const float gyro_high[3] = {3.0f, 0.0f, 0.0f};
+
+  ImuBmi270GyroCalAccumulator_Init(&accumulator);
+  require_int(ImuBmi270GyroCalAccumulator_Begin(&accumulator, 2U, 10U) == 1U,
+              "span accumulator starts");
+  (void)ImuBmi270GyroCalAccumulator_Feed(&accumulator, 0U, accel_g, gyro_low,
+                                         20.0f, 5.0f);
+  require_int(ImuBmi270GyroCalAccumulator_Feed(&accumulator, 10U, accel_g,
+                                               gyro_high, 20.0f, 5.0f) ==
+                  IMU_BMI270_GYRO_CAL_ACC_FAIL_SPAN,
+              "gyro accumulator rejects excessive span");
+  require_int(accumulator.fail_axis == 0U, "span failure reports axis");
+}
+
+static void test_stationary_gate_requires_continuous_stable_window(void)
+{
+  imu_calibration_gate_t gate;
+  int16_t pwm[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {0};
+  float speed[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {0.0f};
+  uint8_t speed_valid[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {1U, 1U, 1U, 1U};
+  const float accel_g[3] = {0.0f, 0.0f, 1.0f};
+  const float gyro_dps[3] = {0.1f, -0.1f, 0.05f};
+
+  ImuCalibrationGate_Init(&gate);
+  for (uint32_t sample = 1U; sample < IMU_CALIBRATION_GATE_WINDOW_SAMPLES; ++sample)
+  {
+    require_int(ImuCalibrationGate_Update(&gate, pwm, speed, speed_valid, 0x0FU,
+                                          accel_g, gyro_dps, sample) == 0U,
+                "stationary gate waits for full stable window");
+  }
+  require_int(ImuCalibrationGate_Update(&gate, pwm, speed, speed_valid, 0x0FU,
+                                        accel_g, gyro_dps,
+                                        IMU_CALIBRATION_GATE_WINDOW_SAMPLES) == 1U,
+              "stationary gate accepts full stable window");
+  pwm[2] = 1;
+  require_int(ImuCalibrationGate_Update(&gate, pwm, speed, speed_valid, 0x0FU,
+                                        accel_g, gyro_dps,
+                                        IMU_CALIBRATION_GATE_WINDOW_SAMPLES) == 0U,
+              "actual pwm immediately clears stationary evidence");
+  require_int(gate.sample_count == 0U, "motion clears stationary sample count");
+}
+
+static void test_stationary_gate_rejects_gyro_variance(void)
+{
+  imu_calibration_gate_t gate;
+  int16_t pwm[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {0};
+  float speed[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {0.0f};
+  uint8_t speed_valid[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {1U, 1U, 1U, 1U};
+  const float accel_g[3] = {0.0f, 0.0f, 1.0f};
+  float gyro_dps[3] = {0.0f, 0.0f, 0.0f};
+  uint8_t stationary = 0U;
+
+  ImuCalibrationGate_Init(&gate);
+  for (uint32_t sample = 1U; sample <= IMU_CALIBRATION_GATE_WINDOW_SAMPLES; ++sample)
+  {
+    gyro_dps[0] = ((sample & 1U) != 0U) ? 1.0f : -1.0f;
+    stationary = ImuCalibrationGate_Update(&gate, pwm, speed, speed_valid, 0x0FU,
+                                           accel_g, gyro_dps, sample);
+  }
+  require_int(stationary == 0U, "gyro variance above 0.25 dps squared is rejected");
+}
+
 static void test_profile_register_values_are_named_and_checkable(void)
 {
   const imu_bmi270_profile_t *profile = ImuBmi270Profile_Get(IMU_BMI270_PROFILE_PERFORMANCE);
@@ -225,6 +379,12 @@ int main(void)
   test_raw_frame_signal_guard_rejects_all_zero_frame();
   test_gyro_cal_span_limit_reports_first_unstable_axis();
   test_auto_cal_scheduler_waits_for_online_uncalibrated_due_state();
+  test_temperature_conversion_uses_direct_celsius();
+  test_temperature_compensation_uses_calibration_slope();
+  test_nonblocking_gyro_calibration_accumulator();
+  test_nonblocking_gyro_calibration_rejects_span();
+  test_stationary_gate_requires_continuous_stable_window();
+  test_stationary_gate_rejects_gyro_variance();
   test_profile_register_values_are_named_and_checkable();
   test_coordinate_mapping_and_calibration_defaults();
   test_mahony_static_and_yaw_continuity();

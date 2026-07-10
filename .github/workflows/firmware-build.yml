@@ -53,6 +53,20 @@ jobs:
           arm-none-eabi-objcopy -O ihex "$ELF" "build/${{ matrix.preset }}/F407_V2.0.hex"
           arm-none-eabi-objcopy -O binary "$ELF" "build/${{ matrix.preset }}/F407_V2.0.bin"
 
+      - name: Enforce firmware size limit
+        run: |
+          BIN="build/${{ matrix.preset }}/F407_V2.0.bin"
+          ELF="build/${{ matrix.preset }}/F407_V2.0.elf"
+          MAX_BYTES=245760
+          MAX_RAM_BYTES=114688
+          ACTUAL_BYTES=$(stat -c%s "$BIN")
+          read TEXT_BYTES DATA_BYTES BSS_BYTES _ < <(arm-none-eabi-size "$ELF" | tail -1)
+          RAM_BYTES=$((DATA_BYTES + BSS_BYTES))
+          echo "Firmware size: ${ACTUAL_BYTES}/${MAX_BYTES} bytes"
+          echo "Firmware RAM: ${RAM_BYTES}/${MAX_RAM_BYTES} bytes"
+          test "$ACTUAL_BYTES" -le "$MAX_BYTES"
+          test "$RAM_BYTES" -le "$MAX_RAM_BYTES"
+
       - name: Memory report ${{ matrix.preset }}
         run: |
           ELF="build/${{ matrix.preset }}/F407_V2.0.elf"
@@ -99,6 +113,9 @@ jobs:
 
       - name: Run host tests
         run: ctest --test-dir build/host-tests-ninja --output-on-failure
+
+      - name: Check CubeMX safety configuration
+        run: python scripts/check_generated_safety_config.py
 
       - name: Host test summary
         if: always()

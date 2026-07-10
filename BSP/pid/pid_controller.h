@@ -27,6 +27,11 @@ typedef struct
 void PidController_Init(pid_state_t *pid, const pid_params_t *params);
 void PidController_Reset(pid_state_t *pid);
 float PidController_Step(pid_state_t *pid, float target, float actual, float dt_s);
+float PidController_StepLimited(pid_state_t *pid,
+                                float target,
+                                float actual,
+                                float dt_s,
+                                int8_t actuator_limit_direction);
 void PidController_SetParams(pid_state_t *pid, const pid_params_t *params);
 
 #ifdef __cplusplus

@@ -18,6 +18,7 @@ TIM_HandleTypeDef htim8 = { .Instance = &tim8_instance };
 static uint32_t fake_primask;
 static GPIO_PinState gpio_state_c[16];
 static GPIO_PinState gpio_state_d[16];
+static GPIO_PinState gpio_state_e[16];
 static uint8_t pwm_start_count_tim1;
 static uint8_t pwm_start_count_tim8;
 static uint32_t fake_tick_ms;
@@ -123,6 +124,10 @@ GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *port, uint16_t pin)
   {
     return gpio_state_d[pin_index(pin)];
   }
+  if (port == GPIOE)
+  {
+    return gpio_state_e[pin_index(pin)];
+  }
   (void)pin;
   (void)port;
   return GPIO_PIN_SET;
@@ -157,6 +162,7 @@ static void reset_fake_hw(void)
   {
     gpio_state_c[i] = GPIO_PIN_RESET;
     gpio_state_d[i] = GPIO_PIN_SET;
+    gpio_state_e[i] = GPIO_PIN_SET;
   }
   pwm_start_count_tim1 = 0U;
   pwm_start_count_tim8 = 0U;
@@ -385,6 +391,53 @@ static void test_motor_driver_effective_pwm_and_fault_edges(void)
   require_int(state.fault_last_change_ms[MOTOR_ID_M2] != 0U, "fault last change timestamp captured");
 }
 
+static void test_tim1_break_latches_until_safe_manual_clear(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+  for (uint8_t i = 0U; i < 20U; ++i)
+  {
+    MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  }
+  tim1_instance.SR |= TIM_FLAG_BREAK;
+  MotorDriver_OnTim1BreakFromIsr();
+  MotorDriver_GetState(&state);
+  require_int(state.tim1_break_latched != 0U, "TIM1 break remains latched after pulse");
+  require_int((tim1_instance.BDTR & TIM_BDTR_MOE) == 0U, "TIM1 break clears MOE");
+  require_int(tim1_instance.CCR1 == 0U && tim1_instance.CCR2 == 0U &&
+              tim1_instance.CCR3 == 0U && tim1_instance.CCR4 == 0U,
+              "TIM1 break clears every PWM compare");
+  require_int(state.effective_pwm[MOTOR_ID_M3] == 0, "TIM1 break forces effective PWM to zero");
+  require_int(MotorDriver_HasFault() != 0U, "latched break is a motor fault");
+
+  gpio_state_e[pin_index(TIM1_BKIN_Pin)] = GPIO_PIN_RESET;
+  require_int(MotorDriver_ClearBreakLatch() == 0U, "active BKIN blocks manual clear");
+  MotorDriver_GetState(&state);
+  require_int(state.tim1_break_latched != 0U, "failed clear preserves break latch");
+
+  gpio_state_e[pin_index(TIM1_BKIN_Pin)] = GPIO_PIN_SET;
+  require_int(MotorDriver_ClearBreakLatch() == 1U, "released BKIN permits safe manual clear");
+  MotorDriver_GetState(&state);
+  require_int(state.tim1_break_latched == 0U, "safe clear removes break latch");
+  require_int((tim1_instance.BDTR & TIM_BDTR_MOE) != 0U, "safe clear re-enables TIM1 outputs");
+}
+
+static void test_tim1_break_before_driver_init_is_not_lost(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  tim1_instance.SR |= TIM_FLAG_BREAK;
+  MotorDriver_Init();
+  MotorDriver_GetState(&state);
+  require_int(state.tim1_break_latched != 0U,
+              "TIM1 break pending before driver init remains latched");
+  require_int((tim1_instance.BDTR & TIM_BDTR_MOE) == 0U,
+              "startup TIM1 break keeps main output disabled");
+}
+
 int main(void)
 {
   test_motor_driver_uses_gpio_for_phase();
@@ -393,5 +446,7 @@ int main(void)
   test_motor_driver_serializes_phase_switches();
   test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely();
   test_motor_driver_effective_pwm_and_fault_edges();
+  test_tim1_break_latches_until_safe_manual_clear();
+  test_tim1_break_before_driver_init_is_not_lost();
   return 0;
 }

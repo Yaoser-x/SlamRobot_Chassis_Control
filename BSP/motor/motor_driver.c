@@ -53,6 +53,39 @@ static uint8_t phase_switch_gap_calls;
 
 static void MotorDriver_UpdateEffectivePwmAll(void);
 
+static void MotorDriver_LatchTim1BreakLocked(void)
+{
+  htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
+  htim1.Instance->CCR1 = 0U;
+  htim1.Instance->CCR2 = 0U;
+  htim1.Instance->CCR3 = 0U;
+  htim1.Instance->CCR4 = 0U;
+  for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    motor_runtime[i].requested_pwm = 0;
+    motor_runtime[i].applied_pwm = 0;
+    motor_runtime[i].pending_dir = 0;
+    motor_runtime[i].phase = MOTOR_DRIVER_PHASE_IDLE_BRAKE;
+    motor_runtime[i].wait_cycles = 0U;
+    motor_state.requested_pwm[i] = 0;
+    motor_state.applied_pwm[i] = 0;
+    motor_state.output_permille[i] = 0;
+    motor_state.effective_pwm[i] = 0;
+    motor_state.pending_dir[i] = 0;
+    motor_state.phase[i] = MOTOR_DRIVER_PHASE_IDLE_BRAKE;
+  }
+  motor_state.tim1_moe_active = 0U;
+  motor_state.tim1_break_flag = 1U;
+  motor_state.tim1_break_latched = 1U;
+  motor_state.tim1_break_count++;
+}
+
+void MotorDriver_OnTim1BreakFromIsr(void)
+{
+  __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+  MotorDriver_LatchTim1BreakLocked();
+}
+
 static void MotorDriver_UpdateBreakStatus(void)
 {
   uint8_t tim1_break_flag = (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
@@ -63,7 +96,8 @@ static void MotorDriver_UpdateBreakStatus(void)
 
   if (tim1_break_flag != 0U)
   {
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+    MotorDriver_OnTim1BreakFromIsr();
+    tim1_moe_active = 0U;
   }
   if (tim8_break_flag != 0U)
   {
@@ -76,10 +110,6 @@ static void MotorDriver_UpdateBreakStatus(void)
   motor_state.tim1_break_flag = tim1_break_flag;
   motor_state.tim8_moe_active = tim8_moe_active;
   motor_state.tim8_break_flag = tim8_break_flag;
-  if (tim1_break_flag != 0U)
-  {
-    motor_state.tim1_break_count++;
-  }
   if (tim8_break_flag != 0U)
   {
     motor_state.tim8_break_count++;
@@ -101,6 +131,7 @@ static int16_t MotorDriver_ComputeEffectivePwm(motor_id_t motor)
       ChassisLayout_MotorEnabled(motor) == 0U ||
       motor_state.fault_active[index] != 0U ||
       motor_state.tim1_moe_active == 0U ||
+      motor_state.tim1_break_latched != 0U ||
       motor_state.tim1_break_flag != 0U)
   {
     return 0;
@@ -297,9 +328,14 @@ static void MotorDriver_StartPwm(const motor_hw_t *motor)
 
 void MotorDriver_Init(void)
 {
+  uint8_t tim1_break_pending;
+
   HAL_GPIO_WritePin(DRV_SLEEP_ALL_GPIO_Port, DRV_SLEEP_ALL_Pin, GPIO_PIN_SET);
   HAL_Delay(DRV8874_WAKE_DELAY_MS);
 
+  tim1_break_pending = (motor_state.tim1_break_latched != 0U ||
+                        __HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET ||
+                        HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET) ? 1U : 0U;
   motor_state = (motor_driver_state_t){0};
   phase_switch_gap_calls = 0U;
   motor_state.sleep_enabled = 1U;
@@ -313,8 +349,15 @@ void MotorDriver_Init(void)
     MotorDriver_SetRaw(&motor_hw[i], 0U, -1);
     MotorDriver_RecordRuntime((motor_id_t)i);
   }
-  __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
   __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
+  if (tim1_break_pending != 0U ||
+      motor_state.tim1_break_latched != 0U ||
+      __HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET ||
+      HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET)
+  {
+    MotorDriver_OnTim1BreakFromIsr();
+  }
+  __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_BREAK);
   MotorDriver_UpdateFaults();
 }
 
@@ -334,6 +377,11 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
   }
 
   runtime = &motor_runtime[(uint32_t)motor];
+  if (motor_state.tim1_break_latched != 0U)
+  {
+    MotorDriver_ClearRuntimeOutput(motor);
+    return;
+  }
   if (ChassisLayout_MotorEnabled(motor) == 0U)
   {
     MotorDriver_DisableRuntimeOutput(motor);
@@ -535,6 +583,10 @@ void MotorDriver_UpdateFaults(void)
 uint8_t MotorDriver_HasFault(void)
 {
   MotorDriver_UpdateFaults();
+  if (motor_state.tim1_break_latched != 0U)
+  {
+    return 1U;
+  }
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     if (motor_state.fault_active[i] != 0U)
@@ -543,6 +595,44 @@ uint8_t MotorDriver_HasFault(void)
     }
   }
   return 0U;
+}
+
+uint8_t MotorDriver_ClearBreakLatch(void)
+{
+  uint32_t primask;
+
+  MotorDriver_UpdateFaults();
+  if (HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET)
+  {
+    return 0U;
+  }
+  for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+        motor_state.fault_active[i] != 0U)
+    {
+      return 0U;
+    }
+    if (motor_state.effective_pwm[i] != 0 || motor_runtime[i].applied_pwm != 0)
+    {
+      return 0U;
+    }
+  }
+  if (htim1.Instance->CCR1 != 0U || htim1.Instance->CCR2 != 0U ||
+      htim1.Instance->CCR3 != 0U || htim1.Instance->CCR4 != 0U)
+  {
+    return 0U;
+  }
+  primask = __get_PRIMASK();
+  __disable_irq();
+  __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+  motor_state.tim1_break_flag = 0U;
+  motor_state.tim1_break_latched = 0U;
+  htim1.Instance->BDTR |= TIM_BDTR_MOE;
+  motor_state.tim1_moe_active = 1U;
+  MotorDriver_UpdateEffectivePwmAll();
+  __set_PRIMASK(primask);
+  return 1U;
 }
 
 void MotorDriver_GetState(motor_driver_state_t *state)

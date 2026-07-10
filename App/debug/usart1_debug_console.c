@@ -39,6 +39,7 @@
 #define DEBUG_CONSOLE_TASK_PERIOD_MS 10U
 #define DEBUG_CONSOLE_LOG_PERIOD_MS  500U
 #define DEBUG_CONSOLE_TX_TIMEOUT_MS  100U
+#define DEBUG_CONSOLE_FLASH_MAX_SPEED_MPS 0.02f
 
 /* ────────── 日志级别宏 ────────── */
 #define LOG_INFO(fmt, ...)  do {                          \
@@ -108,6 +109,33 @@ static int32_t DebugConsole_Milli(float value)
   return (int32_t)(value * 1000.0f);
 }
 
+static uint8_t DebugConsole_PrepareFlashMaintenance(void)
+{
+  encoder_state_t encoder_state;
+  motor_driver_state_t motor_state;
+
+  ControlManager_ClearCommand();
+  ChassisControl_EmergencyStop();
+  MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
+  EncoderDriver_GetState(&encoder_state);
+  MotorDriver_GetState(&motor_state);
+  for (uint8_t motor = 0U; motor < MOTOR_ID_COUNT; ++motor)
+  {
+    if (motor_state.effective_pwm[motor] != 0)
+    {
+      return 0U;
+    }
+    if (ChassisLayout_MotorEnabled((motor_id_t)motor) != 0U &&
+        (encoder_state.speed_valid[motor] == 0U ||
+         encoder_state.speed_mps[motor] < -DEBUG_CONSOLE_FLASH_MAX_SPEED_MPS ||
+         encoder_state.speed_mps[motor] > DEBUG_CONSOLE_FLASH_MAX_SPEED_MPS))
+    {
+      return 0U;
+    }
+  }
+  return 1U;
+}
+
 static const char *DebugConsole_ImuGyroCalFailReason(uint8_t reason)
 {
   switch (reason)
@@ -122,6 +150,8 @@ static const char *DebugConsole_ImuGyroCalFailReason(uint8_t reason)
       return "abs";
     case IMU_BMI270_GYRO_CAL_FAIL_SPAN:
       return "span";
+    case IMU_BMI270_GYRO_CAL_FAIL_MOTION:
+      return "motion";
     default:
       return "unknown";
   }
@@ -969,13 +999,15 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu gcal=%u acal=%u,%u,%u gbias_dps=%.3f,%.3f,%.3f acc_g=%.3f,%.3f,%.3f corr_dps=%.2f,%.2f,%.2f filt_dps=%.2f,%.2f,%.2f euler_deg=%.1f,%.1f,%.1f\r\n",
+                 "BMI270 enabled=%u online=%u chip=0x%02X err=%u errcnt=%lu gcal=%u acal=%u,%u,%u temp=%.1fC temp_ok=%u gbias_dps=%.3f,%.3f,%.3f acc_g=%.3f,%.3f,%.3f corr_dps=%.2f,%.2f,%.2f filt_dps=%.2f,%.2f,%.2f euler_deg=%.1f,%.1f,%.1f\r\n",
                  imu_state.enabled, imu_state.online, imu_state.chip_id, imu_state.last_error,
                  (unsigned long)imu_state.error_count,
                  imu_state.gyro_calibrated,
                  imu_state.gyro_auto_cal_state,
                  imu_state.gyro_auto_cal_attempts,
                  imu_state.gyro_auto_cal_last_result,
+                 imu_state.temperature_c,
+                 imu_state.temperature_valid,
                  imu_state.gyro_bias_dps[0],
                  imu_state.gyro_bias_dps[1],
                  imu_state.gyro_bias_dps[2],
@@ -1157,10 +1189,17 @@ static void DebugConsole_HandleLine(char *line)
   }
   else if (strcmp(line, "set save") == 0)
   {
+    flash_param_bundle_t bundle;
     param_store_t params;
     adc_monitor_state_t adc_state;
     imu_bmi270_state_t imu_state;
     flash_param_status_t status;
+
+    if (DebugConsole_PrepareFlashMaintenance() == 0U)
+    {
+      LOG_WARN("param save rejected: chassis not stationary");
+      return;
+    }
     ParamStore_Get(&params);
     AdcMonitor_GetState(&adc_state);
     ImuBmi270_GetState(&imu_state);
@@ -1181,7 +1220,9 @@ static void DebugConsole_HandleLine(char *line)
       params.imu_gyro_bias_valid = 1U;
     }
     (void)ParamStore_Set(&params);
-    status = FlashParam_Save(&params);
+    bundle.params = params;
+    ImuBmi270_GetCalibration(&bundle.imu_calibration);
+    status = FlashParam_SaveBundle(&bundle);
     if (status == FLASH_PARAM_STATUS_OK)
     {
       LOG_INFO("param saved to flash");
@@ -1193,15 +1234,28 @@ static void DebugConsole_HandleLine(char *line)
   }
   else if (strcmp(line, "set reset") == 0)
   {
-    flash_param_status_t status = FlashParam_Erase();
-    ParamStore_SetDefaults();
+    flash_param_bundle_t bundle;
+    flash_param_status_t status;
+
+    if (DebugConsole_PrepareFlashMaintenance() == 0U)
+    {
+      LOG_WARN("param reset rejected: chassis not stationary");
+      return;
+    }
+    ParamStore_Defaults(&bundle.params);
+    ImuBmi270Calibration_Default(&bundle.imu_calibration);
+    status = FlashParam_SaveBundle(&bundle);
     if (status == FLASH_PARAM_STATUS_OK)
     {
-      LOG_INFO("param reset to defaults and flash erased");
+      ParamStore_SetDefaults();
+      (void)ImuBmi270_ApplyCalibration(&bundle.imu_calibration);
+      ImuBmi270_ClearCalibration();
+      AdcMonitor_RequestCurrentZeroCalibration();
+      LOG_INFO("param reset defaults saved safely");
     }
     else
     {
-      LOG_ERR("param reset defaults, flash erase failed: %s", FlashParam_StatusString(status));
+      LOG_ERR("param reset failed: %s", FlashParam_StatusString(status));
     }
   }
   else if (sscanf(line, "set %31s %f", param_name, &param_value) == 2)
@@ -1459,7 +1513,7 @@ static void DebugConsole_HandleLine(char *line)
     uint16_t samples = (value > 0) ? (uint16_t)value : 0U;
     imu_bmi270_state_t imu_state;
 
-    LOG_INFO("bmi270 gyro calibration: keep still");
+    LOG_INFO("bmi270 gyro calibration request: keep still");
     if (ImuBmi270_CalibrateGyro(samples, 10U) == 0U)
     {
       ImuBmi270_GetState(&imu_state);
@@ -1487,10 +1541,9 @@ static void DebugConsole_HandleLine(char *line)
     }
 
     ImuBmi270_GetState(&imu_state);
-    LOG_INFO("bmi270 gyro calibration ok bias_dps=%.2f,%.2f,%.2f",
-             imu_state.gyro_bias_dps[0],
-             imu_state.gyro_bias_dps[1],
-             imu_state.gyro_bias_dps[2]);
+    LOG_INFO("bmi270 gyro calibration accepted state=%u samples=%u; use status/acal for progress",
+             imu_state.gyro_auto_cal_state,
+             imu_state.gyro_cal_sample_count);
   }
   else if (strcmp(line, "imucalclear") == 0)
   {

@@ -229,9 +229,12 @@ static uint8_t OLED_UI_RunSelfCheck(selfcheck_item_t item)
 
     case SC_ESP12F:
     {
+      uint32_t now = osKernelGetTickCount();
       esp12f_comm_state_t esp_state;
       Esp12fComm_GetState(&esp_state);
-      return (uint8_t)OLED_SelfCheckEsp12f(esp_state.rx_frames,
+      return (uint8_t)OLED_SelfCheckEsp12f(now,
+                                           esp_state.last_rx_timestamp_ms,
+                                           CONTROL_TIMEOUT_ESP12F_MS,
                                            esp_state.boot_mode_download);
     }
 
@@ -284,7 +287,10 @@ static void OLED_UI_UpdateModuleStatus(void)
   {
     esp12f_comm_state_t esp_state;
     Esp12fComm_GetState(&esp_state);
-    mod_esp_online = (esp_state.rx_frames > 0U) ? 1U : 0U;
+    mod_esp_online = (OLED_SelfCheckEsp12f(now,
+                                           esp_state.last_rx_timestamp_ms,
+                                           CONTROL_TIMEOUT_ESP12F_MS,
+                                           esp_state.boot_mode_download) == OLED_SELFCHECK_OK) ? 1U : 0U;
   }
 
   /* Motor: nFAULT all normal */

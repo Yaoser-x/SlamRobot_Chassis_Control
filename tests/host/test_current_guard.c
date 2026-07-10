@@ -27,6 +27,7 @@ static adc_monitor_state_t valid_adc_state(void)
   return state;
 }
 
+#if !defined(CURRENT_GUARD_TEST_SOFT_LIMIT)
 static void test_observe_only_does_not_change_pwm(void)
 {
   adc_monitor_state_t adc = valid_adc_state();
@@ -68,6 +69,7 @@ static void test_fault_would_latch_uses_consecutive_samples(void)
   CurrentGuard_GetState(&state);
   require_int(state.fault_would_latch[MOTOR_ID_M2] == 0U, "below-threshold sample resets debounce");
 }
+#endif
 
 static void test_invalid_current_never_intervenes(void)
 {
@@ -89,6 +91,7 @@ static void test_invalid_current_never_intervenes(void)
   require_int(state.control_valid[MOTOR_ID_M2] == 0U, "invalid current reports guard invalid");
 }
 
+#if defined(CURRENT_GUARD_TEST_SOFT_LIMIT)
 static void test_soft_limit_scales_when_enabled(void)
 {
   adc_monitor_state_t adc = valid_adc_state();
@@ -106,6 +109,7 @@ static void test_soft_limit_scales_when_enabled(void)
   require_int(state.soft_limit_would_apply[MOTOR_ID_M2] != 0U, "enabled soft limit records would apply");
   require_int(state.soft_limit_applied[MOTOR_ID_M2] != 0U, "enabled soft limit records applied");
 }
+#endif
 
 static void test_disabled_motor_does_not_participate(void)
 {

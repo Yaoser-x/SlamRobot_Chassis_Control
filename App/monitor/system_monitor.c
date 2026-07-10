@@ -259,6 +259,10 @@ void SystemMonitor_Update(void)
       new_latched_flags |= SYSTEM_ERROR_DRV_FAULT;
     }
   }
+  if (motor_state.tim1_break_latched != 0U)
+  {
+    new_latched_flags |= SYSTEM_ERROR_TIM_BREAK;
+  }
 
   primask = __get_PRIMASK();
   __disable_irq();
@@ -288,7 +292,8 @@ void SystemMonitor_Update(void)
   latched_after_commit = monitor_state.latched_error_flags;
   monitor_state.error_flags = next_state.error_flags | latched_after_commit;
   if ((latched_after_commit &
-       (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT | SYSTEM_ERROR_DRV_FAULT)) != 0U)
+       (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT |
+        SYSTEM_ERROR_DRV_FAULT | SYSTEM_ERROR_TIM_BREAK)) != 0U)
   {
     request_fault_stop = 1U;
     monitor_state.error_flags |= SYSTEM_ERROR_FAULT_STOP;
@@ -352,13 +357,18 @@ void SystemMonitor_ClearLatchedFaults(uint32_t mask)
       }
     }
   }
+  if ((mask & SYSTEM_ERROR_TIM_BREAK) != 0U && MotorDriver_ClearBreakLatch() == 0U)
+  {
+    clearable &= ~SYSTEM_ERROR_TIM_BREAK;
+  }
 
   primask = __get_PRIMASK();
   __disable_irq();
   monitor_state.latched_error_flags &= ~clearable;
   latched_after_clear = monitor_state.latched_error_flags;
   if ((latched_after_clear &
-       (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT | SYSTEM_ERROR_DRV_FAULT)) == 0U)
+       (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT |
+        SYSTEM_ERROR_DRV_FAULT | SYSTEM_ERROR_TIM_BREAK)) == 0U)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {

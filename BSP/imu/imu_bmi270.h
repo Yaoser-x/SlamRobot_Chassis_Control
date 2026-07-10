@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "imu_bmi270_calibration.h"
 #include "imu_bmi270_profile.h"
 
 #ifdef __cplusplus
@@ -31,6 +32,7 @@ typedef enum
 #define IMU_BMI270_QUALITY_ATTITUDE_INVALID (1UL << 6)
 #define IMU_BMI270_QUALITY_POLL_FALLBACK    (1UL << 7)
 #define IMU_BMI270_QUALITY_PROFILE_MISMATCH (1UL << 8)
+#define IMU_BMI270_QUALITY_TEMPERATURE_INVALID (1UL << 9)
 
 typedef enum
 {
@@ -49,7 +51,8 @@ typedef enum
   IMU_BMI270_GYRO_CAL_FAIL_CONFIG = 1,
   IMU_BMI270_GYRO_CAL_FAIL_READ = 2,
   IMU_BMI270_GYRO_CAL_FAIL_ABS = 3,
-  IMU_BMI270_GYRO_CAL_FAIL_SPAN = 4
+  IMU_BMI270_GYRO_CAL_FAIL_SPAN = 4,
+  IMU_BMI270_GYRO_CAL_FAIL_MOTION = 5
 } imu_bmi270_gyro_cal_fail_t;
 
 typedef enum
@@ -93,6 +96,7 @@ typedef struct
   float pitch_deg;
   float yaw_deg;
   float temperature_c;
+  uint8_t temperature_valid;
   float accel_correction_weight;
   uint32_t quality_flags;
   uint32_t quality_latched_flags;
@@ -149,8 +153,11 @@ uint8_t ImuBmi270_AutoCalDue(uint8_t enabled,
                              uint32_t now_ms,
                              uint32_t next_ms);
 uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms);
+void ImuBmi270_ServiceCalibration(uint32_t now_ms, uint8_t stationary);
 void ImuBmi270_ClearCalibration(void);
 void ImuBmi270_ApplyGyroBias(const float bias_dps[3]);
+uint8_t ImuBmi270_ApplyCalibration(const imu_bmi270_calibration_t *calibration);
+void ImuBmi270_GetCalibration(imu_bmi270_calibration_t *calibration);
 void ImuBmi270_GetState(imu_bmi270_state_t *state);
 
 #ifdef __cplusplus

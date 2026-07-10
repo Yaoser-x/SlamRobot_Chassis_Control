@@ -22,7 +22,9 @@ oled_selfcheck_status_t OLED_SelfCheckLine(uint32_t now_ms,
                                            uint8_t data_valid,
                                            uint32_t timestamp_ms,
                                            uint32_t timeout_ms);
-oled_selfcheck_status_t OLED_SelfCheckEsp12f(uint32_t rx_frames,
+oled_selfcheck_status_t OLED_SelfCheckEsp12f(uint32_t now_ms,
+                                             uint32_t last_rx_ms,
+                                             uint32_t timeout_ms,
                                              uint8_t download_mode);
 
 #ifdef __cplusplus

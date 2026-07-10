@@ -6,6 +6,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+endif()
+
 enable_testing()
 
 add_executable(test_f407_v2
@@ -246,6 +250,7 @@ add_test(NAME oled_ssd1306 COMMAND test_oled_ssd1306)
 
 add_executable(test_imu_pipeline
     test_imu_pipeline.c
+    ../../App/imu/imu_calibration_gate.c
     ../../BSP/imu/imu_bmi270_calibration.c
     ../../BSP/imu/imu_bmi270_fifo.c
     ../../BSP/imu/imu_bmi270_math.c
@@ -255,6 +260,7 @@ add_executable(test_imu_pipeline
 
 target_include_directories(test_imu_pipeline PRIVATE
     .
+    ../../App/imu
     ../../BSP/imu
 )
 
@@ -281,6 +287,7 @@ add_executable(test_flash_param
     test_flash_param.c
     ../../App/param/param_store.c
     ../../BSP/flash/flash_param.c
+    ../../BSP/imu/imu_bmi270_calibration.c
 )
 
 target_include_directories(test_flash_param PRIVATE
@@ -289,6 +296,7 @@ target_include_directories(test_flash_param PRIVATE
     ../../App/param
     ../../BSP
     ../../BSP/flash
+    ../../BSP/imu
     ../../BSP/motor
 )
 
@@ -333,3 +341,22 @@ target_include_directories(test_oled_selfcheck PRIVATE
 )
 
 add_test(NAME oled_selfcheck COMMAND test_oled_selfcheck)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+add_executable(generate_upper_v2_golden
+    generate_upper_v2_golden.c
+    ../../App/protocol/upper_protocol.c
+)
+
+target_include_directories(generate_upper_v2_golden PRIVATE
+    ../../App/protocol
+)
+
+add_test(
+    NAME upper_v2_golden
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_upper_v2_golden.py
+        $<TARGET_FILE:generate_upper_v2_golden>
+        ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/upper_v2_golden.json
+)

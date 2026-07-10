@@ -147,6 +147,7 @@ static void reset_fake_chassis(void)
   }
   fake_encoder_state.speed_valid_all = 1U;
   fake_adc_state.current_valid = 1U;
+  fake_adc_state.current_zero_valid = 1U;
   ChassisControl_Init();
 }
 
@@ -167,8 +168,24 @@ static void test_high_adc_current_does_not_throttle_pwm_output(void)
   require_int(state.motor_current_limited[MOTOR_ID_M2] == 0U, "M2 high ADC current does not report dynamic limit");
 }
 
+static void test_invalid_current_zero_blocks_test_outputs(void)
+{
+  reset_fake_chassis();
+  fake_adc_state.current_zero_valid = 0U;
+
+  ChassisControl_RawMotorInputTest(MOTOR_ID_M2, 50, 0);
+  ChassisControl_Step(1000U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "raw output is blocked before current zero");
+
+  ChassisControl_OpenLoopTest(100, 100);
+  ChassisControl_Step(1010U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "open-loop output is blocked before current zero");
+  require_int(fake_signed_pwm[MOTOR_ID_M3] == 0, "all open-loop outputs stay zero before current zero");
+}
+
 int main(void)
 {
   test_high_adc_current_does_not_throttle_pwm_output();
+  test_invalid_current_zero_blocks_test_outputs();
   return 0;
 }
