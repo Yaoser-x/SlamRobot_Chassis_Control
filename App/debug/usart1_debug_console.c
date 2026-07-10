@@ -11,11 +11,14 @@
 #include "encoder_math.h"
 #include "esp12f_comm.h"
 #include "esp12f_flash_bridge.h"
+#include "flash_param.h"
 #include "imu_bmi270.h"
 #include "i2c.h"
 #include "line_control.h"
 #include "line_uart.h"
 #include "motor_driver.h"
+#include "param_store.h"
+#include "power_on_self_test.h"
 #include "ps2_control.h"
 #include "reset_trace.h"
 #include "system_monitor.h"
@@ -486,6 +489,7 @@ static void DebugConsole_PrintHelp(void)
   DebugConsole_Write(
     "\r\nF407 V2 debug console\r\n"
     "help/status/header\r\n"
+    "get <param> | set <param> <value> | set save | set reset\r\n"
     "log 0                  stop streaming\r\n"
     "log 1 [fld...]         start CSV stream, optional field filter\r\n"
     "                       fields: motor adc imu errors source ps2 line esp\r\n"
@@ -812,6 +816,8 @@ static void DebugConsole_PrintStatus(void)
   line_uart_state_t line_state;
   esp12f_comm_state_t esp_state;
   motor_driver_state_t motor_state;
+  post_result_t post_result;
+  param_store_t params;
   uint32_t encoder_hw_count[MOTOR_ID_COUNT];
 
   AdcMonitor_GetState(&adc_state);
@@ -823,6 +829,8 @@ static void DebugConsole_PrintStatus(void)
   LineUart_GetState(&line_state);
   Esp12fComm_GetState(&esp_state);
   MotorDriver_GetState(&motor_state);
+  POST_GetResult(&post_result);
+  ParamStore_Get(&params);
   encoder_hw_count[MOTOR_ID_M1] = __HAL_TIM_GET_COUNTER(&htim2);
   encoder_hw_count[MOTOR_ID_M2] = __HAL_TIM_GET_COUNTER(&htim4);
   encoder_hw_count[MOTOR_ID_M3] = __HAL_TIM_GET_COUNTER(&htim3);
@@ -917,6 +925,28 @@ static void DebugConsole_PrintStatus(void)
                  (unsigned long)adc_state.sample_rate_hz_milli);
   DebugConsole_Write(tx);
   DebugConsole_PrintAdcCalShow();
+
+  (void)snprintf(tx, sizeof(tx),
+                 "POST done=%u errors=0x%08lX drv=%s(mask=0x%02X) adc=%s imu=%s(chip=0x%02X) enc=%s\r\n",
+                 post_result.done,
+                 (unsigned long)post_result.error_flags,
+                 POST_ItemStatusString(post_result.drv_status),
+                 post_result.drv_fault_mask,
+                 POST_ItemStatusString(post_result.adc_status),
+                 POST_ItemStatusString(post_result.imu_status),
+                 post_result.imu_chip_id,
+                 POST_ItemStatusString(post_result.encoder_status));
+  DebugConsole_Write(tx);
+
+  (void)snprintf(tx, sizeof(tx),
+                 "PARAM vmax=%ldmm/s wmax=%ldmrad/s ramp=%ldmm/s2 wr=%ldum track=%ldum gcal_valid=%u\r\n",
+                 (long)DebugConsole_Milli(params.max_linear_mps),
+                 (long)DebugConsole_Milli(params.max_angular_rps),
+                 (long)DebugConsole_Milli(params.speed_ramp_mps2),
+                 (long)(params.wheel_radius_m * 1000000.0f),
+                 (long)(params.track_width_m * 1000000.0f),
+                 params.imu_gyro_bias_valid);
+  DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
                  "ADCWIN m1 mean=%ld rms=%ld pk=%ld n=%u m2 mean=%ld rms=%ld pk=%ld n=%u m3 mean=%ld rms=%ld pk=%ld n=%u m4 mean=%ld rms=%ld pk=%ld n=%u\r\n",
@@ -1096,6 +1126,8 @@ static void DebugConsole_HandleLine(char *line)
   int rr;
   int linear_mm_s;
   int angular_mrad_s = 0;
+  float param_value = 0.0f;
+  char param_name[32];
   motor_id_t motor;
 
   if ((strcmp(line, "help") == 0) || (strcmp(line, "h") == 0))
@@ -1109,6 +1141,82 @@ static void DebugConsole_HandleLine(char *line)
   else if (strcmp(line, "rtos") == 0)
   {
     DebugConsole_PrintRtosStatus();
+  }
+  else if (sscanf(line, "get %31s", param_name) == 1)
+  {
+    param_store_t params;
+    ParamStore_Get(&params);
+    if (ParamStore_GetFloat(&params, param_name, &param_value) != 0U)
+    {
+      LOG_INFO("param %s=%.6f", param_name, param_value);
+    }
+    else
+    {
+      LOG_ERR("unknown param");
+    }
+  }
+  else if (strcmp(line, "set save") == 0)
+  {
+    param_store_t params;
+    adc_monitor_state_t adc_state;
+    imu_bmi270_state_t imu_state;
+    flash_param_status_t status;
+    ParamStore_Get(&params);
+    AdcMonitor_GetState(&adc_state);
+    ImuBmi270_GetState(&imu_state);
+    if (adc_state.current_zero_valid != 0U)
+    {
+      for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+      {
+        params.current_zero_raw[i] = adc_state.current_zero_raw[i];
+      }
+      params.current_zero_valid = 1U;
+    }
+    if (imu_state.gyro_calibrated != 0U)
+    {
+      for (uint8_t i = 0U; i < 3U; ++i)
+      {
+        params.imu_gyro_bias_dps[i] = imu_state.gyro_bias_dps[i];
+      }
+      params.imu_gyro_bias_valid = 1U;
+    }
+    (void)ParamStore_Set(&params);
+    status = FlashParam_Save(&params);
+    if (status == FLASH_PARAM_STATUS_OK)
+    {
+      LOG_INFO("param saved to flash");
+    }
+    else
+    {
+      LOG_ERR("param save failed: %s", FlashParam_StatusString(status));
+    }
+  }
+  else if (strcmp(line, "set reset") == 0)
+  {
+    flash_param_status_t status = FlashParam_Erase();
+    ParamStore_SetDefaults();
+    if (status == FLASH_PARAM_STATUS_OK)
+    {
+      LOG_INFO("param reset to defaults and flash erased");
+    }
+    else
+    {
+      LOG_ERR("param reset defaults, flash erase failed: %s", FlashParam_StatusString(status));
+    }
+  }
+  else if (sscanf(line, "set %31s %f", param_name, &param_value) == 2)
+  {
+    param_store_t params;
+    ParamStore_Get(&params);
+    if (ParamStore_SetFloat(&params, param_name, param_value) != 0U &&
+        ParamStore_Set(&params) != 0U)
+    {
+      LOG_INFO("param %s=%.6f", param_name, param_value);
+    }
+    else
+    {
+      LOG_ERR("param set rejected");
+    }
   }
   else if (strncmp(line, "adccal", 6) == 0)
   {

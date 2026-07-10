@@ -60,6 +60,7 @@ void AdcMonitor_Init(void);
 void AdcMonitor_Update(void);
 void AdcMonitor_GetState(adc_monitor_state_t *state);
 void AdcMonitor_RequestCurrentZeroCalibration(void);
+void AdcMonitor_ApplyCurrentZeroCalibration(const uint16_t zero_raw[MOTOR_ID_COUNT]);
 
 #ifdef __cplusplus
 }

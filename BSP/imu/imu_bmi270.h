@@ -150,6 +150,7 @@ uint8_t ImuBmi270_AutoCalDue(uint8_t enabled,
                              uint32_t next_ms);
 uint8_t ImuBmi270_CalibrateGyro(uint16_t samples, uint16_t delay_ms);
 void ImuBmi270_ClearCalibration(void);
+void ImuBmi270_ApplyGyroBias(const float bias_dps[3]);
 void ImuBmi270_GetState(imu_bmi270_state_t *state);
 
 #ifdef __cplusplus

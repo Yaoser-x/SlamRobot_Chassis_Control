@@ -22,6 +22,7 @@
 #include "esp12f_comm.h"
 #include "adc_monitor.h"
 #include "upper_uart.h"
+#include "oled_selfcheck.h"
 
 /* ================================================================
  *  Self-Check Item Definitions
@@ -208,9 +209,31 @@ static uint8_t OLED_UI_RunSelfCheck(selfcheck_item_t item)
     }
 
     case SC_UART3_RPI:
+    {
+      uint32_t now = osKernelGetTickCount();
+      return (uint8_t)OLED_SelfCheckRpi(now,
+                                        UpperUart_GetLastRxTimestamp(),
+                                        OLED_MODULE_TIMEOUT_RPI_MS);
+    }
+
     case SC_UART4_LINE:
+    {
+      uint32_t now = osKernelGetTickCount();
+      line_sensor_data_t sensor;
+      uint8_t valid = LineUart_GetSensorData(&sensor);
+      return (uint8_t)OLED_SelfCheckLine(now,
+                                         valid,
+                                         sensor.timestamp_ms,
+                                         OLED_MODULE_TIMEOUT_LINE_MS);
+    }
+
     case SC_ESP12F:
-      return 1U;
+    {
+      esp12f_comm_state_t esp_state;
+      Esp12fComm_GetState(&esp_state);
+      return (uint8_t)OLED_SelfCheckEsp12f(esp_state.rx_frames,
+                                           esp_state.boot_mode_download);
+    }
 
     default:
       return 2U;
@@ -349,9 +372,13 @@ static void OLED_UI_DrawSelfCheck(void)
   {
     SSD1306_DrawString(52, 6, " OK ", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
   }
-  else if (selfcheck_results[sci] == 2U)
+  else if (selfcheck_results[sci] == OLED_SELFCHECK_FAIL)
   {
     SSD1306_DrawString(48, 6, "FAIL", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+  }
+  else if (selfcheck_results[sci] == OLED_SELFCHECK_SKIP)
+  {
+    SSD1306_DrawString(48, 6, "SKIP", OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
   }
   else
   {
@@ -515,7 +542,7 @@ void OLED_UI_Update(void)
       {
         uint8_t result = OLED_UI_RunSelfCheck((selfcheck_item_t)selfcheck_current);
         selfcheck_results[selfcheck_current] = result;
-        if (result == 2U)
+        if (result == OLED_SELFCHECK_FAIL)
         {
           selfcheck_errors |= sc_error_bits[selfcheck_current];
         }

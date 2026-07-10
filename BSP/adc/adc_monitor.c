@@ -664,6 +664,36 @@ void AdcMonitor_RequestCurrentZeroCalibration(void)
   __set_PRIMASK(primask);
 }
 
+void AdcMonitor_ApplyCurrentZeroCalibration(const uint16_t zero_raw[MOTOR_ID_COUNT])
+{
+  uint32_t primask;
+
+  if (zero_raw == 0)
+  {
+    return;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  current_zero_valid = 1U;
+  current_zero_sample_count = ADC_MONITOR_CURRENT_ZERO_SAMPLES;
+  current_filter_initialized = 0U;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    current_zero_raw[i] = zero_raw[i];
+    current_zero_min_raw[i] = zero_raw[i];
+    current_zero_max_raw[i] = zero_raw[i];
+    current_zero_span_raw[i] = 0U;
+    current_zero_sum[i] = (uint32_t)zero_raw[i] * ADC_MONITOR_CURRENT_ZERO_SAMPLES;
+    adc_state.current_zero_raw[i] = zero_raw[i];
+    adc_state.current_zero_span_raw[i] = 0U;
+  }
+  adc_state.current_zero_valid = 1U;
+  adc_state.current_zero_sample_count = ADC_MONITOR_CURRENT_ZERO_SAMPLES;
+  adc_state.current_valid = (adc_state.samples_ready != 0U) ? 1U : 0U;
+  __set_PRIMASK(primask);
+}
+
 void AdcMonitor_GetState(adc_monitor_state_t *state)
 {
   uint32_t primask;

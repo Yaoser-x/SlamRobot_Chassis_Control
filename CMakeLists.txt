@@ -55,7 +55,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/debug/reset_trace.c
     App/debug/usart1_debug_console.c
     App/display/oled_ui.c
+    App/display/oled_selfcheck.c
     App/monitor/system_monitor.c
+    App/monitor/power_on_self_test.c
+    App/param/param_store.c
     App/protocol/esp12f_comm.c
     App/protocol/upper_protocol.c
     App/protocol/upper_uart.c
@@ -65,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/encoder/encoder_driver.c
     BSP/encoder/encoder_math.c
     BSP/esp12f/esp12f_flash_bridge.c
+    BSP/flash/flash_param.c
     BSP/imu/imu_bmi270.c
     BSP/imu/imu_bmi270_calibration.c
     BSP/imu/imu_bmi270_config.c
@@ -90,11 +94,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/debug
     App/display
     App/monitor
+    App/param
     App/protocol
     BSP
     BSP/adc
     BSP/encoder
     BSP/esp12f
+    BSP/flash
     BSP/imu
     BSP/led
     BSP/line
@@ -117,4 +123,11 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
 
     # Add user defined libraries
+)
+
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.hex
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.bin
+    COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+    COMMENT "Generating .hex/.bin and printing memory usage"
 )

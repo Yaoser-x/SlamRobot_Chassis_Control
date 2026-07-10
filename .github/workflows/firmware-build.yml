@@ -112,3 +112,53 @@ jobs:
           else
             echo "No test results found (build likely failed)." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format
+
+      - name: clang-format dry run
+        run: |
+          files=$(git diff --name-only --diff-filter=ACMRT HEAD^ HEAD -- '*.c' '*.h' \
+            | grep -E '^(App|BSP|tests/host)/' || true)
+          if [ -n "$files" ]; then
+            echo "$files" | xargs clang-format --dry-run --Werror
+          else
+            echo "No changed App/BSP/tests C/H files."
+          fi
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cppcheck
+
+      - name: Run cppcheck
+        run: |
+          files=$(git diff --name-only --diff-filter=ACMRT HEAD^ HEAD -- '*.c' '*.h' \
+            | grep -E '^(App|BSP|tests/host)/' || true)
+          if [ -n "$files" ]; then
+            cppcheck --enable=warning,style --error-exitcode=1 \
+              --suppress=missingIncludeSystem \
+              --suppress=unusedFunction \
+              --inline-suppr \
+              $files
+          else
+            echo "No changed App/BSP/tests C/H files."
+          fi

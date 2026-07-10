@@ -29,7 +29,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
-| **构建验证** | Debug — RAM 79.3KB (60.5%) / FLASH 132.8KB (25.3%) — Host 测试 7/7 通过 — CI 双 preset + host-tests |
+| **构建验证** | Debug — RAM 81.2KB (61.9%) / FLASH 180.7KB (34.5%) — Host 测试 17/17 通过 — CI 双 preset + host-tests + format/cppcheck |
 
 > V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 
@@ -42,11 +42,13 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 │   ├── debug/         USART1 调试命令台 + Reset Trace
 │   ├── display/       OLED 三阶段 UI (欢迎/自检/运行)
 │   ├── monitor/       电压/电流/编码器/DRV fault 状态聚合
+│   ├── param/         运行时参数与校准快照
 │   └── protocol/      上位机帧协议 (USART3 + ESP12F 共用)
 ├── BSP/              板级驱动层（硬件抽象，每个外设独立目录）
 │   ├── adc/           ADC DMA 采样换算
 │   ├── encoder/       编码器计数/回绕差分/速度计算
 │   ├── esp12f/        ESP12F 协议与烧录桥
+│   ├── flash/         STM32 Flash 参数镜像读写
 │   ├── imu/           BMI270 SPI 驱动 (配置表/校准/姿态估计/诊断)
 │   ├── led/           状态 LED
 │   ├── line/          八路巡线传感器 (帧解析 + P 控制)
@@ -72,8 +74,10 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | [外设资源](docs/peripherals.md) | 电机 PWM/编码器/ADC/通信接口/BMI270/ESP12F GPIO/PS2/巡线传感器 — 完整硬件规格 |
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
 | [调试命令台](docs/debug-console.md) | USART1 全命令参考、CSV 日志字段过滤、line 命令输出格式 |
+| [STM32 主控烧录](docs/stm32-flashing.md) | STM32CubeProgrammer / OpenOCD / st-flash 烧录流程 |
 | [ESP12F 烧录](docs/esp12f-flashing.md) | esptool.py / Arduino IDE 烧录流程、透明桥行为、常见故障排查 |
 | [ESP12F 固件](firmware/esp12f/) | Arduino 源码：固定 AP、WebSocket 摇杆遥控、upper_protocol 帧协议通信 |
 | [Bring-up 验收](docs/bring-up.md) | 11 步分阶段验收：从 RTOS 状态到巡线跟踪 |
 | [开发指南](docs/development.md) | 环境搭建、构建命令、GitHub Actions CI、Git 策略、开发约束、常见排查 |
+| [HIL 冒烟](docs/hil-smoke.md) | USART1 只读硬件在环冒烟脚本与验收边界 |
 | [教学实验](docs/labs/README.md) | 13 个分级实验：开环运动 → 编码器反馈 → PID 调参 → 电流限制 → IMU → 巡线 → PS2 遥操 → 系统安全 → FreeRTOS → 仲裁 → ADC → OLED → ESP12F WiFi |

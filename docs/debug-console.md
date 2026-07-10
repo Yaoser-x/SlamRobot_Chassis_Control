@@ -13,8 +13,12 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
 | `help` / `h` | — | 打印命令列表 |
-| `status` / `s` | — | 打印所有子系统单次快照（编码器/底盘/ADC/IMU/系统/巡线/ResetTrace） |
+| `status` / `s` | — | 打印所有子系统单次快照（编码器/底盘/ADC/POST/参数/IMU/系统/巡线/ResetTrace） |
 | `rtos` | — | FreeRTOS heap、各任务栈余量、missed-period、通信统计 |
+| `get` | `<param>` | 读取运行时参数 |
+| `set` | `<param> <value>` | 修改运行时参数（RAM 生效） |
+| `set save` | — | 保存当前参数与校准快照到 STM32 Flash |
+| `set reset` | — | 擦除 Flash 参数并恢复默认参数 |
 | `header` | — | 打印全字段 CSV 日志标题行 |
 | **`log 0`** | — | 停止 CSV 日志输出 |
 | **`log 1`** | `[field...]` | 启动 2 Hz CSV 日志，可选字段过滤（见第 3 节） |
@@ -139,7 +143,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ### 5.1 状态查询
 
-- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度、`current_control_valid`、`signed_mean/noise/zero_span/quality_flags`）、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
+- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度、`current_control_valid`、`signed_mean/noise/zero_span/quality_flags`）、POST、ParamStore、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
 
 `ADCCAL` 行中的 `valid` 表示电流可显示，`cvalid` 表示可用于保护/控制，`cmask` 是按 M1~M4 位排列的逐路控制有效掩码。`observe` 是 dry-run 阶段观察到超过堵转阈值的累计次数，`would` 是如果打开软件锁停本会锁停的累计次数。`ADCQ` 行中的 `signed` 保留带符号均值，`noise` 为窗口噪声估计，`span` 为零点学习窗口 raw 跨度，`q` 为质量标志。
 
@@ -147,25 +151,50 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 - **`adccal zero`**：要求所有启用电机 `effective_pwm == 0`，否则拒绝重新零点并提示先停机。
 - **`adccal plan <motor> <known_mA>`**：在施加已知电流后，根据当前读数估算对应 `MOTOR_CURRENT_VOLTS_PER_AMP_Mx`，只给计划值，不写入 Flash。
 
+`POST` 行分两阶段显示自检：调度器启动前立即确认驱动故障和 BMI270 chip-id，ADC 与编码器先显示
+`PENDING`；安全任务在运行时确认两者就绪，或等待 2 秒超时后再给出最终 `OK/FAIL`。`PENDING` 不计为
+故障，最终失败也不阻塞启动。`PARAM` 行显示当前运行时参数摘要。
+
 `ENC` 行末的 `hw=a,b,c,d` 是按逻辑 M1~M4 排列的原始定时器计数，用于区分“定时器未收到脉冲”和“逻辑计数未更新”。V2.0 映射为 M1=TIM2、M2=TIM4、M3=TIM3、M4=TIM5；CubeMX 中 M2/M3 的旧 label 不代表运行时逻辑顺序。
 
 `BREAK tim1 moe=... bif=... count=... tim8 ...` 中，`moe` 表示当前主输出是否启用，`bif` 表示本次采集是否观察到 Break 标志，`count` 是启动以来累计观察次数。BIF 在采集后清除，因此瞬态故障应结合 `count` 判断。
 - **`rtos`**：FreeRTOS 运行时状态，除 heap/栈外还包括 USART3 TX drop 和 ESP12F TX drop 计数
 - **`header`**：打印全字段 CSV 标题行（调试用，正常由 `log 1` 自动输出）
 
-### 5.2 电机调试
+### 5.2 参数与持久化
+
+- `get <param>`：读取当前 RAM 中的参数值。
+- `set <param> <value>`：修改当前 RAM 中的参数值；超出安全范围会拒绝。
+- `set save`：保存当前 ParamStore，并抓取 ADC current-zero 与 IMU gyro bias 校准快照写入 STM32 Flash。
+- `set reset`：擦除 Flash 参数镜像并恢复编译期默认值。
+
+当前支持的浮点参数名：
+
+```text
+max_linear_mps
+max_angular_rps
+speed_ramp_mps2
+angular_ramp_rps2
+wheel_radius_m
+track_width_m
+pid_integral_limit
+```
+
+Flash 参数镜像带 magic、版本号和 CRC32。启动时若镜像为空、CRC 错误或版本不兼容，则使用编译期默认值；若镜像有效，会恢复 ADC current-zero 和 IMU gyro bias 快照。
+
+### 5.3 电机调试
 
 - 所有 motor/raw 命令受 ESTOP 和 fault-stop 保护，激活时拒绝执行并提示 `"rejected: estop/fault active"`
 - permille 参数自动钳位至 `±CHASSIS_PWM_MAX_PERMILLE`（默认 900‰）
 - `vel` 通过 `ControlManager` 提交至 `CONTROL_SOURCE_DEBUG`（最低优先级），每 10ms 自动刷新时间戳避免超时
 
-### 5.3 IMU 操作
+### 5.4 IMU 操作
 
 - `imutest` 执行单次 SPI 读取 chip-id，不修改 IMU 运行状态
 - `imucal` 要求保持静止，校准成功后自动写入零偏估计值，`imucalclear` 清除
 - `imu 0` 不会关闭 SPI 外设，仅停止 `imuTask` 采样；正常采样由 BMI270 INT1 唤醒，10ms 超时后轮询降级
 
-### 5.4 ESP12F 管理
+### 5.5 ESP12F 管理
 
 - `espreset` 通过拉低 `ESP_RST` 复位 ESP12F
 - `espisolate` 彻底断电 ESP12F（拉低 RST + EN），仅可通过整板复位恢复。用于确认 ESP12F 异常时不影响主控
@@ -175,7 +204,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 - `espat on` / `espflash on` 操作均不可逆——需要等待 30s 自动退出或复位整板才能恢复调试台
 - `espflash off` / `espat off` 用于桥未激活时手动恢复（或复位整板强制退出）
 
-### 5.5 复位诊断（Reset Trace）
+### 5.6 复位诊断（Reset Trace）
 
 上电时自动打印复位源标志和崩溃追踪记录。`status` 命令也会输出这些信息。
 

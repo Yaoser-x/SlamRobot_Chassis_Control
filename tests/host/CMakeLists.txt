@@ -261,3 +261,75 @@ target_include_directories(test_imu_pipeline PRIVATE
 target_link_libraries(test_imu_pipeline PRIVATE m)
 
 add_test(NAME imu_pipeline COMMAND test_imu_pipeline)
+
+add_executable(test_param_store
+    test_param_store.c
+    ../../App/param/param_store.c
+)
+
+target_include_directories(test_param_store PRIVATE
+    .
+    ../../App/chassis
+    ../../App/param
+    ../../BSP
+    ../../BSP/motor
+)
+
+add_test(NAME param_store COMMAND test_param_store)
+
+add_executable(test_flash_param
+    test_flash_param.c
+    ../../App/param/param_store.c
+    ../../BSP/flash/flash_param.c
+)
+
+target_include_directories(test_flash_param PRIVATE
+    .
+    ../../App/chassis
+    ../../App/param
+    ../../BSP
+    ../../BSP/flash
+    ../../BSP/motor
+)
+
+target_compile_definitions(test_flash_param PRIVATE
+    FLASH_PARAM_HOST_TEST=1
+)
+
+add_test(NAME flash_param COMMAND test_flash_param)
+
+add_executable(test_power_on_self_test
+    test_power_on_self_test.c
+    ../../App/monitor/power_on_self_test.c
+)
+
+target_include_directories(test_power_on_self_test PRIVATE
+    .
+    ../../App/chassis
+    ../../App/monitor
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/encoder
+    ../../BSP/imu
+    ../../BSP/motor
+)
+
+target_compile_definitions(test_power_on_self_test PRIVATE
+    POWER_ON_SELF_TEST_HOST_TEST=1
+)
+
+add_test(NAME power_on_self_test COMMAND test_power_on_self_test)
+
+add_executable(test_oled_selfcheck
+    test_oled_selfcheck.c
+    ../../App/display/oled_selfcheck.c
+)
+
+target_include_directories(test_oled_selfcheck PRIVATE
+    .
+    ../../App/chassis
+    ../../App/display
+    ../../BSP
+)
+
+add_test(NAME oled_selfcheck COMMAND test_oled_selfcheck)

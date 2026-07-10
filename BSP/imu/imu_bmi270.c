@@ -1307,6 +1307,34 @@ void ImuBmi270_ClearCalibration(void)
   ImuBmi270_ScheduleAutoCal(HAL_GetTick(), BMI270_GYRO_AUTO_CAL_START_DELAY_MS);
 }
 
+void ImuBmi270_ApplyGyroBias(const float bias_dps[3])
+{
+  uint32_t primask;
+
+  if (bias_dps == 0)
+  {
+    return;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    imu_state.gyro_bias_dps[i] = bias_dps[i];
+    imu_state.gyro_corrected_dps[i] = 0.0f;
+    imu_state.gyro_filtered_dps[i] = 0.0f;
+    imu_state.gyro_dps[i] = 0.0f;
+  }
+  imu_state.gyro_calibrated = 1U;
+  imu_state.filter_initialized = 0U;
+  imu_state.gyro_auto_cal_last_result = 1U;
+  if (imu_state.gyro_auto_cal_enabled != 0U)
+  {
+    imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_DONE;
+  }
+  __set_PRIMASK(primask);
+}
+
 void ImuBmi270_GetState(imu_bmi270_state_t *state)
 {
   uint32_t primask;

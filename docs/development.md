@@ -74,14 +74,14 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 | --- | --- |
 | Debug | `build/Debug/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
 | Release | `build/Release/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
-| Host 测试 | `test_f407_v2[.exe]`、`test_chassis_layout_2wd[.exe]`、`test_adc_monitor[.exe]`、`test_motor_driver_gpio[.exe]`、`test_system_monitor[.exe]`、`test_chassis_control_current_limit[.exe]`、`test_imu_pipeline[.exe]` |
+| Host 测试 | 17 个 CTest target，覆盖控制逻辑、ADC/电流保护、UART 协议、OLED/IMU 管线、POST、参数存储与 Flash 参数镜像 |
 
 ### 2.4 当前构建验证
 
 ```
-Debug:  RAM   79.3 KB / 128 KB (60.5%)
-        FLASH 132.8 KB / 512 KB (25.3%)
-        Host 测试 7/7 通过 (CI host-tests)
+Debug:  RAM   81.2 KB / 128 KB (61.9%)
+        FLASH 180.7 KB / 512 KB (34.5%)
+        Host 测试 17/17 通过 (CI host-tests)
 ```
 
 ---
@@ -97,10 +97,12 @@ Debug:  RAM   79.3 KB / 128 KB (60.5%)
 | 步骤 | 操作 |
 | --- | --- |
 | 环境 | `ubuntu-24.04` |
-| 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc` |
+| 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc`；静态检查: `clang-format`、`cppcheck` |
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
-| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（7 个 target），通过后输出测试摘要 |
+| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（17 个 target），通过后输出测试摘要 |
+| 格式检查 | `clang-format --dry-run --Werror` 检查本次变更涉及的 App/BSP/tests C/H 文件 |
+| 静态分析 | `cppcheck --enable=warning,style --error-exitcode=1` 检查本次变更涉及的 App/BSP/tests C/H 文件 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
@@ -226,8 +228,10 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | ESP12F 协议 | ✅ 完成 | upper_protocol 帧协议通信 + 烧录透传桥 |
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
+| POST/参数持久化 | ✅ 基础完成 | 上电 POST、ParamStore、Flash 镜像、`get/set/set save/set reset` |
 | ESP12F 网页固件 | ✅ 完成 | 固定 AP + WebSocket 摇杆 + upper_protocol 帧协议 + 网页遥控 |
-| OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 自检 + 模块在线状态 |
+| OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 真实链路自检/模块在线状态 |
+| HIL 冒烟 | ✅ 基础完成 | USART1 只读 smoke 脚本，不自动驱动电机 |
 | 上位机 (RPI) 对接 | 🔲 待对接 | 协议已就绪 |
 
 ---

@@ -20,6 +20,9 @@
 #include "usart1_debug_console.h"
 #include "ssd1306.h"
 #include "oled_ui.h"
+#include "flash_param.h"
+#include "param_store.h"
+#include "power_on_self_test.h"
 #include "control_manager.h"
 #include "main.h"
 
@@ -27,10 +30,30 @@ extern osThreadId_t imuTaskHandle;
 
 void ChassisTasks_InitHardware(void)
 {
+  param_store_t params;
+  uint8_t params_loaded;
+
   ChassisTaskTiming_Reset();
+  ParamStore_SetDefaults();
+  params_loaded = (FlashParam_Load(&params) == FLASH_PARAM_STATUS_OK) ? 1U : 0U;
+  if (params_loaded != 0U)
+  {
+    (void)ParamStore_Set(&params);
+  }
   EncoderDriver_Init();
   AdcMonitor_Init();
   ImuBmi270_Init();
+  if (params_loaded != 0U)
+  {
+    if (params.current_zero_valid != 0U)
+    {
+      AdcMonitor_ApplyCurrentZeroCalibration(params.current_zero_raw);
+    }
+    if (params.imu_gyro_bias_valid != 0U)
+    {
+      ImuBmi270_ApplyGyroBias(params.imu_gyro_bias_dps);
+    }
+  }
   LedStatus_Init();
   SystemMonitor_Init();
   ChassisControl_Init();
@@ -42,6 +65,7 @@ void ChassisTasks_InitHardware(void)
   Esp12fComm_Init();
   Esp12fFlashBridge_Init();
   Usart1DebugConsole_Init();
+  POST_Run();
   SSD1306_Init();
   OLED_UI_Init();
 }
@@ -60,6 +84,7 @@ void Task_Safety(void *argument)
     uint32_t now_ms = osKernelGetTickCount();
 
     SystemMonitor_Update();
+    POST_UpdateRuntime(now_ms);
     ResetTrace_UpdateControl(ControlManager_GetActiveSource(),
                              ControlManager_IsEmergencyStop(),
                              ControlManager_IsFaultStop());
