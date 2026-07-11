@@ -4,6 +4,7 @@
 #include "adc_monitor.h"
 #include "chassis_config.h"
 #include "chassis_control.h"
+#include "chassis_maintenance.h"
 #include "chassis_layout.h"
 #include "chassis_task_timing.h"
 #include "cmsis_os2.h"
@@ -71,15 +72,11 @@ static void ChassisTasks_ServiceFirstImuCalibrationSave(uint32_t now_ms)
   imu_bmi270_state_t imu_state;
 
   if (imu_calibration_save_pending == 0U ||
-      ((int32_t)(now_ms - imu_calibration_save_next_ms)) < 0 ||
-      ChassisTasks_CurrentZeroStationary() == 0U)
+      ((int32_t)(now_ms - imu_calibration_save_next_ms)) < 0)
   {
     return;
   }
-  ControlManager_ClearCommand();
-  ChassisControl_EmergencyStop();
-  MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
-  if (ChassisTasks_CurrentZeroStationary() == 0U)
+  if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
   {
     return;
   }
@@ -119,6 +116,7 @@ static void ChassisTasks_ServiceFirstImuCalibrationSave(uint32_t now_ms)
   {
     imu_calibration_save_next_ms = now_ms + CHASSIS_IMU_AUTOSAVE_RETRY_MS;
   }
+  ChassisMaintenance_End();
 }
 
 void ChassisTasks_InitHardware(void)

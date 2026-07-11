@@ -3,9 +3,16 @@
 
 #include <stdint.h>
 
+#include "relative_yaw_control.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define PS2_HEADING_GATE_IMU_OFFLINE       (1UL << 0)
+#define PS2_HEADING_GATE_IMU_UNCALIBRATED  (1UL << 1)
+#define PS2_HEADING_GATE_IMU_STALE         (1UL << 2)
+#define PS2_HEADING_GATE_IMU_QUALITY       (1UL << 3)
 
 typedef struct
 {
@@ -21,6 +28,13 @@ typedef struct
   uint8_t right_y;
   uint8_t macro_active;
   uint8_t macro_button;
+  uint8_t heading_active;
+  uint8_t heading_end_reason;
+  uint8_t pressed_btn2;
+  uint32_t heading_gate_flags;
+  uint32_t imu_age_ms;
+  float heading_target_deg;
+  float heading_accumulated_deg;
   float linear_x;
   float angular_z;
   uint32_t rx_ok_count;

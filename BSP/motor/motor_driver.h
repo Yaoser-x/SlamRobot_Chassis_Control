@@ -37,6 +37,13 @@ typedef enum
   MOTOR_DRIVER_PHASE_RAMP_UP
 } motor_driver_phase_t;
 
+typedef enum
+{
+  MOTOR_BREAK_ORIGIN_NONE = 0,
+  MOTOR_BREAK_ORIGIN_STARTUP_TIMEOUT,
+  MOTOR_BREAK_ORIGIN_TIM1_RUNTIME
+} motor_break_origin_t;
+
 typedef struct
 {
   uint8_t fault_active[MOTOR_ID_COUNT];
@@ -55,6 +62,13 @@ typedef struct
   uint8_t tim8_break_flag;
   uint32_t tim1_break_count;
   uint32_t tim8_break_count;
+  uint32_t tim1_break_last_ms;
+  uint32_t tim8_break_last_ms;
+  uint8_t startup_qualified;
+  uint8_t startup_pre_wake_bif;
+  uint8_t startup_bkin_high;
+  uint8_t startup_nfault_high_mask;
+  motor_break_origin_t break_origin;
   uint32_t fault_edge_count[MOTOR_ID_COUNT];
   uint32_t fault_last_change_ms[MOTOR_ID_COUNT];
   uint32_t fault_low_since_ms[MOTOR_ID_COUNT];

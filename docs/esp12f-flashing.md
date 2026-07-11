@@ -72,9 +72,10 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 
 ### 3.1 配置
 
-1. Arduino IDE 安装 **ESP8266 boards**（`https://arduino.esp8266.com/stable/package_esp8266com_index.json`）
-2. 开发板选择 **`Generic ESP8266 Module`**
-3. 关键参数设置：
+1. Arduino IDE 安装 **ESP8266 boards**（`https://arduino.esp8266.com/stable/package_esp8266com_index.json`）；本轮验收默认记录 ESP8266 Core **3.1.2**
+2. 安装 `arduinoWebSockets` **2.7.2**（不是 ESP8266 Core 内置库）
+3. 开发板选择 **`Generic ESP8266 Module`**
+4. 关键参数设置：
 
    | 参数 | 推荐值 |
    | --- | --- |
@@ -108,6 +109,7 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
   2. 释放 `EN`，等待 10ms（ESP8266 在 `EN` 上升沿采样 `IO0`）
   3. 释放 `RST`，等待 BootROM 就绪
 - 启动 USART1 ↔ USART2 双向透传
+- 先获取统一底盘维护锁、撤销旧 LINE/DEBUG/raw/open-loop 模式并确认编码器静止；不满足时 `espflash on`/`espat on` 被拒绝
 
 ### 4.2 bridge active 期间
 
@@ -116,6 +118,7 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 - ESP12F 正常网页控制协议暂停，status 帧不会混入烧录数据
 - 调试台命令台暂停（`Esp12fFlashBridge_IsActive()` 检查），避免二进制烧录流被误解析
 - 30 秒无任何串口活动 → **自动退出** bridge
+- 维护锁持续持有，UPPER/PS2/ESP/LINE/DEBUG 新命令均被拒绝；正常退出或启动失败都会释放锁
 
 ### 4.3 自动退出
 

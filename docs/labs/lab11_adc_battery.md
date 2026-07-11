@@ -220,7 +220,9 @@ vbat = df['vbat_mv'] / 1000.0    # volts
 plt.figure(figsize=(10, 5))
 plt.plot(t, vbat, 'b-', alpha=0.7)
 plt.axhline(10.5, color='orange', linestyle='--', label='Low battery warn (10.5V)')
+plt.axhline(11.0, color='green', linestyle='--', label='Warning clear (11.0V)')
 plt.axhline(9.0, color='red', linestyle='--', label='Cutoff (9.0V)')
+plt.axhline(9.6, color='purple', linestyle='--', label='Critical recovery (9.6V)')
 plt.xlabel('Time (min)')
 plt.ylabel('Battery Voltage (V)')
 plt.legend()
@@ -228,6 +230,8 @@ plt.grid(alpha=0.3)
 plt.title('Battery Discharge Curve')
 plt.savefig('lab11_discharge.png', dpi=150)
 ```
+
+3S 欠压板测要求：<10.5V 置告警且 >11.0V 才解除；<9.0V 的有效 ADC 样本持续 500ms 后整车 fault-stop；锁停后 >9.6V 持续 2s 只清 `BATTERY_CRITICAL`。恢复后控制源应为 NONE，必须收到新命令才能运动。一次无效样本会重置对应连续时间窗。
 
 ## 思考题
 

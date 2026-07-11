@@ -32,6 +32,13 @@ float PidController_StepLimited(pid_state_t *pid,
                                 float actual,
                                 float dt_s,
                                 int8_t actuator_limit_direction);
+float PidController_StepBounded(pid_state_t *pid,
+                                float target,
+                                float actual,
+                                float dt_s,
+                                int8_t actuator_limit_direction,
+                                float output_min,
+                                float output_max);
 void PidController_SetParams(pid_state_t *pid, const pid_params_t *params);
 
 #ifdef __cplusplus

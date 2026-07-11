@@ -32,7 +32,9 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | `vel` | `<mm/s> [mrad/s]` | 闭环速度控制（提交至 `CONTROL_SOURCE_DEBUG`） |
 | `stop` | — | 清除所有测试命令、清空 open-loop 和 `vel` 指令 |
 | `estop` | `<0\|1>` | 清除/设置紧急停止 |
-| `clearfault` | — | 清除锁存过流/DRV 故障标志 |
+| `clearfault` | — | 在硬件原因消失且输出安全时清除普通锁存故障；不能解除 ESTOP |
+
+`status` 的 `BREAK` 行包含 `origin/startup/pre_bif/bkin/nfault`，用于区分启动资格超时与运行期 TIM1 Break；`PS2` 行包含按钮沿、定角目标/累计角、结束原因、IMU HAL-age 与门禁位。
 | `imutest` | — | 探测 BMI270（读取 CHIP_ID 期望 `0x24`） |
 | `imudiag` | — | SPI 硬件诊断（寄存器回读 + bit-bang + MISO 上拉/下拉/悬空） |
 | `imuinit` | — | 加载配置表并初始化 BMI270 |
@@ -157,7 +159,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 `ENC` 行末的 `hw=a,b,c,d` 是按逻辑 M1~M4 排列的原始定时器计数，用于区分“定时器未收到脉冲”和“逻辑计数未更新”。V2.0 映射为 M1=TIM2、M2=TIM4、M3=TIM3、M4=TIM5；CubeMX 中 M2/M3 的旧 label 不代表运行时逻辑顺序。
 
-`BREAK tim1 moe=... bif=... count=... tim8 ...` 中，`moe` 表示当前主输出是否启用，`bif` 表示本次采集是否观察到 Break 标志，`count` 是启动以来累计观察次数。BIF 在采集后清除，因此瞬态故障应结合 `count` 判断。
+`BREAK tim1 moe=... bif=... count=... last=... tim8 ...` 中，`moe` 表示当前主输出是否启用，`bif` 表示本次是否观察到 Break，`count` 是累计次数，`last` 是最后一次 tick。TIM1 是权威锁存，TIM8 是同网冗余诊断。
 - **`rtos`**：FreeRTOS 运行时状态，除 heap/栈外还包括 USART3 TX drop 和 ESP12F TX drop 计数
 - **`header`**：打印全字段 CSV 标题行（调试用，正常由 `log 1` 自动输出）
 
@@ -167,6 +169,8 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 - `set <param> <value>`：修改当前 RAM 中的参数值；超出安全范围会拒绝。
 - `set save`：保存当前 ParamStore，并抓取 ADC current-zero 与 IMU gyro bias 校准快照写入 STM32 Flash。
 - `set reset`：擦除 Flash 参数镜像并恢复编译期默认值。
+
+`set <param>`、`set save`、`set reset` 都会进入统一底盘维护锁：清控制源和 raw/open-loop，PWM 归零，并要求所有 enabled encoder 有效且静止。维护事件还会撤销此前的 LINE enable 和自动续发 DEBUG `vel`；释放锁后需新的 `line on`/`vel` 才能运动。保存成功或失败都会释放锁。
 
 当前支持的浮点参数名：
 
@@ -187,6 +191,7 @@ Flash 参数镜像带 magic、版本号和 CRC32。启动时若镜像为空、CR
 - 所有 motor/raw 命令受 ESTOP 和 fault-stop 保护，激活时拒绝执行并提示 `"rejected: estop/fault active"`
 - permille 参数自动钳位至 `±CHASSIS_PWM_MAX_PERMILLE`（默认 900‰）
 - `vel` 通过 `ControlManager` 提交至 `CONTROL_SOURCE_DEBUG`（最低优先级），每 10ms 自动刷新时间戳避免超时
+- raw/open-loop 只在最近 400ms 内收到刷新时有效。Release 构建还必须先在本地 USART1 执行 `maint arm`，授权 60s；`maint off`、UART 错误、ESP 桥接、ESTOP/fault 或超时立即撤销并停车。Debug 构建无需 arm，但仍受 400ms deadman 保护。
 
 ### 5.4 IMU 操作
 
@@ -199,8 +204,8 @@ Flash 参数镜像带 magic、版本号和 CRC32。启动时若镜像为空、CR
 - `espreset` 通过拉低 `ESP_RST` 复位 ESP12F
 - `espisolate` 彻底断电 ESP12F（拉低 RST + EN），仅可通过整板复位恢复。用于确认 ESP12F 异常时不影响主控
 - `espboot 1` 设置下载模式（`ESP_IO0=0` + 复位），`espboot 0` 恢复正常启动（`ESP_IO0=1`）
-- `espflash on` 进入烧录桥（下载模式：IO0=0, RST 脉冲），用于 esptool.py 或 Arduino 烧录
-- `espat on` 进入 AT 透传桥（正常模式：IO0=1, RST 脉冲），用于手动发 AT 指令测试连通性
+- `espflash on` 进入烧录桥（下载模式：IO0=0, RST 脉冲），用于 esptool.py 或 Arduino 烧录；进入前必须通过统一维护锁与静止检查
+- `espat on` 进入 AT 透传桥（正常模式：IO0=1, RST 脉冲），用于手动发 AT 指令测试连通性；active 期间维护锁持续持有，其他控制源全部被拒绝
 - `espat on` / `espflash on` 操作均不可逆——需要等待 30s 自动退出或复位整板才能恢复调试台
 - `espflash off` / `espat off` 用于桥未激活时手动恢复（或复位整板强制退出）
 

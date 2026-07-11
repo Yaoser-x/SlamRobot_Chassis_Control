@@ -3,10 +3,13 @@
 #include "chassis_config.h"
 #include "cmsis_os2.h"
 #include "main.h"
+#include "param_store.h"
 
 static chassis_cmd_t source_cmds[CONTROL_SOURCE_LINE + 1U];
 static uint8_t emergency_stop;
 static uint8_t fault_stop;
+static uint8_t maintenance_lock;
+static uint32_t motion_revoke_generation;
 
 /* 按源独立超时 (ms)：UPPER/PS2/ESP12F/LINE/DEBUG */
 static const uint32_t source_timeout_ms[CONTROL_SOURCE_LINE + 1U] = {
@@ -42,9 +45,9 @@ static float ControlManager_ClampFloat(float value, float limit)
   return value;
 }
 
-static uint8_t ControlManager_KinematicsValid(void)
+static uint8_t ControlManager_KinematicsValid(const param_store_t *params)
 {
-  return (CHASSIS_WHEEL_RADIUS_M > 0.0f && CHASSIS_WHEEL_BASE_M > 0.0f) ? 1U : 0U;
+  return (params != 0 && params->wheel_radius_m > 0.0f && params->track_width_m > 0.0f) ? 1U : 0U;
 }
 
 void ControlManager_Init(void)
@@ -55,6 +58,8 @@ void ControlManager_Init(void)
   }
   emergency_stop = 0U;
   fault_stop = 0U;
+  maintenance_lock = 0U;
+  motion_revoke_generation = 0UL;
 }
 
 void ControlManager_ClearCommand(void)
@@ -84,14 +89,22 @@ void ControlManager_ClearSource(uint8_t source)
   __set_PRIMASK(primask);
 }
 
-control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
+static control_command_result_t ControlManager_SetCommandInternal(const chassis_cmd_t *cmd,
+                                                                  uint8_t enforce_generation,
+                                                                  uint32_t expected_generation)
 {
   if (cmd != 0)
   {
     chassis_cmd_t sanitized = *cmd;
+    param_store_t params;
     uint32_t primask;
 
-    if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
+    (void)ParamStore_GetSnapshot(&params);
+    if (ControlManager_IsEmergencyStop() != 0U ||
+        ControlManager_IsFaultStop() != 0U ||
+        ControlManager_IsMaintenanceLocked() != 0U ||
+        (enforce_generation != 0U &&
+         ControlManager_GetMotionRevokeGeneration() != expected_generation))
     {
       return CONTROL_COMMAND_REJECTED;
     }
@@ -113,9 +126,9 @@ control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
       return CONTROL_COMMAND_REJECTED_AND_STOPPED;
     }
 
-    sanitized.linear_x = ControlManager_ClampFloat(sanitized.linear_x, CHASSIS_MAX_LINEAR_MPS);
-    sanitized.angular_z = ControlManager_ClampFloat(sanitized.angular_z, CHASSIS_MAX_ANGULAR_RPS);
-    if (ControlManager_KinematicsValid() == 0U &&
+    sanitized.linear_x = ControlManager_ClampFloat(sanitized.linear_x, params.max_linear_mps);
+    sanitized.angular_z = ControlManager_ClampFloat(sanitized.angular_z, params.max_angular_rps);
+    if (ControlManager_KinematicsValid(&params) == 0U &&
         ControlManager_AbsFloat(sanitized.angular_z) > CHASSIS_ANGULAR_EPSILON_RPS)
     {
       ControlManager_ClearSource(sanitized.source);
@@ -124,7 +137,9 @@ control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
 
     primask = __get_PRIMASK();
     __disable_irq();
-    if (emergency_stop != 0U || fault_stop != 0U)
+    if (emergency_stop != 0U || fault_stop != 0U || maintenance_lock != 0U ||
+        (enforce_generation != 0U &&
+         motion_revoke_generation != expected_generation))
     {
       __set_PRIMASK(primask);
       return CONTROL_COMMAND_REJECTED;
@@ -137,11 +152,77 @@ control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
   return CONTROL_COMMAND_REJECTED;
 }
 
+control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
+{
+  return ControlManager_SetCommandInternal(cmd, 0U, 0UL);
+}
+
+control_command_result_t ControlManager_SetCommandForGeneration(const chassis_cmd_t *cmd,
+                                                                uint32_t expected_generation)
+{
+  return ControlManager_SetCommandInternal(cmd, 1U, expected_generation);
+}
+
+uint8_t ControlManager_BeginMaintenance(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  if (maintenance_lock != 0U)
+  {
+    __set_PRIMASK(primask);
+    return 0U;
+  }
+  maintenance_lock = 1U;
+  motion_revoke_generation++;
+  for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
+  {
+    source_cmds[i] = (chassis_cmd_t){0};
+  }
+  __set_PRIMASK(primask);
+  return 1U;
+}
+
+void ControlManager_EndMaintenance(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  maintenance_lock = 0U;
+  __set_PRIMASK(primask);
+}
+
+uint8_t ControlManager_IsMaintenanceLocked(void)
+{
+  uint8_t value;
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  value = maintenance_lock;
+  __set_PRIMASK(primask);
+  return value;
+}
+
+uint32_t ControlManager_GetMotionRevokeGeneration(void)
+{
+  uint32_t generation;
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  generation = motion_revoke_generation;
+  __set_PRIMASK(primask);
+  return generation;
+}
+
 void ControlManager_SetEmergencyStop(uint8_t enabled)
 {
   uint32_t primask = __get_PRIMASK();
 
   __disable_irq();
+  if (enabled != 0U && emergency_stop == 0U)
+  {
+    motion_revoke_generation++;
+  }
   emergency_stop = (enabled != 0U) ? 1U : 0U;
   for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
   {
@@ -155,6 +236,10 @@ void ControlManager_SetFaultStop(uint8_t enabled)
   uint32_t primask = __get_PRIMASK();
 
   __disable_irq();
+  if (enabled != 0U && fault_stop == 0U)
+  {
+    motion_revoke_generation++;
+  }
   fault_stop = (enabled != 0U) ? 1U : 0U;
   for (uint8_t i = 0U; i <= CONTROL_SOURCE_LINE; ++i)
   {
@@ -180,7 +265,7 @@ uint8_t ControlManager_GetCommand(chassis_cmd_t *cmd, uint32_t now_ms)
   }
   primask = __get_PRIMASK();
   __disable_irq();
-  if (emergency_stop != 0U || fault_stop != 0U)
+  if (emergency_stop != 0U || fault_stop != 0U || maintenance_lock != 0U)
   {
     __set_PRIMASK(primask);
     return 0U;

@@ -3,6 +3,7 @@
 #include "bsp_config.h"
 #include "chassis_layout.h"
 #include "encoder_math.h"
+#include "param_store.h"
 #include "tim.h"
 
 #define TWO_PI_F 6.28318530718f
@@ -20,7 +21,7 @@ static const encoder_hw_t encoder_hw[MOTOR_ID_COUNT] = {
   { &htim5 },
 };
 
-static encoder_state_t encoder_state;
+static encoder_state_t published_encoder_state;
 static uint32_t last_count[MOTOR_ID_COUNT];
 static encoder_speed_window_t speed_window[MOTOR_ID_COUNT];
 static uint32_t last_update_ms;
@@ -55,18 +56,20 @@ void EncoderDriver_Init(void)
     last_count[i] = 0U;
     EncoderMath_SpeedWindowReset(&speed_window[i]);
   }
-  encoder_state = (encoder_state_t){0};
+  published_encoder_state = (encoder_state_t){0};
   last_update_ms = 0U;
   has_last_update = 0U;
 }
 
 void EncoderDriver_Update(uint32_t now_ms)
 {
+  encoder_state_t encoder_state;
+  param_store_t params;
   uint32_t now_count[MOTOR_ID_COUNT];
   int32_t delta[MOTOR_ID_COUNT];
   uint32_t dt_ms = now_ms - last_update_ms;
   float counts_per_rev = EncoderDriver_GetCountsPerRev();
-  float meters_per_rev = TWO_PI_F * CHASSIS_WHEEL_RADIUS_M;
+  float meters_per_rev;
   uint32_t primask;
   uint8_t valid_all = 1U;
   uint8_t left_count = 0U;
@@ -77,6 +80,14 @@ void EncoderDriver_Update(uint32_t now_ms)
   int32_t right_delta_sum = 0;
   float left_speed_sum = 0.0f;
   float right_speed_sum = 0.0f;
+
+  (void)ParamStore_GetSnapshot(&params);
+  meters_per_rev = TWO_PI_F * params.wheel_radius_m;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  encoder_state = published_encoder_state;
+  __set_PRIMASK(primask);
 
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
@@ -93,9 +104,6 @@ void EncoderDriver_Update(uint32_t now_ms)
     }
     last_count[i] = now_count[i];
   }
-
-  primask = __get_PRIMASK();
-  __disable_irq();
 
   encoder_state.last_update_ms = now_ms;
   for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -131,7 +139,7 @@ void EncoderDriver_Update(uint32_t now_ms)
                                            delta[i],
                                            dt_ms,
                                            counts_per_rev,
-                                           CHASSIS_WHEEL_RADIUS_M,
+                                           params.wheel_radius_m,
                                            CHASSIS_ENCODER_MAX_ABS_MPS,
                                            CHASSIS_ENCODER_SPIKE_REJECT_MPS,
                                            CHASSIS_ENCODER_FILTER_MIN_SAMPLES,
@@ -153,7 +161,7 @@ void EncoderDriver_Update(uint32_t now_ms)
       encoder_state.speed_mps[i] = EncoderMath_CountDeltaSpeedMps(speed_window[i].delta_sum,
                                                                   speed_window[i].dt_sum_ms,
                                                                   counts_per_rev,
-                                                                  CHASSIS_WHEEL_RADIUS_M);
+                                                                  params.wheel_radius_m);
       if (encoder_state.consecutive_anomalies[i] >= CHASSIS_ENCODER_MAX_CONSECUTIVE_ANOMALIES)
       {
         encoder_state.speed_valid[i] = 0U;
@@ -306,6 +314,9 @@ void EncoderDriver_Update(uint32_t now_ms)
   }
   encoder_state.speed_valid_all = valid_all;
 
+  primask = __get_PRIMASK();
+  __disable_irq();
+  published_encoder_state = encoder_state;
   __set_PRIMASK(primask);
 
   last_update_ms = now_ms;
@@ -323,7 +334,7 @@ void EncoderDriver_GetState(encoder_state_t *state)
 
   primask = __get_PRIMASK();
   __disable_irq();
-  *state = encoder_state;
+  *state = published_encoder_state;
   __set_PRIMASK(primask);
 }
 
@@ -339,7 +350,7 @@ float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
 
   primask = __get_PRIMASK();
   __disable_irq();
-  speed = encoder_state.speed_mps[(uint32_t)motor];
+  speed = published_encoder_state.speed_mps[(uint32_t)motor];
   __set_PRIMASK(primask);
   return speed;
 }

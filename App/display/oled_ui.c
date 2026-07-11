@@ -453,12 +453,20 @@ static void OLED_UI_DrawNormal(void)
     if (blink_visible || err == 0U)
     {
       char err_buf[7];
-      err_buf[0] = '0';
-      err_buf[1] = 'x';
-      for (uint8_t n = 0; n < 4; n++)
+      if ((err & SYSTEM_ERROR_TIM_BREAK) != 0U)
       {
-        uint8_t nib = (uint8_t)((err >> (12 - n * 4)) & 0x0FU);
-        err_buf[2 + n] = (char)(nib < 10 ? '0' + nib : 'A' + nib - 10);
+        err_buf[0] = 'B'; err_buf[1] = 'K'; err_buf[2] = 'I';
+        err_buf[3] = 'N'; err_buf[4] = '!'; err_buf[5] = ' ';
+      }
+      else
+      {
+        err_buf[0] = '0';
+        err_buf[1] = 'x';
+        for (uint8_t n = 0; n < 4; n++)
+        {
+          uint8_t nib = (uint8_t)((err >> (12 - n * 4)) & 0x0FU);
+          err_buf[2 + n] = (char)(nib < 10 ? '0' + nib : 'A' + nib - 10);
+        }
       }
       err_buf[6] = '\0';
       SSD1306_DrawString(0, 4, err_buf, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);

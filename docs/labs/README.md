@@ -87,7 +87,8 @@ Lab 01 → Lab 02 → Lab 03 → Lab 05 → Lab 06 → Lab 08
 | | `m1 F R` ~ `m4 F R` | 单路电机 EN/PH raw 测试，输出按 `F-R` 解析 |
 | | `vel V [W]` | 闭环速度控制 V(mm/s) W(mrad/s) |
 | | `stop` | 停止全部运动 |
-| 安全 | `estop 0\|1` | 清除/设置紧急停止 |
+| 安全 | `estop 0\|1` | USART1 本地清除/设置紧急停止；远程链路只能设置 |
+| | `maint arm\|off` | Release 构建 raw/open-loop 的 60s 本地授权；输出本身仍有 400ms deadman |
 | | `clearfault` | 清除锁存过流/DRV 故障 |
 | 日志 | `log 0` | 停止 CSV 日志 |
 | | `log 1 [fld...]` | 启动 CSV 日志（可选字段过滤） |

@@ -83,6 +83,8 @@ extern "C" {
 #define MOTOR_REVERSE_SPEED_THRESHOLD_MPS   0.02f
 #define MOTOR_REVERSE_MAX_BRAKE_CYCLES      20U
 #define DRV8874_WAKE_DELAY_MS               2U
+#define DRV8874_STARTUP_STABLE_MS            5U
+#define DRV8874_STARTUP_TIMEOUT_MS           50U
 
 /* 编码器物理参数 */
 #define CHASSIS_ENCODER_BASE_PPR            11.0f

@@ -17,6 +17,16 @@ static uint8_t motor_output_active[MOTOR_ID_COUNT];
 static uint8_t startup_blank_armed[MOTOR_ID_COUNT];
 static uint32_t overcurrent_blank_until_ms[MOTOR_ID_COUNT];
 static uint32_t inactive_since_ms[MOTOR_ID_COUNT];
+static uint8_t battery_warning_active;
+static uint8_t battery_critical_debounce_active;
+static uint8_t battery_recovery_debounce_active;
+static uint32_t battery_critical_since_ms;
+static uint32_t battery_recovery_since_ms;
+
+#define SYSTEM_FAULT_STOP_CAUSE_MASK \
+  (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT | \
+   SYSTEM_ERROR_DRV_FAULT | SYSTEM_ERROR_TIM_BREAK | \
+   SYSTEM_ERROR_ENCODER_FEEDBACK_LOST | SYSTEM_ERROR_BATTERY_CRITICAL)
 
 static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
   SYSTEM_ERROR_M1_OVERCURRENT,
@@ -28,6 +38,18 @@ static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
 static uint8_t SystemMonitor_CurrentBelowFaultThreshold(float current_a)
 {
   return (current_a <= MOTOR_STALL_CURRENT_A) ? 1U : 0U;
+}
+
+static uint8_t SystemMonitor_BatterySampleValid(const adc_monitor_state_t *adc_state)
+{
+  const uint32_t invalid_mask = ADC_MONITOR_INVALID_NOT_READY |
+                                ADC_MONITOR_INVALID_NO_NEW_SAMPLE |
+                                ADC_MONITOR_INVALID_DMA_ERROR;
+
+  return (adc_state != 0 &&
+          adc_state->samples_ready != 0U &&
+          adc_state->raw_sample_count > 0U &&
+          (adc_state->invalid_reason_flags & invalid_mask) == 0UL) ? 1U : 0U;
 }
 
 static uint8_t SystemMonitor_TimeReached(uint32_t now_ms, uint32_t deadline_ms)
@@ -123,6 +145,11 @@ static void SystemMonitor_UpdateCurrentDryRun(const adc_monitor_state_t *adc_sta
 void SystemMonitor_Init(void)
 {
   monitor_state = (system_monitor_state_t){0};
+  battery_warning_active = 0U;
+  battery_critical_debounce_active = 0U;
+  battery_recovery_debounce_active = 0U;
+  battery_critical_since_ms = 0UL;
+  battery_recovery_since_ms = 0UL;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     overcurrent_count[i] = 0U;
@@ -151,6 +178,10 @@ void SystemMonitor_Update(void)
   uint32_t new_latched_flags = 0U;
   uint32_t latched_after_commit;
   uint8_t request_fault_stop = 0U;
+  uint8_t release_fault_stop = 0U;
+  uint8_t battery_sample_valid;
+  uint8_t battery_critical_latched;
+  uint32_t auto_clear_latched_flags = 0UL;
   uint32_t now_ms;
   uint32_t primask;
 
@@ -168,6 +199,8 @@ void SystemMonitor_Update(void)
 
   primask = __get_PRIMASK();
   __disable_irq();
+  battery_critical_latched = ((monitor_state.latched_error_flags &
+                               SYSTEM_ERROR_BATTERY_CRITICAL) != 0U) ? 1U : 0U;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     previous_overcurrent_count[i] = overcurrent_count[i];
@@ -232,12 +265,66 @@ void SystemMonitor_Update(void)
                                           previous_overcurrent_count,
                                           next_overcurrent_count,
                                           &new_latched_flags);
-  if (ADC_MONITOR_CALIBRATION_ENABLED != 0U &&
-      BATTERY_LOW_MONITOR_ENABLED != 0U &&
-      next_state.battery_voltage > 0.1f &&
-      next_state.battery_voltage < BATTERY_LOW_WARN_V)
+  battery_sample_valid = SystemMonitor_BatterySampleValid(&adc_state);
+  if (BATTERY_LOW_MONITOR_ENABLED != 0U && battery_sample_valid != 0U)
+  {
+    if (next_state.battery_voltage < BATTERY_LOW_WARN_V)
+    {
+      battery_warning_active = 1U;
+    }
+    else if (next_state.battery_voltage > BATTERY_LOW_CLEAR_V)
+    {
+      battery_warning_active = 0U;
+    }
+  }
+  if (battery_warning_active != 0U)
   {
     next_state.error_flags |= SYSTEM_ERROR_LOW_BATTERY;
+  }
+
+  if (battery_critical_latched == 0U)
+  {
+    battery_recovery_debounce_active = 0U;
+    if (battery_sample_valid != 0U && next_state.battery_voltage < BATTERY_CRITICAL_V)
+    {
+      if (battery_critical_debounce_active == 0U)
+      {
+        battery_critical_debounce_active = 1U;
+        battery_critical_since_ms = now_ms;
+      }
+      else if ((uint32_t)(now_ms - battery_critical_since_ms) >=
+               BATTERY_CRITICAL_DEBOUNCE_MS)
+      {
+        new_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
+        battery_critical_debounce_active = 0U;
+      }
+    }
+    else
+    {
+      battery_critical_debounce_active = 0U;
+    }
+  }
+  else
+  {
+    battery_critical_debounce_active = 0U;
+    if (battery_sample_valid != 0U && next_state.battery_voltage > BATTERY_RECOVER_V)
+    {
+      if (battery_recovery_debounce_active == 0U)
+      {
+        battery_recovery_debounce_active = 1U;
+        battery_recovery_since_ms = now_ms;
+      }
+      else if ((uint32_t)(now_ms - battery_recovery_since_ms) >=
+               BATTERY_RECOVER_DEBOUNCE_MS)
+      {
+        auto_clear_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
+        battery_recovery_debounce_active = 0U;
+      }
+    }
+    else
+    {
+      battery_recovery_debounce_active = 0U;
+    }
   }
   if (estop_active != 0U)
   {
@@ -289,20 +376,27 @@ void SystemMonitor_Update(void)
     monitor_state.task_timed_out[i] = next_state.task_timed_out[i];
   }
   monitor_state.latched_error_flags |= new_latched_flags;
+  monitor_state.latched_error_flags &= ~auto_clear_latched_flags;
   latched_after_commit = monitor_state.latched_error_flags;
   monitor_state.error_flags = next_state.error_flags | latched_after_commit;
-  if ((latched_after_commit &
-       (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT |
-        SYSTEM_ERROR_DRV_FAULT | SYSTEM_ERROR_TIM_BREAK)) != 0U)
+  if ((latched_after_commit & SYSTEM_FAULT_STOP_CAUSE_MASK) != 0U)
   {
     request_fault_stop = 1U;
     monitor_state.error_flags |= SYSTEM_ERROR_FAULT_STOP;
+  }
+  else if (auto_clear_latched_flags != 0UL)
+  {
+    release_fault_stop = 1U;
   }
   __set_PRIMASK(primask);
 
   if (request_fault_stop != 0U)
   {
     ControlManager_SetFaultStop(1U);
+  }
+  else if (release_fault_stop != 0U)
+  {
+    ControlManager_SetFaultStop(0U);
   }
 }
 
@@ -323,14 +417,16 @@ void SystemMonitor_GetState(system_monitor_state_t *state)
 
 void SystemMonitor_ClearLatchedFaults(uint32_t mask)
 {
-  uint32_t clearable = mask;
+  uint32_t clearable = mask & ~SYSTEM_ERROR_BATTERY_CRITICAL;
   system_monitor_state_t snapshot;
   motor_driver_state_t motor_state;
+  encoder_state_t encoder_state;
   uint8_t clear_fault_stop = 0U;
   uint32_t latched_after_clear;
   uint32_t primask;
 
   MotorDriver_GetState(&motor_state);
+  EncoderDriver_GetState(&encoder_state);
 
   primask = __get_PRIMASK();
   __disable_irq();
@@ -361,14 +457,26 @@ void SystemMonitor_ClearLatchedFaults(uint32_t mask)
   {
     clearable &= ~SYSTEM_ERROR_TIM_BREAK;
   }
+  if ((mask & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U)
+  {
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+      if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
+          (encoder_state.speed_valid[i] == 0U ||
+           motor_state.requested_pwm[i] != 0 ||
+           motor_state.applied_pwm[i] != 0 ||
+           motor_state.effective_pwm[i] != 0))
+      {
+        clearable &= ~SYSTEM_ERROR_ENCODER_FEEDBACK_LOST;
+      }
+    }
+  }
 
   primask = __get_PRIMASK();
   __disable_irq();
   monitor_state.latched_error_flags &= ~clearable;
   latched_after_clear = monitor_state.latched_error_flags;
-  if ((latched_after_clear &
-       (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT |
-        SYSTEM_ERROR_DRV_FAULT | SYSTEM_ERROR_TIM_BREAK)) == 0U)
+  if ((latched_after_clear & SYSTEM_FAULT_STOP_CAUSE_MASK) == 0U)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -383,6 +491,17 @@ void SystemMonitor_ClearLatchedFaults(uint32_t mask)
   {
     ControlManager_SetFaultStop(0U);
   }
+}
+
+void SystemMonitor_LatchEncoderFeedbackFault(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  monitor_state.latched_error_flags |= SYSTEM_ERROR_ENCODER_FEEDBACK_LOST;
+  monitor_state.error_flags |= SYSTEM_ERROR_ENCODER_FEEDBACK_LOST | SYSTEM_ERROR_FAULT_STOP;
+  __set_PRIMASK(primask);
+  ControlManager_SetFaultStop(1U);
 }
 
 uint8_t SystemMonitor_HasLatchedFault(void)

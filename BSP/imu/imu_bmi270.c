@@ -758,19 +758,16 @@ uint8_t ImuBmi270_ProbeNow(void)
   HAL_Delay(BMI270_SPI_SELECT_DELAY_MS);
   if (ImuBmi270_ReadReg(BMI270_REG_CHIP_ID, &chip_id) == 0U)
   {
-    imu_state.online = 0U;
     return 0U;
   }
 
   imu_state.chip_id = chip_id;
   if (chip_id != BMI270_CHIP_ID)
   {
-    imu_state.online = 0U;
     ImuBmi270_SetError(IMU_BMI270_ERROR_CHIP_ID);
     return 0U;
   }
 
-  imu_state.online = 1U;
   ImuBmi270_SetError(IMU_BMI270_ERROR_NONE);
   return 1U;
 }

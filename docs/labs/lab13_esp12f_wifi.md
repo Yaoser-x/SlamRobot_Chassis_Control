@@ -51,6 +51,13 @@ PC (esptool.py) ←──bin── USART1 ←── USART2 ←── ESP12F
 | UPPER_CMD_LINE_CTRL | ESP→STM | 远程启停巡线 |
 | STATUS | STM→ESP | 状态回传 |
 
+Web 控制安全状态机：
+
+- 无有效 EEPROM magic/version/length/CRC 记录时，只启动开放 `F407_Chassis_Setup`，接受 8–63 字节密码；配置前不启动 WebSocket。
+- 首个 `claim` 的客户端成为 owner；500ms 租约由 200ms `heartbeat` 续租，其他客户端只读遥测。
+- `vel`/`stop`/`line` 仅 owner 可用。owner 断开或超时立即发零速并释放控制权。
+- 任意客户端可设置 ESTOP，但 ESP 网页/固件和 STM32 远程协议都不接受 ESTOP=0。
+
 ### 4. ESP8266 下载模式
 
 ESP8266 进入下载模式需 GPIO0 拉低 + 复位脉冲：
@@ -83,7 +90,7 @@ espreset            → 复位 → ESP8266 正常启动
 | 类别 | 项目 |
 |------|------|
 | 硬件 | F407_V2.0 底盘、12V 电池、USB-TTL 串口模块、ESP12F 模块（已焊接） |
-| 软件 | 串口终端 + Python 3 + esptool.py（`pip install esptool`） |
+| 软件 | 串口终端 + Python 3 + esptool.py；Arduino IDE 验收使用 ESP8266 Core 3.1.2 + arduinoWebSockets 2.7.2 |
 
 ## 实验步骤
 
@@ -167,6 +174,13 @@ s
 ```
 
 **验证优先级**：ESP12F (优先级 3) > DEBUG (4)，所以网页命令会覆盖串口 `vel` 命令。
+
+追加安全验收：
+
+1. 擦除 EEPROM，确认只有 `F407_Chassis_Setup`；分别提交 7/8/63/64 字节密码，只有 8–63 字节成功。
+2. 同时连接两个浏览器：owner 可运动，readonly 继续收遥测但运动/巡线被拒绝。
+3. 关闭 owner 页面或停 heartbeat，500ms 内 `source` 应回 NONE 且 PWM 归零。
+4. readonly 可触发 ESTOP；急停后页面只显示“请本地解除”，必须在 USART1 执行 `estop 0`。
 
 ### 步骤 6：桥接溢流诊断
 

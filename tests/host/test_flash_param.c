@@ -4,6 +4,23 @@
 #include <stdio.h>
 #include <string.h>
 
+static uint32_t fake_primask;
+
+uint32_t __get_PRIMASK(void)
+{
+  return fake_primask;
+}
+
+void __disable_irq(void)
+{
+  fake_primask = 1U;
+}
+
+void __set_PRIMASK(uint32_t primask)
+{
+  fake_primask = primask;
+}
+
 static void require_int(int condition, const char *message)
 {
   if (!condition)

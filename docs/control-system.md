@@ -53,7 +53,7 @@
 | **ESTOP (紧急停止)** | `estop 1` 命令 | 清空全部控制源命令，拒绝所有新命令 |
 | **fault-stop (故障停止)** | 任一路 DRV8874 `nFAULT` 低有效 | 清空全部命令、EN=0 停止输出并进入 PH/EN 低侧慢衰减制动；注：**不**拉低 DRV_SLEEP_ALL（仅 fatal loop 和 HardFault 才会拉低 SLEEP） |
 | **DRV 故障锁存** | DRV8874 nFAULT 拉低 | 触发 fault-stop，锁存 error flag。ADC 电流当前只用于日志诊断，`MOTOR_ADC_OVERCURRENT_FAULT_ENABLED=0U` 表示不使用 ADC 峰值触发 fault-stop |
-| **硬件 Break** | TIM1_BKIN PE15 或 TIM8_BKIN PA6 被拉低 | 硬件立即清除对应定时器 MOE，切断 PWM；信号释放后 Automatic Output 在下一更新事件自动恢复 MOE。**当前未实现软件 ESTOP 回调**（`HAL_TIMEx_BreakCallback` 缺失，Break 不触发软件 ESTOP 标志） |
+| **硬件 Break** | 共享 nFAULT 网络拉低 PE15/TIM1_BKIN 与 PA6/TIM8_BKIN | TIM1 立即清 MOE/CCR，Automatic Output 禁用并软件锁存；只有 BKIN/nFAULT 释放且 PWM 全零时才可清除。TIM8 只记录同网冗余 BIF/count/last_ms，不重复锁存 |
 | **RTOS 异常** | `configASSERT` / 栈溢出 / malloc 失败 / 任务创建失败 | 拉低 `DRV_SLEEP_ALL`，进入 fatal loop（不自动复位，保留故障现场） |
 
 ### 3.2 命令拒绝规则
@@ -76,6 +76,14 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 - **手动覆盖**：PS2 摇杆操作时 LINE 被优先级仲裁自动跳过
 
 ---
+
+### 3.3 P0 运动安全
+
+- ParamStore generation 快照供 ControlManager、ChassisControl 和 EncoderDriver 同代消费；代际变化清 PID/斜坡。方向仍由 `ChassisLayout` 编译期配置。
+- 维护锁先阻止新命令，再清控制源/raw/open-loop/PWM 并确认编码器静止。raw/open-loop 租约 400ms；Release 还需本地 `maint arm` 60s 授权。
+- 维护、ESTOP 和 fault-stop 首次置位都会递增 motion-revoke generation；此前启用的 LINE 和自动续发 DEBUG `vel` 会失效，解除安全锁后必须重新执行 `line on` 或发送新的本地 `vel`，不会恢复旧运动模式。
+- 正常闭环任一 enabled encoder 无效，或 RUN/PWM 有效时非零 requested target 持续 150ms 无运动，当前 motorTask 周期立即整车停车并锁存 bit17。
+- PS2 非巡线中位提交零速；巡线中位让权给 LINE。L1/R1=±90°，L2/R2=±360°，使用 IMU yaw 增量累计。
 
 ## 4. FreeRTOS 任务模型
 
@@ -155,4 +163,4 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 - **`vel` 闭环**：应在电压/电流/编码器方向/DRV fault/raw 方向全部确认后执行，从低速（50 mm/s）开始
 - **IMU / PS2 / ESP12F / 巡线**：离线不阻塞底盘实验，状态在 `status` 中可见
 - **巡线安全**：默认不启用；需 PS2/ESP12F/调试台显式开启；PS2 摇杆随时可覆盖；丢线自动退让不锁死
-- **ESP12F flash bridge**：维护功能。active 期间 USART1 被二进制透传接管，普通调试命令不可用；30s 无活动自动退出
+- **ESP12F flash bridge**：维护功能。进入前获取统一维护锁并确认静止，active 全生命周期拒绝所有控制源；USART1 被二进制透传接管，30s 无活动自动退出并释放锁

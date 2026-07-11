@@ -12,6 +12,7 @@
 #include "encoder_math.h"
 #include "imu_bmi270.h"
 #include "motor_output_logic.h"
+#include "param_store.h"
 #include "pid_controller.h"
 #include "upper_protocol.h"
 
@@ -321,21 +322,111 @@ static void test_control_priority_timeout_and_reject_stop(void)
   require_int(ControlManager_GetCommand(&snapshot, 701U) == 0U, "reject clears source");
 }
 
+static void test_control_manager_uses_runtime_limits(void)
+{
+  chassis_cmd_t cmd = {
+    .linear_x = 1.0f,
+    .angular_z = 2.0f,
+    .enable = 1U,
+    .source = CONTROL_SOURCE_DEBUG,
+    .timestamp_ms = 100U,
+  };
+  chassis_cmd_t snapshot;
+  param_store_t params;
+
+  ParamStore_Defaults(&params);
+  params.max_linear_mps = 0.2f;
+  params.max_angular_rps = 0.5f;
+  require_int(ParamStore_Set(&params) != 0U, "runtime limits accepted");
+  ControlManager_Init();
+
+  require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED,
+              "runtime-limited command accepted");
+  require_int(ControlManager_GetCommand(&snapshot, 100U) != 0U,
+              "runtime-limited command available");
+  require_close(snapshot.linear_x, 0.2f, 0.0001f, "runtime linear limit applied");
+  require_close(snapshot.angular_z, 0.5f, 0.0001f, "runtime angular limit applied");
+  ParamStore_SetDefaults();
+}
+
+static void test_control_manager_maintenance_rejects_commands(void)
+{
+  chassis_cmd_t cmd = {
+    .linear_x = 0.1f,
+    .angular_z = 0.0f,
+    .enable = 1U,
+    .source = CONTROL_SOURCE_DEBUG,
+    .timestamp_ms = 200U,
+  };
+  chassis_cmd_t snapshot;
+  uint32_t revoke_generation;
+
+  ControlManager_Init();
+  revoke_generation = ControlManager_GetMotionRevokeGeneration();
+  require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED,
+              "command exists before maintenance");
+  require_int(ControlManager_BeginMaintenance() != 0U, "maintenance lock acquired");
+  require_int(ControlManager_GetMotionRevokeGeneration() == revoke_generation + 1U,
+              "maintenance revokes persistent motion producers");
+  require_int(ControlManager_IsMaintenanceLocked() != 0U, "maintenance lock visible");
+  require_int(ControlManager_BeginMaintenance() == 0U, "nested maintenance lock rejected");
+  require_int(ControlManager_IsMaintenanceLocked() != 0U,
+              "rejected nested begin preserves original lock");
+  require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED,
+              "maintenance rejects commands");
+  require_int(ControlManager_GetCommand(&snapshot, 200U) == 0U,
+              "maintenance exposes no active command");
+  ControlManager_EndMaintenance();
+  require_int(ControlManager_IsMaintenanceLocked() == 0U, "maintenance lock released");
+  require_int(ControlManager_GetCommand(&snapshot, 200U) == 0U,
+              "released maintenance does not restore stale command");
+}
+
+static void test_stale_motion_generation_cannot_submit_after_safety_window(void)
+{
+  chassis_cmd_t cmd = {
+    .linear_x = 0.1f,
+    .angular_z = 0.0f,
+    .enable = 1U,
+    .source = CONTROL_SOURCE_DEBUG,
+    .timestamp_ms = 210U,
+  };
+  uint32_t stale_generation;
+
+  ControlManager_Init();
+  stale_generation = ControlManager_GetMotionRevokeGeneration();
+  require_int(ControlManager_BeginMaintenance() != 0U, "maintenance starts safety window");
+  ControlManager_EndMaintenance();
+  require_int(ControlManager_SetCommandForGeneration(&cmd, stale_generation) ==
+                CONTROL_COMMAND_REJECTED,
+              "stale producer token cannot submit after maintenance");
+  require_int(ControlManager_SetCommandForGeneration(
+                &cmd, ControlManager_GetMotionRevokeGeneration()) == CONTROL_COMMAND_ACCEPTED,
+              "current producer token accepts a new command");
+}
+
 static void test_control_stop_recovery_requires_new_command(void)
 {
   chassis_cmd_t cmd = { .linear_x = 0.2f, .angular_z = 0.0f, .enable = 1U, .source = CONTROL_SOURCE_UPPER, .timestamp_ms = 100U };
   chassis_cmd_t snapshot = {0};
+  uint32_t revoke_generation;
 
   ControlManager_Init();
+  revoke_generation = ControlManager_GetMotionRevokeGeneration();
   require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before estop");
   ControlManager_SetEmergencyStop(1U);
+  require_int(ControlManager_GetMotionRevokeGeneration() == revoke_generation + 1U,
+              "estop revokes persistent motion producers");
   require_int(ControlManager_GetCommand(&snapshot, 110U) == 0U, "estop blocks command");
   ControlManager_SetEmergencyStop(0U);
   require_int(ControlManager_GetCommand(&snapshot, 111U) == 0U, "estop recovery does not revive command");
 
   cmd.timestamp_ms = 120U;
+  revoke_generation = ControlManager_GetMotionRevokeGeneration();
   require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before fault");
   ControlManager_SetFaultStop(1U);
+  require_int(ControlManager_GetMotionRevokeGeneration() == revoke_generation + 1U,
+              "fault stop revokes persistent motion producers");
   ControlManager_SetFaultStop(0U);
   require_int(ControlManager_GetCommand(&snapshot, 121U) == 0U, "fault recovery does not revive command");
 }
@@ -720,6 +811,36 @@ static void test_pid_conditional_anti_windup(void)
   require_close(pid.integral, 0.0f, 0.001f, "internal positive saturation freezes positive integral");
 }
 
+static void test_pid_external_output_bounds(void)
+{
+  pid_state_t pid = {0};
+  pid_params_t params = { .kp = 0.0f, .ki = 1.0f, .kd = 0.0f,
+                          .integral_limit = 100.0f, .output_limit = 500.0f };
+  float output;
+
+  PidController_Init(&pid, &params);
+  (void)PidController_Step(&pid, 1.0f, 0.0f, 1.0f);
+  output = PidController_StepBounded(&pid, 1.0f, 0.0f, 1.0f, 0, -10.0f, 1.0f);
+  require_close(output, 1.0f, 0.001f, "external positive bound clamps correction");
+  require_close(pid.integral, 1.0f, 0.001f, "external positive saturation freezes integral");
+
+  output = PidController_StepBounded(&pid, -1.0f, 0.0f, 1.0f, 0, -10.0f, 1.0f);
+  require_close(output, 0.0f, 0.001f, "opposite error leaves positive saturation");
+  require_close(pid.integral, 0.0f, 0.001f, "opposite error unwinds externally limited integral");
+
+  PidController_Reset(&pid);
+  (void)PidController_Step(&pid, -1.0f, 0.0f, 1.0f);
+  output = PidController_StepBounded(&pid, -1.0f, 0.0f, 1.0f, 0, -1.0f, 10.0f);
+  require_close(output, -1.0f, 0.001f, "external negative bound is symmetric");
+  require_close(pid.integral, -1.0f, 0.001f, "external negative saturation freezes integral");
+
+  params.kp = 1000.0f;
+  params.ki = 0.0f;
+  PidController_Init(&pid, &params);
+  output = PidController_StepBounded(&pid, 1.0f, 0.0f, 1.0f, 0, -900.0f, 900.0f);
+  require_close(output, 500.0f, 0.001f, "internal PID limit intersects wider external bound");
+}
+
 static void test_control_dt_uses_measured_period_and_rejects_long_gap(void)
 {
   uint32_t last_step_ms = 0U;
@@ -771,6 +892,9 @@ int main(void)
   test_status_v2_payload_layout_and_saturation();
   test_imu_status_payload_extended_layout();
   test_control_priority_timeout_and_reject_stop();
+  test_control_manager_uses_runtime_limits();
+  test_control_manager_maintenance_rejects_commands();
+  test_stale_motion_generation_cannot_submit_after_safety_window();
   test_control_stop_recovery_requires_new_command();
   test_side_target_distribution();
   test_default_motor_layout();
@@ -790,6 +914,7 @@ int main(void)
   test_pid_zero_dt_returns_zero();
   test_pid_direction_reversal_resets();
   test_pid_conditional_anti_windup();
+  test_pid_external_output_bounds();
   test_control_dt_uses_measured_period_and_rejects_long_gap();
   test_chassis_math_differential();
   (void)printf("PASS: f407_v2 host tests\n");

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "motor_driver.h"
+#include "bsp_config.h"
 #include "tim.h"
 
 GPIO_TypeDef GPIOA_Instance = { .id = 0x0A };
@@ -22,6 +23,8 @@ static GPIO_PinState gpio_state_e[16];
 static uint8_t pwm_start_count_tim1;
 static uint8_t pwm_start_count_tim8;
 static uint32_t fake_tick_ms;
+static uint32_t release_startup_inputs_after_ms;
+static uint32_t delayed_ms;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -135,7 +138,12 @@ GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *port, uint16_t pin)
 
 void HAL_Delay(uint32_t delay_ms)
 {
-  (void)delay_ms;
+  delayed_ms += delay_ms;
+  if (release_startup_inputs_after_ms != 0U && delayed_ms >= release_startup_inputs_after_ms)
+  {
+    gpio_state_e[pin_index(TIM1_BKIN_Pin)] = GPIO_PIN_SET;
+    gpio_state_d[pin_index(M3_FAULT_Pin)] = GPIO_PIN_SET;
+  }
 }
 
 static void require_int(int condition, const char *message)
@@ -166,6 +174,8 @@ static void reset_fake_hw(void)
   }
   pwm_start_count_tim1 = 0U;
   pwm_start_count_tim8 = 0U;
+  release_startup_inputs_after_ms = 0U;
+  delayed_ms = 0U;
 }
 
 static void test_motor_driver_uses_gpio_for_phase(void)
@@ -402,9 +412,11 @@ static void test_tim1_break_latches_until_safe_manual_clear(void)
     MotorDriver_SetPermille(MOTOR_ID_M3, 300);
   }
   tim1_instance.SR |= TIM_FLAG_BREAK;
+  fake_tick_ms = 1234U;
   MotorDriver_OnTim1BreakFromIsr();
   MotorDriver_GetState(&state);
   require_int(state.tim1_break_latched != 0U, "TIM1 break remains latched after pulse");
+  require_int(state.tim1_break_last_ms == 1234U, "TIM1 break records ISR timestamp");
   require_int((tim1_instance.BDTR & TIM_BDTR_MOE) == 0U, "TIM1 break clears MOE");
   require_int(tim1_instance.CCR1 == 0U && tim1_instance.CCR2 == 0U &&
               tim1_instance.CCR3 == 0U && tim1_instance.CCR4 == 0U,
@@ -424,7 +436,23 @@ static void test_tim1_break_latches_until_safe_manual_clear(void)
   require_int((tim1_instance.BDTR & TIM_BDTR_MOE) != 0U, "safe clear re-enables TIM1 outputs");
 }
 
-static void test_tim1_break_before_driver_init_is_not_lost(void)
+static void test_tim8_break_is_timestamped_redundant_diagnostic_only(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  MotorDriver_Init();
+  fake_tick_ms = 2345U;
+  tim8_instance.SR |= TIM_FLAG_BREAK;
+  MotorDriver_UpdateFaults();
+  MotorDriver_GetState(&state);
+
+  require_int(state.tim8_break_count == 1UL, "TIM8 break diagnostic is counted");
+  require_int(state.tim8_break_last_ms == 2345U, "TIM8 break diagnostic is timestamped");
+  require_int(state.tim1_break_latched == 0U, "TIM8 shared-net diagnostic does not create second latch");
+}
+
+static void test_pre_wake_tim1_break_is_cleared_after_inputs_stabilize(void)
 {
   motor_driver_state_t state;
 
@@ -432,10 +460,41 @@ static void test_tim1_break_before_driver_init_is_not_lost(void)
   tim1_instance.SR |= TIM_FLAG_BREAK;
   MotorDriver_Init();
   MotorDriver_GetState(&state);
+  require_int(state.tim1_break_latched == 0U,
+              "pre-wake TIM1 break is not treated as a runtime fault after stable high inputs");
+  require_int(state.startup_qualified != 0U,
+              "stable BKIN and nFAULT inputs qualify startup");
+}
+
+static void test_startup_low_bkin_latches_break_and_keeps_outputs_disabled(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  gpio_state_e[pin_index(TIM1_BKIN_Pin)] = GPIO_PIN_RESET;
+  MotorDriver_Init();
+  MotorDriver_GetState(&state);
   require_int(state.tim1_break_latched != 0U,
-              "TIM1 break pending before driver init remains latched");
+              "BKIN held low through startup qualification latches break");
+  require_int(state.startup_qualified == 0U,
+              "low BKIN cannot qualify startup");
+  require_int(state.break_origin == MOTOR_BREAK_ORIGIN_STARTUP_TIMEOUT,
+              "startup qualification timeout is recorded as break origin");
   require_int((tim1_instance.BDTR & TIM_BDTR_MOE) == 0U,
-              "startup TIM1 break keeps main output disabled");
+              "failed startup qualification keeps main output disabled");
+}
+
+static void test_startup_transient_must_recover_then_remain_stable(void)
+{
+  motor_driver_state_t state;
+
+  reset_fake_hw();
+  gpio_state_e[pin_index(TIM1_BKIN_Pin)] = GPIO_PIN_RESET;
+  release_startup_inputs_after_ms = DRV8874_WAKE_DELAY_MS + 3U;
+  MotorDriver_Init();
+  MotorDriver_GetState(&state);
+  require_int(state.startup_qualified != 0U && state.tim1_break_latched == 0U,
+              "brief wake transient is accepted only after a stable-high window");
 }
 
 int main(void)
@@ -446,7 +505,10 @@ int main(void)
   test_motor_driver_serializes_phase_switches();
   test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely();
   test_motor_driver_effective_pwm_and_fault_edges();
+  test_tim8_break_is_timestamped_redundant_diagnostic_only();
   test_tim1_break_latches_until_safe_manual_clear();
-  test_tim1_break_before_driver_init_is_not_lost();
+  test_pre_wake_tim1_break_is_cleared_after_inputs_stabilize();
+  test_startup_low_bkin_latches_break_and_keeps_outputs_disabled();
+  test_startup_transient_must_recover_then_remain_stable();
   return 0;
 }

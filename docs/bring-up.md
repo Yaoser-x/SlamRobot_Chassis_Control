@@ -186,9 +186,11 @@ esptool.py --chip esp8266 --port COMx --baud 115200 chip_id
 
 **确认项**：
 - 复位整板后 ESP12F 正常启动（`espflash status` 显示 inactive）
-- WiFi AP 出现并可连接
-- 网页控制界面可正常访问
-- 通过网页发送运动命令，`status` 中 `source` 显示为 `UPPER(1)` 或 `ESP12F(3)`
+- 擦除 EEPROM 后仅出现开放 `F407_Chassis_Setup`；7/64 字节密码拒绝，8/63 字节接受并重启。重启后出现受密码保护的 `F407_Chassis`。
+- 配置完成前 WebSocket 不启动，无法发送运动。
+- 两个网页客户端中首个 claimant 为 owner，另一个只读但仍收到遥测。非 owner 运动/巡线/普通停止被拒绝。
+- owner 停 heartbeat 或断开后 500ms 内停车并释放控制权。任意客户端可设置 ESTOP，但网页/固件不能解除，须本地 `estop 0`。
+- 通过 owner 网页发送运动命令，`status` 中 `source` 显示 `ESP12F(3)`。
 
 ---
 

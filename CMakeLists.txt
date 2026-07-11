@@ -45,14 +45,17 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add user-maintained sources to executable
 set(F407_APP_BSP_SOURCES
     App/chassis/chassis_control.c
+    App/chassis/chassis_maintenance.c
     App/chassis/chassis_math.c
     App/chassis/chassis_task_timing.c
     App/chassis/chassis_tasks.c
     App/control/control_manager.c
     App/control/line_control.c
     App/control/ps2_control.c
+    App/control/relative_yaw_control.c
     App/current/current_guard.c
     App/debug/reset_trace.c
+    App/debug/debug_maintenance_policy.c
     App/debug/usart1_debug_console.c
     App/display/oled_ui.c
     App/display/oled_selfcheck.c
@@ -116,7 +119,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
+    $<$<CONFIG:Release>:DEBUG_CONSOLE_RELEASE_REQUIRES_ARM=1>
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

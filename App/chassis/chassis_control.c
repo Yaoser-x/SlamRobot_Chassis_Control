@@ -4,12 +4,15 @@
 #include "chassis_config.h"
 #include "chassis_layout.h"
 #include "chassis_math.h"
+#include "cmsis_os2.h"
 #include "control_manager.h"
 #include "current_guard.h"
 #include "encoder_driver.h"
 #include "main.h"
 #include "motor_driver.h"
+#include "param_store.h"
 #include "pid_controller.h"
+#include "system_monitor.h"
 
 static chassis_control_state_t chassis_state;
 static uint8_t open_loop_test_enabled;
@@ -21,16 +24,16 @@ static float ramped_linear_x;
 static float ramped_angular_z;
 static float last_pid_target_mps[MOTOR_ID_COUNT];
 static uint8_t feedback_loss_count[MOTOR_ID_COUNT];
+static uint32_t feedback_no_motion_since_ms[MOTOR_ID_COUNT];
+static uint8_t feedback_no_motion_active[MOTOR_ID_COUNT];
 static pid_state_t pid_motor[MOTOR_ID_COUNT];
 static uint32_t last_control_step_ms;
 static uint8_t control_dt_initialized;
-
-static const pid_params_t pid_params[MOTOR_ID_COUNT] = {
-  { CHASSIS_PID_KP_M1, CHASSIS_PID_KI_M1, CHASSIS_PID_KD_M1, CHASSIS_PID_INTEGRAL_LIMIT, CHASSIS_PID_CORRECTION_LIMIT },
-  { CHASSIS_PID_KP_M2, CHASSIS_PID_KI_M2, CHASSIS_PID_KD_M2, CHASSIS_PID_INTEGRAL_LIMIT, CHASSIS_PID_CORRECTION_LIMIT },
-  { CHASSIS_PID_KP_M3, CHASSIS_PID_KI_M3, CHASSIS_PID_KD_M3, CHASSIS_PID_INTEGRAL_LIMIT, CHASSIS_PID_CORRECTION_LIMIT },
-  { CHASSIS_PID_KP_M4, CHASSIS_PID_KI_M4, CHASSIS_PID_KD_M4, CHASSIS_PID_INTEGRAL_LIMIT, CHASSIS_PID_CORRECTION_LIMIT },
-};
+static volatile uint8_t control_step_active;
+static uint32_t test_mode_last_refresh_ms;
+static uint8_t test_mode_lease_active;
+static param_store_t runtime_params;
+static uint32_t runtime_params_generation;
 
 static int16_t ChassisControl_ClampPermille(int32_t permille)
 {
@@ -63,13 +66,25 @@ static int8_t ChassisControl_TargetSign(float value)
   return 0;
 }
 
-void ChassisControl_ResolveSideTargets(float linear_x, float angular_z, float *left_mps, float *right_mps)
+static void ChassisControl_ResolveSideTargetsWithParams(float linear_x,
+                                                       float angular_z,
+                                                       const param_store_t *params,
+                                                       float *left_mps,
+                                                       float *right_mps)
 {
   ChassisMath_ResolveDifferentialTargets(linear_x,
                                          angular_z,
-                                         CHASSIS_WHEEL_BASE_M,
+                                         params->track_width_m,
                                          left_mps,
                                          right_mps);
+}
+
+void ChassisControl_ResolveSideTargets(float linear_x, float angular_z, float *left_mps, float *right_mps)
+{
+  param_store_t params;
+
+  (void)ParamStore_GetSnapshot(&params);
+  ChassisControl_ResolveSideTargetsWithParams(linear_x, angular_z, &params, left_mps, right_mps);
 }
 
 static float ChassisControl_RampToward(float current, float target, float step)
@@ -105,10 +120,116 @@ static void ChassisControl_ResetPidTargets(void)
   {
     last_pid_target_mps[i] = 0.0f;
     feedback_loss_count[i] = 0U;
+    feedback_no_motion_since_ms[i] = 0UL;
+    feedback_no_motion_active[i] = 0U;
     chassis_state.motor_feedback_lost[i] = 0U;
   }
   chassis_state.left_feedback_lost = 0U;
   chassis_state.right_feedback_lost = 0U;
+}
+
+static uint8_t ChassisControl_FeedbackFaultDetected(uint32_t now_ms,
+                                                    const encoder_state_t *encoder_state,
+                                                    const motor_driver_state_t *motor_state)
+{
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+    {
+      feedback_no_motion_active[i] = 0U;
+      continue;
+    }
+    if (encoder_state->speed_valid[i] == 0U)
+    {
+      chassis_state.motor_feedback_lost[i] = 1U;
+      return 1U;
+    }
+    if (ChassisControl_AbsFloat(chassis_state.motor_requested_mps[i]) <
+          CHASSIS_PID_FEEDBACK_MIN_TARGET_MPS ||
+        ChassisControl_AbsFloat(encoder_state->speed_mps[i]) >=
+          CHASSIS_PID_FEEDBACK_MIN_SPEED_MPS)
+    {
+      feedback_no_motion_active[i] = 0U;
+      continue;
+    }
+    if (motor_state->phase[i] != MOTOR_DRIVER_PHASE_RUN ||
+        motor_state->effective_pwm[i] == 0)
+    {
+      feedback_no_motion_active[i] = 0U;
+      continue;
+    }
+    if (feedback_no_motion_active[i] == 0U)
+    {
+      feedback_no_motion_active[i] = 1U;
+      feedback_no_motion_since_ms[i] = now_ms;
+    }
+    else if ((uint32_t)(now_ms - feedback_no_motion_since_ms[i]) >=
+             CHASSIS_ENCODER_FEEDBACK_TIMEOUT_MS)
+    {
+      chassis_state.motor_feedback_lost[i] = 1U;
+      return 1U;
+    }
+  }
+  return 0U;
+}
+
+static uint8_t ChassisControl_RefreshRuntimeParams(void)
+{
+  param_store_t params;
+  uint32_t generation = ParamStore_GetSnapshot(&params);
+
+  if (generation == runtime_params_generation)
+  {
+    return 0U;
+  }
+
+  runtime_params = params;
+  runtime_params_generation = generation;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    pid_params_t pid_params = {
+      params.pid_kp[i],
+      params.pid_ki[i],
+      params.pid_kd[i],
+      params.pid_integral_limit,
+      CHASSIS_PID_CORRECTION_LIMIT,
+    };
+
+    if (pid_motor[i].initialized == 0U)
+    {
+      PidController_Init(&pid_motor[i], &pid_params);
+    }
+    else
+    {
+      PidController_SetParams(&pid_motor[i], &pid_params);
+    }
+  }
+  ChassisControl_ResetRamps();
+  ChassisControl_ResetPidTargets();
+  return 1U;
+}
+
+static void ChassisControl_ClearTestModeUnsafe(void)
+{
+  open_loop_test_enabled = 0U;
+  raw_input_test_enabled = 0U;
+  test_mode_lease_active = 0U;
+  open_loop_side[MOTOR_SIDE_LEFT] = 0;
+  open_loop_side[MOTOR_SIDE_RIGHT] = 0;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    raw_forward[i] = 0;
+    raw_reverse[i] = 0;
+  }
+}
+
+void ChassisControl_CancelTestMode(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  ChassisControl_ClearTestModeUnsafe();
+  __set_PRIMASK(primask);
 }
 
 static void ChassisControl_ScaleWheelTargets(float *left_mps, float *right_mps)
@@ -347,7 +468,8 @@ static int16_t ChassisControl_StepMotorPid(motor_id_t motor,
                                           float actual_mps,
                                           uint8_t speed_valid,
                                           float dt_s,
-                                          int8_t actuator_limit_direction)
+                                          int8_t actuator_limit_direction,
+                                          int16_t base_permille)
 {
   int8_t last_sign;
   int8_t target_sign;
@@ -372,13 +494,15 @@ static int16_t ChassisControl_StepMotorPid(motor_id_t motor,
   last_pid_target_mps[motor] = target_mps;
 
   chassis_state.motor_error_mps[motor] = target_mps - actual_mps;
-  pid_out = PidController_StepLimited(&pid_motor[motor],
+  pid_out = PidController_StepBounded(&pid_motor[motor],
                                       target_mps,
                                       actual_mps,
                                       dt_s,
-                                      actuator_limit_direction);
+                                      actuator_limit_direction,
+                                      (float)(-CHASSIS_PWM_MAX_PERMILLE - base_permille),
+                                      (float)(CHASSIS_PWM_MAX_PERMILLE - base_permille));
   chassis_state.motor_pid_active[motor] = 1U;
-  return ChassisControl_ClampPermille((int32_t)ChassisControl_MpsToPermille(target_mps) + (int32_t)pid_out);
+  return ChassisControl_ClampPermille((int32_t)base_permille + (int32_t)pid_out);
 }
 
 static void ChassisControl_StopOutput(void)
@@ -403,14 +527,16 @@ void ChassisControl_Init(void)
   MotorDriver_Init();
   MotorDriver_SetSpeedGetter(EncoderDriver_GetMotorSpeedMps);
   ControlManager_Init();
-  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-  {
-    PidController_Init(&pid_motor[i], &pid_params[i]);
-  }
   CurrentGuard_Init();
   chassis_state = (chassis_control_state_t){0};
+  pid_motor[0] = (pid_state_t){0};
+  pid_motor[1] = (pid_state_t){0};
+  pid_motor[2] = (pid_state_t){0};
+  pid_motor[3] = (pid_state_t){0};
+  runtime_params_generation = 0UL;
   last_control_step_ms = 0U;
   control_dt_initialized = 0U;
+  control_step_active = 0U;
   open_loop_test_enabled = 0U;
   raw_input_test_enabled = 0U;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -420,24 +546,34 @@ void ChassisControl_Init(void)
   }
   open_loop_side[MOTOR_SIDE_LEFT] = 0;
   open_loop_side[MOTOR_SIDE_RIGHT] = 0;
+  test_mode_last_refresh_ms = 0UL;
+  test_mode_lease_active = 0U;
+  (void)ChassisControl_RefreshRuntimeParams();
   ChassisControl_ResetRamps();
   ChassisControl_ResetPidTargets();
   MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
 }
 
-void ChassisControl_Step(uint32_t now_ms)
+static void ChassisControl_StepImpl(uint32_t now_ms)
 {
   chassis_cmd_t cmd;
   encoder_state_t encoder_state;
   uint8_t valid_cmd;
+  uint8_t open_loop_active;
+  uint8_t raw_input_active;
+  uint8_t test_mode_expired = 0U;
+  int16_t open_loop_snapshot[2];
+  int16_t raw_forward_snapshot[MOTOR_ID_COUNT];
+  int16_t raw_reverse_snapshot[MOTOR_ID_COUNT];
+  uint32_t primask;
   float dt_s;
 
+  (void)ChassisControl_RefreshRuntimeParams();
   MotorDriver_UpdateFaults();
   if (MotorDriver_HasFault() != 0U)
   {
     ControlManager_SetFaultStop(1U);
   }
-  valid_cmd = ControlManager_GetCommand(&cmd, now_ms);
   EncoderDriver_GetState(&encoder_state);
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
@@ -445,6 +581,41 @@ void ChassisControl_Step(uint32_t now_ms)
     chassis_state.motor_speed_valid[i] = encoder_state.speed_valid[i];
   }
 
+  if (ControlManager_IsMaintenanceLocked() != 0U ||
+      ControlManager_IsEmergencyStop() != 0U ||
+      ControlManager_IsFaultStop() != 0U)
+  {
+    ChassisControl_CancelTestMode();
+    ChassisControl_EmergencyStop();
+    return;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  if (test_mode_lease_active != 0U &&
+      (uint32_t)(now_ms - test_mode_last_refresh_ms) > CHASSIS_TEST_MODE_LEASE_MS)
+  {
+    ChassisControl_ClearTestModeUnsafe();
+    test_mode_expired = 1U;
+  }
+  open_loop_active = open_loop_test_enabled;
+  raw_input_active = raw_input_test_enabled;
+  open_loop_snapshot[MOTOR_SIDE_LEFT] = open_loop_side[MOTOR_SIDE_LEFT];
+  open_loop_snapshot[MOTOR_SIDE_RIGHT] = open_loop_side[MOTOR_SIDE_RIGHT];
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    raw_forward_snapshot[i] = raw_forward[i];
+    raw_reverse_snapshot[i] = raw_reverse[i];
+  }
+  __set_PRIMASK(primask);
+  if (test_mode_expired != 0U)
+  {
+    ControlManager_ClearCommand();
+    ChassisControl_StopOutput();
+    return;
+  }
+
+  valid_cmd = ControlManager_GetCommand(&cmd, now_ms);
   if (ChassisMath_ControlDt(now_ms,
                             &last_control_step_ms,
                             &control_dt_initialized,
@@ -455,12 +626,6 @@ void ChassisControl_Step(uint32_t now_ms)
       PidController_Reset(&pid_motor[i]);
     }
     ChassisControl_StopOutput();
-    return;
-  }
-
-  if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
-  {
-    ChassisControl_EmergencyStop();
     return;
   }
 
@@ -475,7 +640,7 @@ void ChassisControl_Step(uint32_t now_ms)
     }
   }
 
-  if (open_loop_test_enabled != 0U)
+  if (open_loop_active != 0U)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -487,8 +652,8 @@ void ChassisControl_Step(uint32_t now_ms)
       {
         ChassisControl_SetMotorOutput((motor_id_t)i,
                                       ChassisControl_SelectSideValue((motor_id_t)i,
-                                                                    (float)open_loop_side[MOTOR_SIDE_LEFT],
-                                                                    (float)open_loop_side[MOTOR_SIDE_RIGHT]));
+                                                                    (float)open_loop_snapshot[MOTOR_SIDE_LEFT],
+                                                                    (float)open_loop_snapshot[MOTOR_SIDE_RIGHT]));
       }
       else
       {
@@ -502,7 +667,7 @@ void ChassisControl_Step(uint32_t now_ms)
     return;
   }
 
-  if (raw_input_test_enabled != 0U)
+  if (raw_input_active != 0U)
   {
     adc_monitor_state_t adc_state;
 
@@ -513,7 +678,8 @@ void ChassisControl_Step(uint32_t now_ms)
       chassis_state.motor_current_limited[i] = 0U;
       if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
       {
-        int16_t target = ChassisControl_ClampPermille((int32_t)raw_forward[i] - (int32_t)raw_reverse[i]);
+        int16_t target = ChassisControl_ClampPermille((int32_t)raw_forward_snapshot[i] -
+                                                      (int32_t)raw_reverse_snapshot[i]);
         int16_t applied = target;
         applied = ChassisControl_ApplyCurrentLimit((motor_id_t)i,
                                                    applied,
@@ -540,12 +706,13 @@ void ChassisControl_Step(uint32_t now_ms)
 
   if (valid_cmd != 0U)
   {
+    motor_driver_state_t motor_state;
     float req_left;
     float req_right;
     float ramp_left;
     float ramp_right;
-    float linear_step = CHASSIS_SPEED_RAMP_MPS2 * dt_s;
-    float angular_step = CHASSIS_ANGULAR_RAMP_RPS2 * dt_s;
+    float linear_step = runtime_params.speed_ramp_mps2 * dt_s;
+    float angular_step = runtime_params.angular_ramp_rps2 * dt_s;
 
     if (ChassisLayout_HasBothSides() == 0U)
     {
@@ -554,15 +721,27 @@ void ChassisControl_Step(uint32_t now_ms)
       return;
     }
 
-    ChassisControl_ResolveSideTargets(cmd.linear_x, cmd.angular_z, &req_left, &req_right);
+    ChassisControl_ResolveSideTargetsWithParams(cmd.linear_x, cmd.angular_z, &runtime_params, &req_left, &req_right);
     ChassisControl_ScaleWheelTargets(&req_left, &req_right);
     ChassisControl_SetSideTargets(req_left, req_right, 1U);
 
     ramped_linear_x = ChassisControl_RampToward(ramped_linear_x, cmd.linear_x, linear_step);
     ramped_angular_z = ChassisControl_RampToward(ramped_angular_z, cmd.angular_z, angular_step);
-    ChassisControl_ResolveSideTargets(ramped_linear_x, ramped_angular_z, &ramp_left, &ramp_right);
+    ChassisControl_ResolveSideTargetsWithParams(ramped_linear_x,
+                                               ramped_angular_z,
+                                               &runtime_params,
+                                               &ramp_left,
+                                               &ramp_right);
     ChassisControl_ScaleWheelTargets(&ramp_left, &ramp_right);
     ChassisControl_SetSideTargets(ramp_left, ramp_right, 0U);
+
+    MotorDriver_GetState(&motor_state);
+    if (ChassisControl_FeedbackFaultDetected(now_ms, &encoder_state, &motor_state) != 0U)
+    {
+      SystemMonitor_LatchEncoderFeedbackFault();
+      ChassisControl_EmergencyStop();
+      return;
+    }
 
     if (req_left == 0.0f && req_right == 0.0f)
     {
@@ -585,7 +764,6 @@ void ChassisControl_Step(uint32_t now_ms)
       int16_t permille;
       int16_t base_permille;
       int8_t actuator_limit_direction = 0;
-      motor_driver_state_t motor_state;
       if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
       {
         PidController_Reset(&pid_motor[i]);
@@ -596,7 +774,6 @@ void ChassisControl_Step(uint32_t now_ms)
         continue;
       }
       base_permille = ChassisControl_MpsToPermille(chassis_state.motor_target_mps[i]);
-      MotorDriver_GetState(&motor_state);
       if (chassis_state.motor_current_limited[i] != 0U ||
           ChassisControl_AbsFloat((float)motor_state.applied_pwm[i]) <
               ChassisControl_AbsFloat((float)motor_state.requested_pwm[i]))
@@ -623,7 +800,8 @@ void ChassisControl_Step(uint32_t now_ms)
                                                  chassis_state.motor_actual_mps[i],
                                                  feedback_usable,
                                                  dt_s,
-                                                 actuator_limit_direction);
+                                                 actuator_limit_direction,
+                                                 base_permille);
         }
       }
       else
@@ -644,14 +822,38 @@ void ChassisControl_Step(uint32_t now_ms)
   }
 }
 
+void ChassisControl_Step(uint32_t now_ms)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  control_step_active = 1U;
+  __set_PRIMASK(primask);
+  ChassisControl_StepImpl(now_ms);
+  primask = __get_PRIMASK();
+  __disable_irq();
+  control_step_active = 0U;
+  __set_PRIMASK(primask);
+}
+
+uint8_t ChassisControl_IsStepActive(void)
+{
+  uint8_t active;
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  active = control_step_active;
+  __set_PRIMASK(primask);
+  return active;
+}
+
 void ChassisControl_EmergencyStop(void)
 {
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     PidController_Reset(&pid_motor[i]);
   }
-  open_loop_test_enabled = 0U;
-  raw_input_test_enabled = 0U;
+  ChassisControl_CancelTestMode();
   ChassisControl_ResetRamps();
   ChassisControl_ResetPidTargets();
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -671,10 +873,16 @@ void ChassisControl_EmergencyStop(void)
 
 void ChassisControl_OpenLoopTest(int16_t left_permille, int16_t right_permille)
 {
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
   open_loop_side[MOTOR_SIDE_LEFT] = ChassisControl_ClampPermille(left_permille);
   open_loop_side[MOTOR_SIDE_RIGHT] = ChassisControl_ClampPermille(right_permille);
   open_loop_test_enabled = ((left_permille != 0) || (right_permille != 0)) ? 1U : 0U;
   raw_input_test_enabled = 0U;
+  test_mode_lease_active = open_loop_test_enabled;
+  test_mode_last_refresh_ms = osKernelGetTickCount();
+  __set_PRIMASK(primask);
 }
 
 void ChassisControl_RawInputTest(int16_t left_forward_permille,
@@ -682,6 +890,9 @@ void ChassisControl_RawInputTest(int16_t left_forward_permille,
                                  int16_t right_forward_permille,
                                  int16_t right_reverse_permille)
 {
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
@@ -718,14 +929,21 @@ void ChassisControl_RawInputTest(int16_t left_forward_permille,
     }
   }
   open_loop_test_enabled = 0U;
+  test_mode_lease_active = raw_input_test_enabled;
+  test_mode_last_refresh_ms = osKernelGetTickCount();
+  __set_PRIMASK(primask);
 }
 
 void ChassisControl_RawMotorInputTest(motor_id_t motor, int16_t forward_permille, int16_t reverse_permille)
 {
+  uint32_t primask;
+
   if ((uint32_t)motor >= MOTOR_ID_COUNT)
   {
     return;
   }
+  primask = __get_PRIMASK();
+  __disable_irq();
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     raw_forward[i] = 0;
@@ -735,6 +953,8 @@ void ChassisControl_RawMotorInputTest(motor_id_t motor, int16_t forward_permille
   {
     raw_input_test_enabled = 0U;
     open_loop_test_enabled = 0U;
+    test_mode_lease_active = 0U;
+    __set_PRIMASK(primask);
     return;
   }
   raw_forward[motor] = ChassisControl_ClampPermille(forward_permille);
@@ -749,6 +969,9 @@ void ChassisControl_RawMotorInputTest(motor_id_t motor, int16_t forward_permille
   }
   raw_input_test_enabled = ((raw_forward[motor] != 0) || (raw_reverse[motor] != 0)) ? 1U : 0U;
   open_loop_test_enabled = 0U;
+  test_mode_lease_active = raw_input_test_enabled;
+  test_mode_last_refresh_ms = osKernelGetTickCount();
+  __set_PRIMASK(primask);
 }
 
 void ChassisControl_GetState(chassis_control_state_t *state)

@@ -141,6 +141,13 @@ uint8_t UpperProtocol_Checksum8(const uint8_t *data, uint16_t length)
   return crc;
 }
 
+uint8_t UpperProtocol_RemoteEstopSetRequested(const uint8_t *payload, uint8_t payload_len)
+{
+  return (payload != 0 &&
+          payload_len == UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN &&
+          payload[0] != 0U) ? 1U : 0U;
+}
+
 uint16_t UpperProtocol_BuildFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len, uint8_t *out, uint16_t out_len)
 {
   uint8_t cmd_len = UPPER_PROTOCOL_CMD_LEN(payload_len);

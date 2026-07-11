@@ -92,6 +92,7 @@ typedef struct
 } upper_imu_status_payload_t;
 
 uint8_t UpperProtocol_Checksum8(const uint8_t *data, uint16_t length);
+uint8_t UpperProtocol_RemoteEstopSetRequested(const uint8_t *payload, uint8_t payload_len);
 uint16_t UpperProtocol_BuildFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len, uint8_t *out, uint16_t out_len);
 uint8_t UpperProtocol_ParseVelocityPayload(const uint8_t *payload, uint8_t payload_len, upper_velocity_payload_t *velocity);
 uint8_t UpperProtocol_BuildStatusPayload(const upper_status_payload_t *status, uint8_t *out, uint8_t out_len);

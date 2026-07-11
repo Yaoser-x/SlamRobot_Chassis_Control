@@ -2,11 +2,13 @@
 
 #include "bsp_config.h"
 #include "chassis_config.h"
+#include "main.h"
 
 #include <string.h>
 
 static param_store_t current_params;
 static uint8_t current_params_initialized;
+static uint32_t current_params_generation;
 
 typedef struct
 {
@@ -61,21 +63,53 @@ void ParamStore_Defaults(param_store_t *params)
 
 void ParamStore_SetDefaults(void)
 {
-  ParamStore_Defaults(&current_params);
+  param_store_t defaults;
+  uint32_t primask;
+
+  ParamStore_Defaults(&defaults);
+  primask = __get_PRIMASK();
+  __disable_irq();
+  current_params = defaults;
   current_params_initialized = 1U;
+  current_params_generation++;
+  __set_PRIMASK(primask);
 }
 
 void ParamStore_Get(param_store_t *params)
 {
+  (void)ParamStore_GetSnapshot(params);
+}
+
+uint32_t ParamStore_GetSnapshot(param_store_t *params)
+{
+  param_store_t defaults;
+  uint32_t generation;
+  uint32_t primask;
+
   if (params == 0)
   {
-    return;
+    return 0UL;
   }
   if (current_params_initialized == 0U)
   {
-    ParamStore_SetDefaults();
+    ParamStore_Defaults(&defaults);
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (current_params_initialized == 0U)
+    {
+      current_params = defaults;
+      current_params_initialized = 1U;
+      current_params_generation++;
+    }
+    __set_PRIMASK(primask);
   }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
   *params = current_params;
+  generation = current_params_generation;
+  __set_PRIMASK(primask);
+  return generation;
 }
 
 uint8_t ParamStore_Validate(const param_store_t *params)
@@ -141,12 +175,19 @@ uint8_t ParamStore_Validate(const param_store_t *params)
 
 uint8_t ParamStore_Set(const param_store_t *params)
 {
+  uint32_t primask;
+
   if (ParamStore_Validate(params) == 0U)
   {
     return 0U;
   }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
   current_params = *params;
   current_params_initialized = 1U;
+  current_params_generation++;
+  __set_PRIMASK(primask);
   return 1U;
 }
 

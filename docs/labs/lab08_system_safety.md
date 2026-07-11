@@ -16,7 +16,7 @@
 │  低电平 → 硬件切断 PWM (H桥高阻) │  释放后下一更新事件恢复 MOE
 ├─────────────────────────────────┤
 │ Level 2: 软件 ESTOP             │  SYSTEM_ERROR_ESTOP (bit 5)
-│  清空全部控制源 → 拒绝所有新命令  │  estop 1/0 命令 + 上位机帧
+│  清空全部控制源 → 拒绝所有新命令  │  本地 estop 1/0；远程仅可置位
 ├─────────────────────────────────┤
 │ Level 3: fault-stop             │  SYSTEM_ERROR_FAULT_STOP (bit 6)
 │  清空全部命令 + EN=0 低侧制动    │  DRV nFAULT/过流 → clearfault
@@ -28,13 +28,13 @@
 
 ### 2. 错误标志位定义
 
-TIM1/TIM8 均启用 Automatic Output。BKIN 低电平会立即清除对应定时器 MOE；BKIN 恢复后，下一更新事件自动恢复 MOE。该硬件事件当前不会自动设置软件 ESTOP，需通过 `status` 的 `BREAK tim1/tim8 moe/bif/count` 诊断。
+TIM1 低有效 BKIN 是权威硬切断，Automatic Output 禁用；触发后清 MOE/CCR 并软件锁存。TIM8 在同一 nFAULT 汇聚网上仅作冗余 BIF/count/last 诊断，不计为第二个独立故障。用户确认连线为四路 nFAULT→两组 BAT54A→47k 上拉→PE15/PA6；仓库无原理图可独立复核。
 
-`system_monitor.h` 的 9 个 error flag：
+系统 error flag 以 `system_monitor.h` 为准；bit 9–16 中除 `TIM_BREAK` 外的位保留给现有诊断命名空间：
 
 | 位 | 宏 | 含义 | 触发条件 | 是否锁存 |
 |----|-----|------|----------|---------|
-| 0 | `LOW_BATTERY` | 电池低压 | Vbat < 10.5V | 否（编译禁用） |
+| 0 | `LOW_BATTERY` | 电池低压 | <10.5V 置位，>11.0V 解除 | 否 |
 | 1 | `M1_OVERCURRENT` | M1 ADC 过流 | 默认关闭 | 否 |
 | 2 | `M2_OVERCURRENT` | M2 ADC 过流 | 默认关闭 | 否 |
 | 3 | `M3_OVERCURRENT` | M3 ADC 过流 | 默认关闭 | 否 |
@@ -43,6 +43,9 @@ TIM1/TIM8 均启用 Automatic Output。BKIN 低电平会立即清除对应定时
 | 6 | `FAULT_STOP` | 故障停机 | DRV 故障或过流触发 | **是** |
 | 7 | `ENCODER_INVALID` | 编码器无效 | 超时无脉冲 | 否 |
 | 8 | `DRV_FAULT` | DRV8874 硬件故障 | nFAULT 引脚拉低 | **是** |
+| 9 | `TIM_BREAK` | TIM1 权威 Break | TIM1_BKIN 低 | **是** |
+| 17 | `ENCODER_FEEDBACK_LOST` | 闭环反馈丢失 | enabled encoder 无效，或 150ms 无运动反馈 | **是** |
+| 18 | `BATTERY_CRITICAL` | 3S 严重欠压 | <9.0V 持续 500ms | **是，仅 >9.6V 持续 2s 自动解除** |
 
 锁存标志（latched）与实时标志（error）分离：锁存标志需 `clearfault` 清除，且前提是故障条件已解除。
 
@@ -246,7 +249,7 @@ plt.savefig('lab08_fault_timeline.png', dpi=150)
 
 4. LED 闪烁模式在嘈杂环境中（阳光下/远处/视觉障碍）可能不够显眼。如果要增加一个蜂鸣器作为声音报警，你会放在安全架构的哪一层？为什么？
 
-5. `BATTERY_LOW_MONITOR_ENABLED` 当前为 `0U`（编译禁用）。如果启用，当电池电压低于 9.0V 时应该如何设计停机策略——立即停机还是先警告再降速？为什么？
+5. 当电池在 9.0V 附近受电机启动压降反复跨阈值时，500ms 触发窗和 2s 恢复窗如何避免停机抖动？为什么恢复后仍不能恢复旧运动命令？
 
 ## 常见问题
 

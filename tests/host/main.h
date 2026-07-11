@@ -17,6 +17,7 @@ typedef struct
 typedef struct
 {
   uint32_t ARR;
+  uint32_t CNT;
   uint32_t CCR1;
   uint32_t CCR2;
   uint32_t CCR3;
@@ -59,6 +60,7 @@ typedef enum
 #define TIM_CHANNEL_2 0x00000004U
 #define TIM_CHANNEL_3 0x00000008U
 #define TIM_CHANNEL_4 0x0000000CU
+#define TIM_CHANNEL_ALL 0x0000003CU
 #define TIM_FLAG_BREAK 0x00000080U
 #define TIM_IT_BREAK 0x00000080U
 #define TIM_BDTR_MOE 0x00008000U
@@ -101,11 +103,15 @@ void HostTimSetCompare(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t pulse
 uint32_t HostTimGetCompare(TIM_HandleTypeDef *htim, uint32_t channel);
 HAL_StatusTypeDef HAL_TIM_PWM_Start(TIM_HandleTypeDef *htim, uint32_t channel);
 HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef *htim);
+HAL_StatusTypeDef HAL_TIM_Encoder_Start(TIM_HandleTypeDef *htim, uint32_t channel);
 void HAL_GPIO_WritePin(GPIO_TypeDef *port, uint16_t pin, GPIO_PinState state);
 GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *port, uint16_t pin);
 void HAL_Delay(uint32_t delay_ms);
+uint32_t HAL_GetTick(void);
 
 #define __HAL_TIM_GET_AUTORELOAD(htim) ((htim)->Instance->ARR)
+#define __HAL_TIM_GET_COUNTER(htim) ((htim)->Instance->CNT)
+#define __HAL_TIM_SET_COUNTER(htim, value) ((htim)->Instance->CNT = (value))
 #define __HAL_TIM_SET_COMPARE(htim, channel, pulse) HostTimSetCompare((htim), (channel), (pulse))
 #define __HAL_TIM_GET_FLAG(htim, flag) ((((htim)->Instance->SR & (flag)) != 0U) ? 1U : 0U)
 #define __HAL_TIM_CLEAR_FLAG(htim, flag) ((htim)->Instance->SR &= ~(flag))

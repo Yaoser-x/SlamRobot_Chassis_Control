@@ -78,12 +78,48 @@ static void MotorDriver_LatchTim1BreakLocked(void)
   motor_state.tim1_break_flag = 1U;
   motor_state.tim1_break_latched = 1U;
   motor_state.tim1_break_count++;
+  motor_state.tim1_break_last_ms = osKernelGetTickCount();
 }
 
 void MotorDriver_OnTim1BreakFromIsr(void)
 {
   __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+  motor_state.break_origin = MOTOR_BREAK_ORIGIN_TIM1_RUNTIME;
   MotorDriver_LatchTim1BreakLocked();
+}
+
+static uint8_t MotorDriver_ReadNfaultHighMask(void)
+{
+  uint8_t mask = 0U;
+
+  for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (HAL_GPIO_ReadPin(motor_hw[i].fault_port, motor_hw[i].fault_pin) == GPIO_PIN_SET)
+    {
+      mask |= (uint8_t)(1U << i);
+    }
+  }
+  return mask;
+}
+
+static uint8_t MotorDriver_StartupInputsHigh(uint8_t *nfault_high_mask)
+{
+  uint8_t required_mask = 0U;
+  uint8_t high_mask = MotorDriver_ReadNfaultHighMask();
+
+  for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
+    {
+      required_mask |= (uint8_t)(1U << i);
+    }
+  }
+  if (nfault_high_mask != 0)
+  {
+    *nfault_high_mask = high_mask;
+  }
+  return (HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_SET &&
+          (high_mask & required_mask) == required_mask) ? 1U : 0U;
 }
 
 static void MotorDriver_UpdateBreakStatus(void)
@@ -113,6 +149,7 @@ static void MotorDriver_UpdateBreakStatus(void)
   if (tim8_break_flag != 0U)
   {
     motor_state.tim8_break_count++;
+    motor_state.tim8_break_last_ms = osKernelGetTickCount();
   }
   MotorDriver_UpdateEffectivePwmAll();
   __set_PRIMASK(primask);
@@ -328,14 +365,17 @@ static void MotorDriver_StartPwm(const motor_hw_t *motor)
 
 void MotorDriver_Init(void)
 {
-  uint8_t tim1_break_pending;
+  uint8_t pre_wake_bif;
+  uint8_t startup_qualified = 1U;
+  uint8_t nfault_high_mask = 0U;
+  uint32_t stable_high_ms = 0U;
 
+  htim1.Instance->DIER &= ~TIM_IT_BREAK;
+  htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
+  pre_wake_bif = (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
+  __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
   HAL_GPIO_WritePin(DRV_SLEEP_ALL_GPIO_Port, DRV_SLEEP_ALL_Pin, GPIO_PIN_SET);
   HAL_Delay(DRV8874_WAKE_DELAY_MS);
-
-  tim1_break_pending = (motor_state.tim1_break_latched != 0U ||
-                        __HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET ||
-                        HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET) ? 1U : 0U;
   motor_state = (motor_driver_state_t){0};
   phase_switch_gap_calls = 0U;
   motor_state.sleep_enabled = 1U;
@@ -346,16 +386,49 @@ void MotorDriver_Init(void)
       .phase = MOTOR_DRIVER_PHASE_IDLE_BRAKE,
     };
     MotorDriver_StartPwm(&motor_hw[i]);
+    htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
     MotorDriver_SetRaw(&motor_hw[i], 0U, -1);
     MotorDriver_RecordRuntime((motor_id_t)i);
   }
+  startup_qualified = 0U;
+  for (uint32_t elapsed_ms = 0U; elapsed_ms < DRV8874_STARTUP_TIMEOUT_MS; ++elapsed_ms)
+  {
+    if (MotorDriver_StartupInputsHigh(&nfault_high_mask) != 0U)
+    {
+      stable_high_ms++;
+      if (stable_high_ms >= DRV8874_STARTUP_STABLE_MS)
+      {
+        startup_qualified = 1U;
+        break;
+      }
+    }
+    else
+    {
+      stable_high_ms = 0U;
+    }
+    HAL_Delay(1U);
+  }
+  motor_state.startup_pre_wake_bif = pre_wake_bif;
+  motor_state.startup_bkin_high =
+    (HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_SET) ? 1U : 0U;
+  motor_state.startup_nfault_high_mask = nfault_high_mask;
+  motor_state.startup_qualified = startup_qualified;
+  /* 清除 PWM 启动期间可能由 HAL_TIM_PWM_Start 触发的 TIM1/TIM8 break 标志，
+     避免因 BKIN 脚在 DRV 唤醒过程中短暂低电平导致的误锁存。 */
+  __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
   __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
-  if (tim1_break_pending != 0U ||
-      motor_state.tim1_break_latched != 0U ||
+  if (startup_qualified == 0U ||
       __HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET ||
       HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET)
   {
-    MotorDriver_OnTim1BreakFromIsr();
+    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+    motor_state.break_origin = MOTOR_BREAK_ORIGIN_STARTUP_TIMEOUT;
+    MotorDriver_LatchTim1BreakLocked();
+  }
+  else
+  {
+    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+    htim1.Instance->BDTR |= TIM_BDTR_MOE;
   }
   __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_BREAK);
   MotorDriver_UpdateFaults();

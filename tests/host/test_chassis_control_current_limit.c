@@ -8,13 +8,21 @@
 #include "chassis_control.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
+#include "param_store.h"
 #include "pid_controller.h"
+#include "system_monitor.h"
 
 static adc_monitor_state_t fake_adc_state;
 static encoder_state_t fake_encoder_state;
 static int16_t fake_signed_pwm[MOTOR_ID_COUNT];
 static uint8_t fake_fault_stop;
 static uint8_t fake_primask;
+static uint8_t fake_maintenance_lock;
+static uint32_t fake_tick_ms;
+static uint8_t fake_command_valid;
+static chassis_cmd_t fake_command;
+static motor_driver_state_t fake_motor_state;
+static uint32_t fake_encoder_fault_latch_count;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -31,6 +39,16 @@ void __set_PRIMASK(uint32_t primask)
   fake_primask = primask;
 }
 
+uint32_t HAL_GetTick(void)
+{
+  return fake_tick_ms;
+}
+
+uint32_t osKernelGetTickCount(void)
+{
+  return fake_tick_ms;
+}
+
 void MotorDriver_Init(void)
 {
 }
@@ -43,6 +61,9 @@ void MotorDriver_SetSpeedGetter(motor_speed_getter_t getter)
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 {
   fake_signed_pwm[motor] = permille;
+  fake_motor_state.requested_pwm[motor] = permille;
+  fake_motor_state.applied_pwm[motor] = permille;
+  fake_motor_state.effective_pwm[motor] = permille;
 }
 
 void MotorDriver_StopAll(motor_stop_mode_t mode)
@@ -51,6 +72,9 @@ void MotorDriver_StopAll(motor_stop_mode_t mode)
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     fake_signed_pwm[i] = 0;
+    fake_motor_state.requested_pwm[i] = 0;
+    fake_motor_state.applied_pwm[i] = 0;
+    fake_motor_state.effective_pwm[i] = 0;
   }
 }
 
@@ -67,11 +91,7 @@ void MotorDriver_GetState(motor_driver_state_t *state)
 {
   if (state != 0)
   {
-    *state = (motor_driver_state_t){0};
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-      state->phase[i] = MOTOR_DRIVER_PHASE_RUN;
-    }
+    *state = fake_motor_state;
   }
 }
 
@@ -95,15 +115,31 @@ uint8_t ControlManager_IsFaultStop(void)
   return fake_fault_stop;
 }
 
+uint8_t ControlManager_IsMaintenanceLocked(void)
+{
+  return fake_maintenance_lock;
+}
+
 uint8_t ControlManager_GetCommand(chassis_cmd_t *cmd, uint32_t now_ms)
 {
-  (void)cmd;
   (void)now_ms;
+  if (fake_command_valid != 0U)
+  {
+    *cmd = fake_command;
+    return 1U;
+  }
   return 0U;
 }
 
 void ControlManager_ClearCommand(void)
 {
+  fake_command_valid = 0U;
+}
+
+void SystemMonitor_LatchEncoderFeedbackFault(void)
+{
+  fake_encoder_fault_latch_count++;
+  fake_fault_stop = 1U;
 }
 
 void EncoderDriver_GetState(encoder_state_t *state)
@@ -139,16 +175,36 @@ static void reset_fake_chassis(void)
   fake_adc_state = (adc_monitor_state_t){0};
   fake_encoder_state = (encoder_state_t){0};
   fake_fault_stop = 0U;
+  fake_maintenance_lock = 0U;
   fake_primask = 0U;
+  fake_tick_ms = 0U;
+  fake_command_valid = 0U;
+  fake_command = (chassis_cmd_t){0};
+  fake_motor_state = (motor_driver_state_t){0};
+  fake_encoder_fault_latch_count = 0UL;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     fake_signed_pwm[i] = 0;
     fake_encoder_state.speed_valid[i] = 1U;
+    fake_motor_state.phase[i] = MOTOR_DRIVER_PHASE_RUN;
   }
   fake_encoder_state.speed_valid_all = 1U;
   fake_adc_state.current_valid = 1U;
   fake_adc_state.current_zero_valid = 1U;
+  ParamStore_SetDefaults();
   ChassisControl_Init();
+}
+
+static void set_closed_loop_command(float linear_mps)
+{
+  fake_command = (chassis_cmd_t){
+    .linear_x = linear_mps,
+    .angular_z = 0.0f,
+    .enable = 1U,
+    .source = CONTROL_SOURCE_DEBUG,
+    .timestamp_ms = 1000U,
+  };
+  fake_command_valid = 1U;
 }
 
 static void test_high_adc_current_does_not_throttle_pwm_output(void)
@@ -158,6 +214,7 @@ static void test_high_adc_current_does_not_throttle_pwm_output(void)
   reset_fake_chassis();
   fake_adc_state.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
 
+  fake_tick_ms = 1000U;
   ChassisControl_RawMotorInputTest(MOTOR_ID_M2, 50, 0);
   ChassisControl_Step(1000U);
   ChassisControl_GetState(&state);
@@ -173,6 +230,7 @@ static void test_invalid_current_zero_blocks_test_outputs(void)
   reset_fake_chassis();
   fake_adc_state.current_zero_valid = 0U;
 
+  fake_tick_ms = 1000U;
   ChassisControl_RawMotorInputTest(MOTOR_ID_M2, 50, 0);
   ChassisControl_Step(1000U);
   require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "raw output is blocked before current zero");
@@ -183,9 +241,121 @@ static void test_invalid_current_zero_blocks_test_outputs(void)
   require_int(fake_signed_pwm[MOTOR_ID_M3] == 0, "all open-loop outputs stay zero before current zero");
 }
 
+static void test_raw_test_mode_has_400ms_deadman(void)
+{
+  reset_fake_chassis();
+  fake_tick_ms = 1000U;
+  ChassisControl_RawMotorInputTest(MOTOR_ID_M2, 50, 0);
+  ChassisControl_Step(1000U);
+  ChassisControl_Step(1010U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 50, "raw output starts during lease");
+
+  for (uint32_t now_ms = 1020U; now_ms <= 1400U; now_ms += 10U)
+  {
+    ChassisControl_Step(now_ms);
+  }
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 50, "raw output remains at 400ms boundary");
+  ChassisControl_Step(1401U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "raw output stops after 400ms lease");
+}
+
+static void test_maintenance_lock_cancels_raw_before_output(void)
+{
+  reset_fake_chassis();
+  fake_tick_ms = 2000U;
+  ChassisControl_RawMotorInputTest(MOTOR_ID_M2, 80, 0);
+  ChassisControl_Step(2000U);
+  ChassisControl_Step(2010U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 80, "raw output active before maintenance");
+
+  fake_maintenance_lock = 1U;
+  ChassisControl_Step(2020U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "maintenance lock stops raw output");
+  fake_maintenance_lock = 0U;
+  ChassisControl_Step(2030U);
+  require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "raw output does not resume after maintenance");
+}
+
+static void test_runtime_track_width_changes_side_targets(void)
+{
+  param_store_t params;
+  float left;
+  float right;
+
+  reset_fake_chassis();
+  (void)ParamStore_GetSnapshot(&params);
+  params.track_width_m = 0.200f;
+  require_int(ParamStore_Set(&params) != 0U, "first runtime track width accepted");
+  ChassisControl_ResolveSideTargets(0.0f, 1.0f, &left, &right);
+  require_int(left < -0.099f && right > 0.099f, "first runtime track width applied");
+
+  params.track_width_m = 0.400f;
+  require_int(ParamStore_Set(&params) != 0U, "second runtime track width accepted");
+  ChassisControl_ResolveSideTargets(0.0f, 1.0f, &left, &right);
+  require_int(left < -0.199f && right > 0.199f, "updated runtime track width applied");
+}
+
+static void test_invalid_enabled_encoder_stops_whole_chassis_same_step(void)
+{
+  reset_fake_chassis();
+  set_closed_loop_command(0.2f);
+  fake_encoder_state.speed_valid[MOTOR_ID_M2] = 0U;
+  ChassisControl_Step(1000U);
+
+  require_int(fake_encoder_fault_latch_count == 1UL, "invalid enabled encoder latches feedback fault");
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    require_int(fake_signed_pwm[i] == 0, "feedback fault stops every motor in same step");
+  }
+}
+
+static void test_zero_motion_feedback_fault_after_150ms_run(void)
+{
+  reset_fake_chassis();
+  set_closed_loop_command(0.2f);
+  for (uint32_t now_ms = 1000U; now_ms < 1160U; now_ms += 10U)
+  {
+    ChassisControl_Step(now_ms);
+  }
+  require_int(fake_encoder_fault_latch_count == 0UL, "zero motion does not fault before 150ms RUN window");
+  ChassisControl_Step(1160U);
+  require_int(fake_encoder_fault_latch_count == 1UL, "zero motion faults at 150ms RUN window");
+}
+
+static void test_non_run_motor_phase_does_not_false_latch_feedback(void)
+{
+  reset_fake_chassis();
+  set_closed_loop_command(0.2f);
+  fake_motor_state.phase[MOTOR_ID_M2] = MOTOR_DRIVER_PHASE_PH_SETTLE;
+  fake_motor_state.phase[MOTOR_ID_M3] = MOTOR_DRIVER_PHASE_REVERSE_BRAKE;
+  fake_motor_state.effective_pwm[MOTOR_ID_M2] = 100;
+  fake_motor_state.effective_pwm[MOTOR_ID_M3] = 100;
+  for (uint32_t now_ms = 1000U; now_ms <= 1300U; now_ms += 10U)
+  {
+    ChassisControl_Step(now_ms);
+  }
+  require_int(fake_encoder_fault_latch_count == 0UL, "non-RUN transition phases do not latch feedback fault");
+}
+
+static void test_disabled_encoder_invalid_is_ignored(void)
+{
+  reset_fake_chassis();
+  set_closed_loop_command(0.2f);
+  fake_encoder_state.speed_valid[MOTOR_ID_M1] = 0U;
+  ChassisControl_Step(1000U);
+  require_int(fake_encoder_fault_latch_count == 0UL, "disabled encoder invalid is ignored");
+}
+
 int main(void)
 {
   test_high_adc_current_does_not_throttle_pwm_output();
   test_invalid_current_zero_blocks_test_outputs();
+  test_raw_test_mode_has_400ms_deadman();
+  test_maintenance_lock_cancels_raw_before_output();
+  test_runtime_track_width_changes_side_targets();
+  test_invalid_enabled_encoder_stops_whole_chassis_same_step();
+  test_zero_motion_feedback_fault_after_150ms_run();
+  test_non_run_motor_phase_does_not_false_latch_feedback();
+  test_disabled_encoder_invalid_is_ignored();
   return 0;
 }

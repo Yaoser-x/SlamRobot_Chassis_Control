@@ -21,6 +21,8 @@ extern "C" {
 #define SYSTEM_ERROR_ENCODER_INVALID  (1UL << 7)
 #define SYSTEM_ERROR_DRV_FAULT        (1UL << 8)
 #define SYSTEM_ERROR_TIM_BREAK        (1UL << 9)
+#define SYSTEM_ERROR_ENCODER_FEEDBACK_LOST (1UL << 17)
+#define SYSTEM_ERROR_BATTERY_CRITICAL (1UL << 18)
 
 typedef struct
 {
@@ -45,6 +47,7 @@ void SystemMonitor_Update(void);
 void SystemMonitor_GetState(system_monitor_state_t *state);
 void SystemMonitor_ClearLatchedFaults(uint32_t mask);
 uint8_t SystemMonitor_HasLatchedFault(void);
+void SystemMonitor_LatchEncoderFeedbackFault(void);
 
 #ifdef __cplusplus
 }

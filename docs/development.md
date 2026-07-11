@@ -229,7 +229,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
 | POST/参数持久化 | ✅ 基础完成 | 上电 POST、ParamStore、Flash 镜像、`get/set/set save/set reset` |
-| ESP12F 网页固件 | ✅ 完成 | 固定 AP + WebSocket 摇杆 + upper_protocol 帧协议 + 网页遥控 |
+| ESP12F 网页固件 | 🟡 代码完成 / HIL 待验 | 首配 EEPROM+CRC、owner/heartbeat 租约、只读遥测广播、远程 ESTOP set-only；待 Arduino IDE 编译与多客户板测 |
 | OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 真实链路自检/模块在线状态 |
 | HIL 冒烟 | ✅ 基础完成 | USART1 只读 smoke 脚本，不自动驱动电机 |
 | 上位机 (RPI) 对接 | 🔲 待对接 | 协议已就绪 |

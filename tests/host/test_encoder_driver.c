@@ -1,0 +1,153 @@
+#include "encoder_driver.h"
+
+#include "chassis_layout.h"
+#include "param_store.h"
+#include "tim.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static TIM_TypeDef tim2_instance = { .ARR = 65535U };
+static TIM_TypeDef tim3_instance = { .ARR = 65535U };
+static TIM_TypeDef tim4_instance = { .ARR = 65535U };
+static TIM_TypeDef tim5_instance = { .ARR = 65535U };
+
+TIM_HandleTypeDef htim2 = { .Instance = &tim2_instance };
+TIM_HandleTypeDef htim3 = { .Instance = &tim3_instance };
+TIM_HandleTypeDef htim4 = { .Instance = &tim4_instance };
+TIM_HandleTypeDef htim5 = { .Instance = &tim5_instance };
+
+static uint32_t fake_primask;
+static uint32_t layout_calls_while_masked;
+
+static void require_int(int condition, const char *message)
+{
+  if (!condition)
+  {
+    (void)fprintf(stderr, "FAIL: %s\n", message);
+    exit(1);
+  }
+}
+
+static void require_close(float actual, float expected, float tolerance, const char *message)
+{
+  if (fabsf(actual - expected) > tolerance)
+  {
+    (void)fprintf(stderr, "FAIL: %s (actual=%f expected=%f)\n", message, actual, expected);
+    exit(1);
+  }
+}
+
+uint32_t __get_PRIMASK(void)
+{
+  return fake_primask;
+}
+
+void __disable_irq(void)
+{
+  fake_primask = 1U;
+}
+
+void __set_PRIMASK(uint32_t primask)
+{
+  fake_primask = primask;
+}
+
+HAL_StatusTypeDef HAL_TIM_Encoder_Start(TIM_HandleTypeDef *htim, uint32_t channel)
+{
+  (void)htim;
+  (void)channel;
+  return HAL_OK;
+}
+
+uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
+{
+  if (fake_primask != 0U)
+  {
+    layout_calls_while_masked++;
+  }
+  return ((uint32_t)motor < MOTOR_ID_COUNT) ? 1U : 0U;
+}
+
+motor_side_t ChassisLayout_MotorSide(motor_id_t motor)
+{
+  if (fake_primask != 0U)
+  {
+    layout_calls_while_masked++;
+  }
+  return ((uint32_t)motor < 2U) ? MOTOR_SIDE_LEFT : MOTOR_SIDE_RIGHT;
+}
+
+int8_t ChassisLayout_EncoderDirection(motor_id_t motor)
+{
+  if (fake_primask != 0U)
+  {
+    layout_calls_while_masked++;
+  }
+  (void)motor;
+  return 1;
+}
+
+static void set_all_counters(uint32_t count)
+{
+  tim2_instance.CNT = count;
+  tim3_instance.CNT = count;
+  tim4_instance.CNT = count;
+  tim5_instance.CNT = count;
+}
+
+static void test_update_publishes_after_unmasked_calculation(void)
+{
+  encoder_state_t state;
+
+  ParamStore_SetDefaults();
+  EncoderDriver_Init();
+  set_all_counters(10U);
+  EncoderDriver_Update(10U);
+  layout_calls_while_masked = 0U;
+  set_all_counters(20U);
+  EncoderDriver_Update(20U);
+  EncoderDriver_GetState(&state);
+
+  require_int(state.speed_valid_all != 0U, "encoder state becomes valid");
+  require_int(layout_calls_while_masked == 0U,
+              "layout and filter calculations stay outside the publish critical section");
+  require_int(fake_primask == 0U, "encoder update restores interrupt state");
+}
+
+static void test_runtime_wheel_radius_changes_speed_generation(void)
+{
+  encoder_state_t before;
+  encoder_state_t after;
+  param_store_t params;
+
+  ParamStore_SetDefaults();
+  EncoderDriver_Init();
+  set_all_counters(10U);
+  EncoderDriver_Update(10U);
+  set_all_counters(20U);
+  EncoderDriver_Update(20U);
+  EncoderDriver_GetState(&before);
+
+  (void)ParamStore_GetSnapshot(&params);
+  params.wheel_radius_m = 0.070f;
+  require_int(ParamStore_Set(&params) != 0U, "runtime wheel radius accepted");
+  set_all_counters(30U);
+  EncoderDriver_Update(30U);
+  EncoderDriver_GetState(&after);
+
+  require_int(before.speed_mps[MOTOR_ID_M1] > 0.0f, "baseline speed is positive");
+  require_close(after.speed_mps[MOTOR_ID_M1],
+                before.speed_mps[MOTOR_ID_M1] * 2.0f,
+                0.0001f,
+                "runtime radius doubles converted speed");
+}
+
+int main(void)
+{
+  test_update_publishes_after_unmasked_calculation();
+  test_runtime_wheel_radius_changes_speed_generation();
+  (void)printf("PASS: encoder driver host tests\n");
+  return 0;
+}

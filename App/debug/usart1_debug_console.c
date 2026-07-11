@@ -3,10 +3,12 @@
 #include "adc_monitor.h"
 #include "chassis_config.h"
 #include "chassis_control.h"
+#include "chassis_maintenance.h"
 #include "chassis_layout.h"
 #include "chassis_task_timing.h"
 #include "cmsis_os2.h"
 #include "control_manager.h"
+#include "debug_maintenance_policy.h"
 #include "encoder_driver.h"
 #include "encoder_math.h"
 #include "esp12f_comm.h"
@@ -39,7 +41,10 @@
 #define DEBUG_CONSOLE_TASK_PERIOD_MS 10U
 #define DEBUG_CONSOLE_LOG_PERIOD_MS  500U
 #define DEBUG_CONSOLE_TX_TIMEOUT_MS  100U
-#define DEBUG_CONSOLE_FLASH_MAX_SPEED_MPS 0.02f
+
+#ifndef DEBUG_CONSOLE_RELEASE_REQUIRES_ARM
+#define DEBUG_CONSOLE_RELEASE_REQUIRES_ARM 0U
+#endif
 
 /* ────────── 日志级别宏 ────────── */
 #define LOG_INFO(fmt, ...)  do {                          \
@@ -67,6 +72,7 @@ static char rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t rx_len;
 static uint8_t stream_mode;
 static uint8_t debug_velocity_enabled;
+static uint32_t debug_velocity_generation;
 static chassis_cmd_t debug_velocity_cmd;
 static uint8_t log_filter_count;
 static uint8_t log_filter_order[10];
@@ -80,6 +86,7 @@ static uint32_t rx_overflow_count;
 static int32_t motor_log_last_count[MOTOR_ID_COUNT];
 static uint32_t motor_log_last_ms;
 static uint8_t motor_log_baseline_valid;
+static debug_maintenance_policy_t maintenance_policy;
 
 extern osThreadId_t defaultTaskHandle;
 extern osThreadId_t safetyTaskHandle;
@@ -107,33 +114,6 @@ static void DebugConsole_Write(const char *text)
 static int32_t DebugConsole_Milli(float value)
 {
   return (int32_t)(value * 1000.0f);
-}
-
-static uint8_t DebugConsole_PrepareFlashMaintenance(void)
-{
-  encoder_state_t encoder_state;
-  motor_driver_state_t motor_state;
-
-  ControlManager_ClearCommand();
-  ChassisControl_EmergencyStop();
-  MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
-  EncoderDriver_GetState(&encoder_state);
-  MotorDriver_GetState(&motor_state);
-  for (uint8_t motor = 0U; motor < MOTOR_ID_COUNT; ++motor)
-  {
-    if (motor_state.effective_pwm[motor] != 0)
-    {
-      return 0U;
-    }
-    if (ChassisLayout_MotorEnabled((motor_id_t)motor) != 0U &&
-        (encoder_state.speed_valid[motor] == 0U ||
-         encoder_state.speed_mps[motor] < -DEBUG_CONSOLE_FLASH_MAX_SPEED_MPS ||
-         encoder_state.speed_mps[motor] > DEBUG_CONSOLE_FLASH_MAX_SPEED_MPS))
-    {
-      return 0U;
-    }
-  }
-  return 1U;
 }
 
 static const char *DebugConsole_ImuGyroCalFailReason(uint8_t reason)
@@ -252,8 +232,14 @@ static void DebugConsole_PrintResetTrace(void)
 
 static uint8_t DebugConsole_MotorTestAllowed(void)
 {
-  return (ControlManager_IsEmergencyStop() == 0U &&
-          ControlManager_IsFaultStop() == 0U) ? 1U : 0U;
+  if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
+  {
+    Usart1DebugConsole_RevokeMaintenanceAuthorization();
+    return 0U;
+  }
+  return DebugMaintenancePolicy_Allowed(&maintenance_policy,
+                                        osKernelGetTickCount(),
+                                        DEBUG_CONSOLE_RELEASE_REQUIRES_ARM);
 }
 
 /* ────────── 日志字段分组 ────────── */
@@ -300,6 +286,9 @@ static void DebugConsole_GetMotorLogSpeed(uint32_t now_ms,
 {
   uint32_t dt_ms = now_ms - motor_log_last_ms;
   float counts_per_rev = EncoderDriver_GetCountsPerRev();
+  param_store_t params;
+
+  (void)ParamStore_GetSnapshot(&params);
 
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
@@ -309,7 +298,7 @@ static void DebugConsole_GetMotorLogSpeed(uint32_t now_ms,
         state->count[i] - motor_log_last_count[i],
         dt_ms,
         counts_per_rev,
-        CHASSIS_WHEEL_RADIUS_M);
+        params.wheel_radius_m);
     }
     else
     {
@@ -520,6 +509,7 @@ static void DebugConsole_PrintHelp(void)
     "\r\nF407 V2 debug console\r\n"
     "help/status/header\r\n"
     "get <param> | set <param> <value> | set save | set reset\r\n"
+    "maint arm|off          Release raw/open-loop authorization (60s)\r\n"
     "log 0                  stop streaming\r\n"
     "log 1 [fld...]         start CSV stream, optional field filter\r\n"
     "                       fields: motor adc imu errors source ps2 line esp\r\n"
@@ -920,13 +910,20 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_Write(tx);
 
   (void)snprintf(tx, sizeof(tx),
-                 "BREAK tim1 moe=%u bif=%u count=%lu tim8 moe=%u bif=%u count=%lu edge=%lu,%lu,%lu,%lu low=%lu,%lu,%lu,%lu\r\n",
+                 "BREAK tim1 moe=%u bif=%u count=%lu last=%lu origin=%u startup=%u pre_bif=%u bkin=%u nfault=0x%02X tim8 moe=%u bif=%u count=%lu last=%lu edge=%lu,%lu,%lu,%lu low=%lu,%lu,%lu,%lu\r\n",
                  motor_state.tim1_moe_active,
                  motor_state.tim1_break_flag,
                  (unsigned long)motor_state.tim1_break_count,
+                 (unsigned long)motor_state.tim1_break_last_ms,
+                 (unsigned int)motor_state.break_origin,
+                 motor_state.startup_qualified,
+                 motor_state.startup_pre_wake_bif,
+                 motor_state.startup_bkin_high,
+                 motor_state.startup_nfault_high_mask,
                  motor_state.tim8_moe_active,
                  motor_state.tim8_break_flag,
                  (unsigned long)motor_state.tim8_break_count,
+                 (unsigned long)motor_state.tim8_break_last_ms,
                  (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M1],
                  (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M2],
                  (unsigned long)motor_state.fault_edge_count[MOTOR_ID_M3],
@@ -1046,6 +1043,24 @@ static void DebugConsole_PrintStatus(void)
                  ps2_state.online,
                  (unsigned long)ps2_state.rx_ok_count,
                  (unsigned long)ps2_state.rx_fail_count);
+  DebugConsole_Write(tx);
+  (void)snprintf(tx, sizeof(tx),
+                 "PS2 online=%u btn=%02X/%02X edge=%02X axis=%u,%u,%u,%u heading=%u button=%02X target=%.1f accum=%.1f end=%u imu_age=%lu gate=0x%08lX\r\n",
+                 ps2_state.online,
+                 ps2_state.btn1,
+                 ps2_state.btn2,
+                 ps2_state.pressed_btn2,
+                 ps2_state.left_x,
+                 ps2_state.left_y,
+                 ps2_state.right_x,
+                 ps2_state.right_y,
+                 ps2_state.heading_active,
+                 ps2_state.macro_button,
+                 ps2_state.heading_target_deg,
+                 ps2_state.heading_accumulated_deg,
+                 ps2_state.heading_end_reason,
+                 (unsigned long)ps2_state.imu_age_ms,
+                 (unsigned long)ps2_state.heading_gate_flags);
   DebugConsole_Write(tx);
   DebugConsole_PrintResetTrace();
 }
@@ -1195,7 +1210,7 @@ static void DebugConsole_HandleLine(char *line)
     imu_bmi270_state_t imu_state;
     flash_param_status_t status;
 
-    if (DebugConsole_PrepareFlashMaintenance() == 0U)
+    if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
     {
       LOG_WARN("param save rejected: chassis not stationary");
       return;
@@ -1231,13 +1246,14 @@ static void DebugConsole_HandleLine(char *line)
     {
       LOG_ERR("param save failed: %s", FlashParam_StatusString(status));
     }
+    ChassisMaintenance_End();
   }
   else if (strcmp(line, "set reset") == 0)
   {
     flash_param_bundle_t bundle;
     flash_param_status_t status;
 
-    if (DebugConsole_PrepareFlashMaintenance() == 0U)
+    if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
     {
       LOG_WARN("param reset rejected: chassis not stationary");
       return;
@@ -1257,10 +1273,17 @@ static void DebugConsole_HandleLine(char *line)
     {
       LOG_ERR("param reset failed: %s", FlashParam_StatusString(status));
     }
+    ChassisMaintenance_End();
   }
   else if (sscanf(line, "set %31s %f", param_name, &param_value) == 2)
   {
     param_store_t params;
+
+    if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+    {
+      LOG_WARN("param set rejected: chassis not stationary");
+      return;
+    }
     ParamStore_Get(&params);
     if (ParamStore_SetFloat(&params, param_name, param_value) != 0U &&
         ParamStore_Set(&params) != 0U)
@@ -1271,6 +1294,17 @@ static void DebugConsole_HandleLine(char *line)
     {
       LOG_ERR("param set rejected");
     }
+    ChassisMaintenance_End();
+  }
+  else if (strcmp(line, "maint arm") == 0)
+  {
+    DebugMaintenancePolicy_Arm(&maintenance_policy, osKernelGetTickCount());
+    LOG_INFO("maintenance authorization armed for 60s");
+  }
+  else if (strcmp(line, "maint off") == 0)
+  {
+    Usart1DebugConsole_RevokeMaintenanceAuthorization();
+    LOG_INFO("maintenance authorization revoked");
   }
   else if (strncmp(line, "adccal", 6) == 0)
   {
@@ -1427,6 +1461,8 @@ static void DebugConsole_HandleLine(char *line)
   else if (sscanf(line, "vel %d %d", &linear_mm_s, &angular_mrad_s) == 2 ||
            sscanf(line, "vel %d", &linear_mm_s) == 1)
   {
+    uint32_t generation_before = ControlManager_GetMotionRevokeGeneration();
+
     debug_velocity_cmd = (chassis_cmd_t){
       .linear_x = (float)linear_mm_s / 1000.0f,
       .angular_z = (float)angular_mrad_s / 1000.0f,
@@ -1435,10 +1471,26 @@ static void DebugConsole_HandleLine(char *line)
       .timestamp_ms = osKernelGetTickCount(),
     };
     ChassisControl_OpenLoopTest(0, 0);
-    if (ControlManager_SetCommand(&debug_velocity_cmd) == CONTROL_COMMAND_ACCEPTED)
+    if (ControlManager_SetCommandForGeneration(&debug_velocity_cmd, generation_before) ==
+        CONTROL_COMMAND_ACCEPTED)
     {
-      debug_velocity_enabled = 1U;
-      LOG_INFO("velocity command accepted");
+      uint32_t generation_after = ControlManager_GetMotionRevokeGeneration();
+
+      if (generation_before == generation_after &&
+          ControlManager_IsEmergencyStop() == 0U &&
+          ControlManager_IsFaultStop() == 0U &&
+          ControlManager_IsMaintenanceLocked() == 0U)
+      {
+        debug_velocity_generation = generation_after;
+        debug_velocity_enabled = 1U;
+        LOG_INFO("velocity command accepted");
+      }
+      else
+      {
+        debug_velocity_enabled = 0U;
+        ControlManager_ClearSource(CONTROL_SOURCE_DEBUG);
+        LOG_WARN("velocity command crossed a safety transition");
+      }
     }
     else
     {
@@ -1455,6 +1507,10 @@ static void DebugConsole_HandleLine(char *line)
   }
   else if (sscanf(line, "estop %d", &value) == 1)
   {
+    if (value != 0)
+    {
+      Usart1DebugConsole_RevokeMaintenanceAuthorization();
+    }
     ControlManager_SetEmergencyStop((value != 0) ? 1U : 0U);
     LOG_INFO("estop %s", (value != 0) ? "set" : "cleared");
   }
@@ -1695,6 +1751,8 @@ void Usart1DebugConsole_Init(void)
   rx_len = 0U;
   stream_mode = 0U;
   debug_velocity_enabled = 0U;
+  debug_velocity_generation = ControlManager_GetMotionRevokeGeneration();
+  DebugMaintenancePolicy_Init(&maintenance_policy);
   debug_velocity_cmd = (chassis_cmd_t){0};
   rx_head = 0U;
   rx_tail = 0U;
@@ -1738,13 +1796,23 @@ void Usart1DebugConsole_OnRxCplt(void)
   else
   {
     rx_overflow_count++;
+    Usart1DebugConsole_RevokeMaintenanceAuthorization();
   }
   (void)HAL_UART_Receive_IT(&huart1, &rx_byte, 1U);
 }
 
 void Usart1DebugConsole_OnUartError(void)
 {
+  Usart1DebugConsole_RevokeMaintenanceAuthorization();
   (void)HAL_UART_Receive_IT(&huart1, &rx_byte, 1U);
+}
+
+void Usart1DebugConsole_RevokeMaintenanceAuthorization(void)
+{
+  DebugMaintenancePolicy_Revoke(&maintenance_policy);
+  debug_velocity_enabled = 0U;
+  ChassisControl_CancelTestMode();
+  ControlManager_ClearSource(CONTROL_SOURCE_DEBUG);
 }
 
 void Task_Usart1DebugConsole(void *argument)
@@ -1757,6 +1825,19 @@ void Task_Usart1DebugConsole(void *argument)
     uint32_t now_ms = osKernelGetTickCount();
 
     ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_DEBUG, now_ms);
+    if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
+    {
+      Usart1DebugConsole_RevokeMaintenanceAuthorization();
+    }
+    else if (DebugMaintenancePolicy_Allowed(&maintenance_policy,
+                                            now_ms,
+                                            DEBUG_CONSOLE_RELEASE_REQUIRES_ARM) == 0U)
+    {
+      if (DEBUG_CONSOLE_RELEASE_REQUIRES_ARM != 0U)
+      {
+        ChassisControl_CancelTestMode();
+      }
+    }
     if (Esp12fFlashBridge_IsActive() != 0U)
     {
       osDelay(DEBUG_CONSOLE_TASK_PERIOD_MS);
@@ -1765,10 +1846,18 @@ void Task_Usart1DebugConsole(void *argument)
 
     DebugConsole_PollRx();
 
-    if (debug_velocity_enabled != 0U)
+    if (debug_velocity_enabled != 0U &&
+        debug_velocity_generation != ControlManager_GetMotionRevokeGeneration())
+    {
+      Usart1DebugConsole_RevokeMaintenanceAuthorization();
+      LOG_WARN("velocity command requires a new local command");
+    }
+    else if (debug_velocity_enabled != 0U)
     {
       debug_velocity_cmd.timestamp_ms = now_ms;
-      if (ControlManager_SetCommand(&debug_velocity_cmd) != CONTROL_COMMAND_ACCEPTED)
+      if (ControlManager_SetCommandForGeneration(&debug_velocity_cmd,
+                                                 debug_velocity_generation) !=
+          CONTROL_COMMAND_ACCEPTED)
       {
         debug_velocity_enabled = 0U;
         LOG_WARN("velocity command stopped");

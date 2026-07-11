@@ -241,7 +241,10 @@ static void UpperUart_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t p
   }
   else if (cmd == UPPER_CMD_ESTOP && payload_len == UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN)
   {
-    ControlManager_SetEmergencyStop(payload[0]);
+    if (UpperProtocol_RemoteEstopSetRequested(payload, payload_len) != 0U)
+    {
+      ControlManager_SetEmergencyStop(1U);
+    }
   }
   else if (cmd == UPPER_CMD_LINE_CTRL && payload_len == UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN)
   {

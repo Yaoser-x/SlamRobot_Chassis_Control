@@ -35,8 +35,14 @@ typedef struct
 
 void ControlManager_Init(void);
 control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd);
+control_command_result_t ControlManager_SetCommandForGeneration(const chassis_cmd_t *cmd,
+                                                                uint32_t expected_generation);
 void ControlManager_SetEmergencyStop(uint8_t enabled);
 void ControlManager_SetFaultStop(uint8_t enabled);
+uint8_t ControlManager_BeginMaintenance(void);
+void ControlManager_EndMaintenance(void);
+uint8_t ControlManager_IsMaintenanceLocked(void);
+uint32_t ControlManager_GetMotionRevokeGeneration(void);
 void ControlManager_ClearCommand(void);
 void ControlManager_ClearSource(uint8_t source);
 uint8_t ControlManager_GetCommand(chassis_cmd_t *cmd, uint32_t now_ms);

@@ -4,6 +4,23 @@
 #include <stdio.h>
 #include <string.h>
 
+static uint32_t fake_primask;
+
+uint32_t __get_PRIMASK(void)
+{
+  return fake_primask;
+}
+
+void __disable_irq(void)
+{
+  fake_primask = 1U;
+}
+
+void __set_PRIMASK(uint32_t primask)
+{
+  fake_primask = primask;
+}
+
 static void require_int(int condition, const char *message)
 {
   if (!condition)
@@ -68,11 +85,47 @@ static void test_global_copy_is_isolated(void)
   require_close(roundtrip.speed_ramp_mps2, 1.5f, 0.0001f, "global store copies input");
 }
 
+static void test_snapshot_generation_is_consistent(void)
+{
+  param_store_t params;
+  param_store_t snapshot;
+  uint32_t generation_before;
+  uint32_t generation_after;
+
+  fake_primask = 0U;
+  ParamStore_SetDefaults();
+  generation_before = ParamStore_GetSnapshot(&snapshot);
+  params = snapshot;
+  params.track_width_m = 0.190f;
+
+  require_int(ParamStore_Set(&params) != 0U, "valid runtime update accepted");
+  generation_after = ParamStore_GetSnapshot(&snapshot);
+
+  require_int(generation_after > generation_before, "generation advances");
+  require_close(snapshot.track_width_m, 0.190f, 0.0001f, "snapshot matches generation");
+  require_int(fake_primask == 0U, "snapshot restores interrupt state");
+}
+
+static void test_invalid_set_does_not_advance_generation(void)
+{
+  param_store_t params;
+  uint32_t generation_before;
+  uint32_t generation_after;
+
+  generation_before = ParamStore_GetSnapshot(&params);
+  params.wheel_radius_m = 0.0f;
+  require_int(ParamStore_Set(&params) == 0U, "invalid runtime update rejected");
+  generation_after = ParamStore_GetSnapshot(&params);
+  require_int(generation_after == generation_before, "rejected update preserves generation");
+}
+
 int main(void)
 {
   test_defaults_match_safe_runtime_values();
   test_named_float_set_get_rejects_unsafe_values();
   test_global_copy_is_isolated();
+  test_snapshot_generation_is_consistent();
+  test_invalid_set_does_not_advance_generation();
 
   (void)printf("PASS: param store host tests\n");
   return 0;

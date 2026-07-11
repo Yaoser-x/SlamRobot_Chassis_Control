@@ -31,6 +31,8 @@ static UART_HandleTypeDef *tx_last_uart;
 static uint32_t fake_tick;
 static imu_bmi270_state_t fake_imu_state;
 static uint32_t fake_primask;
+static uint32_t estop_set_count;
+static uint8_t estop_last_value;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -125,7 +127,8 @@ control_command_result_t ControlManager_SetCommand(const chassis_cmd_t *cmd)
 
 void ControlManager_SetEmergencyStop(uint8_t enable)
 {
-  (void)enable;
+  estop_set_count++;
+  estop_last_value = enable;
 }
 
 uint8_t ControlManager_IsEmergencyStop(void)
@@ -212,6 +215,8 @@ static void reset_host_uart_state(void)
   fake_tick = 0U;
   fake_imu_state = (imu_bmi270_state_t){0};
   fake_primask = 0U;
+  estop_set_count = 0UL;
+  estop_last_value = 0U;
   usart3_instance = (USART_TypeDef){0};
   usart3_rx_stream = (DMA_Stream_TypeDef){0};
   hdma_usart3_rx = (DMA_HandleTypeDef){ .Instance = &usart3_rx_stream };
@@ -230,9 +235,9 @@ static void require_int(int condition, const char *message)
   }
 }
 
-static void feed_valid_estop_frame(void)
+static void feed_valid_estop_frame(uint8_t value)
 {
-  uint8_t payload = 1U;
+  uint8_t payload = value;
   uint8_t frame[UPPER_PROTOCOL_MAX_FRAME] = {0};
   uint16_t len = UpperProtocol_BuildFrame(UPPER_CMD_ESTOP,
                                           &payload,
@@ -257,12 +262,28 @@ static void test_dma_callbacks_and_valid_frame_timestamp(void)
 
   UpperUart_OnDmaHalf();
   UpperUart_OnDmaFull();
-  feed_valid_estop_frame();
+  feed_valid_estop_frame(1U);
   UpperUart_Update();
   UpperUart_GetState(&state);
   require_int(state.rx_dma_half_count == 1U, "rx half count");
   require_int(state.rx_dma_full_count == 1U, "rx full count");
   require_int(state.last_valid_frame_ms == 1000U, "last valid frame timestamp");
+}
+
+static void test_remote_estop_is_set_only(void)
+{
+  reset_host_uart_state();
+  UpperUart_Init();
+  feed_valid_estop_frame(0U);
+  UpperUart_Update();
+  require_int(estop_set_count == 0UL, "remote ESTOP=0 cannot clear local emergency stop");
+
+  reset_host_uart_state();
+  UpperUart_Init();
+  feed_valid_estop_frame(1U);
+  UpperUart_Update();
+  require_int(estop_set_count == 1UL && estop_last_value == 1U,
+              "remote ESTOP=1 sets emergency stop");
 }
 
 static void test_parser_timeout_and_uart_error_restart_dma(void)
@@ -409,6 +430,7 @@ int main(void)
   test_full_queue_drops_imu_for_status_priority();
   test_dma_callbacks_and_valid_frame_timestamp();
   test_parser_timeout_and_uart_error_restart_dma();
+  test_remote_estop_is_set_only();
   (void)printf("PASS: upper uart host tests\n");
   return 0;
 }

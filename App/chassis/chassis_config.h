@@ -64,8 +64,9 @@ extern "C" {
 #define PS2_AXIS_CENTER                     128
 #define PS2_AXIS_DEADZONE                   18
 #define PS2_MANUAL_CANCEL_THRESHOLD         0.12f
-#define PS2_MACRO_SHORT_TURN_MS             1571U
-#define PS2_MACRO_LONG_TURN_MS              6283U
+#define PS2_HEADING_QUARTER_TIMEOUT_MS      6000U
+#define PS2_HEADING_FULL_TIMEOUT_MS         20000U
+#define PS2_HEADING_IMU_FRESH_MS            50U
 #define PS2_MACRO_L1_MASK                   0x04U
 #define PS2_MACRO_R1_MASK                   0x08U
 #define PS2_MACRO_L2_MASK                   0x01U
@@ -75,6 +76,8 @@ extern "C" {
 /* 速度斜坡 */
 #define CHASSIS_SPEED_RAMP_MPS2             1.0f
 #define CHASSIS_ANGULAR_RAMP_RPS2           10.0f
+#define CHASSIS_TEST_MODE_LEASE_MS           400U
+#define CHASSIS_MAINTENANCE_MAX_SPEED_MPS    0.02f
 
 /* PID 控制 */
 #define CHASSIS_PID_ENABLED                 1U
@@ -84,6 +87,7 @@ extern "C" {
 #define CHASSIS_PID_FEEDBACK_MIN_TARGET_MPS 0.08f
 #define CHASSIS_PID_FEEDBACK_MIN_SPEED_MPS  0.01f
 #define CHASSIS_PID_FEEDBACK_LOSS_COUNT     50U
+#define CHASSIS_ENCODER_FEEDBACK_TIMEOUT_MS 150U
 
 #define CHASSIS_PID_KP_M1                   50.0f
 #define CHASSIS_PID_KI_M1                   8.0f
@@ -101,7 +105,12 @@ extern "C" {
 
 /* 电池监控 */
 #define BATTERY_LOW_WARN_V                  10.5f
-#define BATTERY_LOW_MONITOR_ENABLED         0U
+#define BATTERY_LOW_CLEAR_V                 11.0f
+#define BATTERY_CRITICAL_V                  9.0f
+#define BATTERY_CRITICAL_DEBOUNCE_MS        500U
+#define BATTERY_RECOVER_V                   9.6f
+#define BATTERY_RECOVER_DEBOUNCE_MS         2000U
+#define BATTERY_LOW_MONITOR_ENABLED         1U
 
 /* OLED SSD1306 配置 */
 #define OLED_I2C_ADDR                   0x3CU  /* 7-bit addr; HAL <<1 = 0x78 */

@@ -43,7 +43,9 @@ typedef struct
 
 void ChassisControl_Init(void);
 void ChassisControl_Step(uint32_t now_ms);
+uint8_t ChassisControl_IsStepActive(void);
 void ChassisControl_EmergencyStop(void);
+void ChassisControl_CancelTestMode(void);
 void ChassisControl_OpenLoopTest(int16_t left_permille, int16_t right_permille);
 void ChassisControl_RawInputTest(int16_t left_forward_permille,
                                  int16_t left_reverse_permille,

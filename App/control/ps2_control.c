@@ -3,9 +3,11 @@
 #include "chassis_config.h"
 #include "cmsis_os2.h"
 #include "control_manager.h"
+#include "imu_bmi270.h"
 #include "line_control.h"
 #include "main.h"
 #include "ps2_hw.h"
+#include "relative_yaw_control.h"
 
 #define PS2_DPAD_UP_MASK    0x10U
 #define PS2_DPAD_RIGHT_MASK 0x20U
@@ -15,10 +17,16 @@
 static ps2_control_state_t ps2_state;
 static uint8_t last_btn2;
 static uint8_t consecutive_read_failures;
-static uint8_t macro_active;
-static uint8_t macro_button;
-static float macro_angular_z;
-static uint32_t macro_end_ms;
+static relative_yaw_control_t heading_control;
+static uint8_t heading_button;
+static uint8_t heading_zero_pending;
+static uint32_t heading_motion_generation;
+
+#define PS2_HEADING_CRITICAL_QUALITY_MASK \
+  (IMU_BMI270_QUALITY_SPI_ERROR | IMU_BMI270_QUALITY_INIT_FAILED | \
+   IMU_BMI270_QUALITY_FIFO_OVERFLOW | IMU_BMI270_QUALITY_TIMESTAMP_ERROR | \
+   IMU_BMI270_QUALITY_GYRO_SATURATION | IMU_BMI270_QUALITY_ATTITUDE_INVALID | \
+   IMU_BMI270_QUALITY_PROFILE_MISMATCH)
 
 static void Ps2Control_CopyState(ps2_control_state_t *dst, const ps2_control_state_t *src)
 {
@@ -65,7 +73,9 @@ static float Ps2Control_ClampFloat(float value, float limit)
   return value;
 }
 
-static void Ps2Control_SubmitCommand(float linear_x, float angular_z)
+static void Ps2Control_SubmitCommand(float linear_x,
+                                     float angular_z,
+                                     uint32_t input_generation)
 {
   chassis_cmd_t cmd = {
     .linear_x = linear_x,
@@ -75,7 +85,20 @@ static void Ps2Control_SubmitCommand(float linear_x, float angular_z)
     .timestamp_ms = osKernelGetTickCount(),
   };
 
-  (void)ControlManager_SetCommand(&cmd);
+  (void)ControlManager_SetCommandForGeneration(&cmd, input_generation);
+}
+
+static void Ps2Control_SubmitHeadingCommand(float angular_z)
+{
+  chassis_cmd_t cmd = {
+    .linear_x = 0.0f,
+    .angular_z = angular_z,
+    .enable = 1U,
+    .source = CONTROL_SOURCE_PS2,
+    .timestamp_ms = osKernelGetTickCount(),
+  };
+
+  (void)ControlManager_SetCommandForGeneration(&cmd, heading_motion_generation);
 }
 
 static uint8_t Ps2Control_ManualInputActive(float linear_x, float angular_z)
@@ -123,41 +146,94 @@ static void Ps2Control_ApplyDpad(const ps2_hw_sample_t *sample, float *linear_x,
   }
 }
 
-static uint8_t Ps2Control_StartMacro(uint8_t pressed, uint32_t now_ms)
+static uint32_t Ps2Control_ImuGateFlags(const imu_bmi270_state_t *imu_state, uint32_t now_ms)
 {
+  uint32_t flags = 0U;
+
+  if (imu_state == 0 || imu_state->enabled == 0U || imu_state->online == 0U ||
+      imu_state->last_error != IMU_BMI270_ERROR_NONE ||
+      imu_state->init_state != IMU_BMI270_INIT_STATE_SAMPLING || imu_state->sample_count == 0UL)
+  {
+    flags |= PS2_HEADING_GATE_IMU_OFFLINE;
+  }
+  if (imu_state == 0 || imu_state->gyro_calibrated == 0U || imu_state->filter_initialized == 0U)
+  {
+    flags |= PS2_HEADING_GATE_IMU_UNCALIBRATED;
+  }
+  if (imu_state == 0 || (uint32_t)(now_ms - imu_state->last_update_ms) > PS2_HEADING_IMU_FRESH_MS)
+  {
+    flags |= PS2_HEADING_GATE_IMU_STALE;
+  }
+  if (imu_state == 0 || (imu_state->quality_flags & PS2_HEADING_CRITICAL_QUALITY_MASK) != 0UL)
+  {
+    flags |= PS2_HEADING_GATE_IMU_QUALITY;
+  }
+  return flags;
+}
+
+static uint8_t Ps2Control_ImuUsable(const imu_bmi270_state_t *imu_state, uint32_t now_ms)
+{
+  return (Ps2Control_ImuGateFlags(imu_state, now_ms) == 0U) ? 1U : 0U;
+}
+
+static uint8_t Ps2Control_StartMacro(uint8_t pressed,
+                                    const imu_bmi270_state_t *imu_state,
+                                    uint32_t imu_now_ms,
+                                    uint32_t control_now_ms,
+                                    uint32_t input_generation)
+{
+  float target_deg = 0.0f;
+  uint32_t timeout_ms = 0U;
+
+  if (Ps2Control_ImuUsable(imu_state, imu_now_ms) == 0U ||
+      input_generation != ControlManager_GetMotionRevokeGeneration())
+  {
+    return 0U;
+  }
   if ((pressed & PS2_MACRO_L1_MASK) != 0U)
   {
-    macro_active = 1U;
-    macro_button = PS2_MACRO_L1_MASK;
-    macro_angular_z = PS2_ANGULAR_MAX_RPS;
-    macro_end_ms = now_ms + PS2_MACRO_LONG_TURN_MS;
-    return 1U;
+    target_deg = 90.0f;
+    timeout_ms = PS2_HEADING_QUARTER_TIMEOUT_MS;
+    heading_button = PS2_MACRO_L1_MASK;
   }
-  if ((pressed & PS2_MACRO_R1_MASK) != 0U)
+  else if ((pressed & PS2_MACRO_R1_MASK) != 0U)
   {
-    macro_active = 1U;
-    macro_button = PS2_MACRO_R1_MASK;
-    macro_angular_z = -PS2_ANGULAR_MAX_RPS;
-    macro_end_ms = now_ms + PS2_MACRO_LONG_TURN_MS;
-    return 1U;
+    target_deg = -90.0f;
+    timeout_ms = PS2_HEADING_QUARTER_TIMEOUT_MS;
+    heading_button = PS2_MACRO_R1_MASK;
   }
-  if ((pressed & PS2_MACRO_L2_MASK) != 0U)
+  else if ((pressed & PS2_MACRO_L2_MASK) != 0U)
   {
-    macro_active = 1U;
-    macro_button = PS2_MACRO_L2_MASK;
-    macro_angular_z = PS2_ANGULAR_MAX_RPS;
-    macro_end_ms = now_ms + PS2_MACRO_SHORT_TURN_MS;
-    return 1U;
+    target_deg = 360.0f;
+    timeout_ms = PS2_HEADING_FULL_TIMEOUT_MS;
+    heading_button = PS2_MACRO_L2_MASK;
   }
-  if ((pressed & PS2_MACRO_R2_MASK) != 0U)
+  else if ((pressed & PS2_MACRO_R2_MASK) != 0U)
   {
-    macro_active = 1U;
-    macro_button = PS2_MACRO_R2_MASK;
-    macro_angular_z = -PS2_ANGULAR_MAX_RPS;
-    macro_end_ms = now_ms + PS2_MACRO_SHORT_TURN_MS;
-    return 1U;
+    target_deg = -360.0f;
+    timeout_ms = PS2_HEADING_FULL_TIMEOUT_MS;
+    heading_button = PS2_MACRO_R2_MASK;
   }
-  return 0U;
+  else
+  {
+    return 0U;
+  }
+
+  if (RelativeYawControl_Start(&heading_control,
+                               target_deg,
+                               imu_state->yaw_deg,
+                               control_now_ms,
+                               timeout_ms) == 0U)
+  {
+    return 0U;
+  }
+  heading_motion_generation = input_generation;
+  if (heading_motion_generation != ControlManager_GetMotionRevokeGeneration())
+  {
+    RelativeYawControl_Cancel(&heading_control, RELATIVE_YAW_END_SAFETY_STOP);
+    return 0U;
+  }
+  return 1U;
 }
 
 void Ps2Control_Init(void)
@@ -169,10 +245,10 @@ void Ps2Control_Init(void)
   ps2_state.right_y = PS2_AXIS_CENTER;
   last_btn2 = 0U;
   consecutive_read_failures = 0U;
-  macro_active = 0U;
-  macro_button = 0U;
-  macro_angular_z = 0.0f;
-  macro_end_ms = 0U;
+  RelativeYawControl_Init(&heading_control);
+  heading_button = 0U;
+  heading_zero_pending = 0U;
+  heading_motion_generation = ControlManager_GetMotionRevokeGeneration();
 
   Ps2Hw_Init();
   ps2_state.cmd_dat_swapped = 0U;
@@ -182,14 +258,19 @@ void Ps2Control_Update(void)
 {
   ps2_hw_sample_t sample;
   ps2_control_state_t next_state;
+  imu_bmi270_state_t imu_state;
   float linear_x = 0.0f;
   float angular_z = 0.0f;
   uint8_t pressed_btn2;
   uint8_t command_active;
+  uint8_t manual_active;
+  uint8_t input_revoked;
   uint32_t now_ms = osKernelGetTickCount();
+  uint32_t input_generation = ControlManager_GetMotionRevokeGeneration();
 
   if (Ps2Hw_ReadSample(&sample) == 0U)
   {
+    ps2_state.rx_fail_count++;
     if (consecutive_read_failures < PS2_OFFLINE_FAIL_LIMIT)
     {
       consecutive_read_failures++;
@@ -202,19 +283,29 @@ void Ps2Control_Update(void)
     Ps2Control_CopyState(&next_state, &ps2_state);
     next_state.online = 0U;
     next_state.drive_enabled = 0U;
+    if (heading_control.active != 0U)
+    {
+      RelativeYawControl_Cancel(&heading_control, RELATIVE_YAW_END_CONTROLLER_OFFLINE);
+    }
+    heading_button = 0U;
+    heading_zero_pending = 0U;
     next_state.macro_active = 0U;
     next_state.macro_button = 0U;
+    next_state.heading_active = 0U;
+    next_state.heading_end_reason = (uint8_t)heading_control.end_reason;
+    next_state.heading_target_deg = heading_control.target_delta_deg;
+    next_state.heading_accumulated_deg = heading_control.accumulated_delta_deg;
     next_state.linear_x = 0.0f;
     next_state.angular_z = 0.0f;
     Ps2Control_CopyState(&ps2_state, &next_state);
-    macro_active = 0U;
-    macro_button = 0U;
-    macro_angular_z = 0.0f;
     ControlManager_ClearSource(CONTROL_SOURCE_PS2);
     return;
   }
   consecutive_read_failures = 0U;
+  input_revoked = (input_generation != ControlManager_GetMotionRevokeGeneration()) ? 1U : 0U;
   ps2_state.rx_ok_count++;
+  ImuBmi270_GetState(&imu_state);
+  uint32_t imu_now_ms = HAL_GetTick();
 
   linear_x = -Ps2Control_NormalizeAxis(sample.left_y) * PS2_LINEAR_MAX_MPS;
   angular_z = -Ps2Control_NormalizeAxis(sample.right_x) * PS2_ANGULAR_MAX_RPS;
@@ -223,7 +314,7 @@ void Ps2Control_Update(void)
   last_btn2 = sample.btn2;
 
   /* 巡线模式切换：三角键上升沿触发 */
-  if ((pressed_btn2 & PS2_LINE_TOGGLE_MASK) != 0U)
+  if (input_revoked == 0U && (pressed_btn2 & PS2_LINE_TOGGLE_MASK) != 0U)
   {
     LineControl_Enable((LineControl_IsEnabled() == 0U) ? 1U : 0U);
   }
@@ -231,39 +322,66 @@ void Ps2Control_Update(void)
   linear_x = Ps2Control_ClampFloat(linear_x, PS2_LINEAR_MAX_MPS);
   angular_z = Ps2Control_ClampFloat(angular_z, PS2_ANGULAR_MAX_RPS);
 
-  if (Ps2Control_ManualInputActive(linear_x, angular_z) != 0U)
+  manual_active = Ps2Control_ManualInputActive(linear_x, angular_z);
+  if (ControlManager_IsEmergencyStop() != 0U ||
+      ControlManager_IsFaultStop() != 0U ||
+      ControlManager_IsMaintenanceLocked() != 0U ||
+      input_revoked != 0U ||
+      (heading_control.active != 0U &&
+       heading_motion_generation != ControlManager_GetMotionRevokeGeneration()))
   {
-    macro_active = 0U;
-    macro_button = 0U;
+    if (heading_control.active != 0U)
+    {
+      RelativeYawControl_Cancel(&heading_control, RELATIVE_YAW_END_SAFETY_STOP);
+    }
+    heading_button = 0U;
+    heading_zero_pending = 0U;
+    linear_x = 0.0f;
+    angular_z = 0.0f;
+    command_active = 0U;
   }
-  else if (macro_active != 0U)
+  else if (manual_active != 0U)
   {
-    if ((int32_t)(now_ms - macro_end_ms) >= 0)
+    if (heading_control.active != 0U)
     {
-      macro_active = 0U;
-      macro_button = 0U;
-      macro_angular_z = 0.0f;
+      RelativeYawControl_Cancel(&heading_control, RELATIVE_YAW_END_MANUAL_OVERRIDE);
     }
-    else
-    {
-      angular_z = macro_angular_z;
-    }
+    heading_button = 0U;
+    heading_zero_pending = 0U;
+    command_active = 1U;
   }
   else
   {
-    (void)Ps2Control_StartMacro(pressed_btn2, now_ms);
-    if (macro_active == 0U)
+    if (heading_control.active == 0U && heading_zero_pending == 0U)
     {
-      macro_button = 0U;
+      (void)Ps2Control_StartMacro(pressed_btn2,
+                                  &imu_state,
+                                  imu_now_ms,
+                                  now_ms,
+                                  input_generation);
     }
-    if (macro_active != 0U)
+    if (heading_control.active != 0U)
     {
-      angular_z = macro_angular_z;
+      if (RelativeYawControl_Update(&heading_control,
+                                   imu_state.yaw_deg,
+                                   imu_state.body_gyro_dps[2],
+                                   now_ms,
+                                   &angular_z) != 0U)
+      {
+        command_active = 1U;
+      }
+      else
+      {
+        heading_button = 0U;
+        heading_zero_pending = 1U;
+        command_active = 0U;
+      }
+    }
+    else
+    {
+      command_active = 0U;
     }
   }
-
-  command_active = (Ps2Control_ManualInputActive(linear_x, angular_z) != 0U ||
-                    macro_active != 0U) ? 1U : 0U;
 
   if (command_active == 0U)
   {
@@ -281,20 +399,45 @@ void Ps2Control_Update(void)
   next_state.left_y = sample.left_y;
   next_state.right_x = sample.right_x;
   next_state.right_y = sample.right_y;
-  next_state.macro_active = macro_active;
-  next_state.macro_button = macro_button;
+  next_state.macro_active = heading_control.active;
+  next_state.macro_button = heading_button;
+  next_state.heading_active = heading_control.active;
+  next_state.heading_end_reason = (uint8_t)heading_control.end_reason;
+  next_state.pressed_btn2 = pressed_btn2;
+  next_state.heading_gate_flags = Ps2Control_ImuGateFlags(&imu_state, imu_now_ms);
+  next_state.imu_age_ms = (uint32_t)(imu_now_ms - imu_state.last_update_ms);
+  next_state.heading_target_deg = heading_control.target_delta_deg;
+  next_state.heading_accumulated_deg = heading_control.accumulated_delta_deg;
   next_state.linear_x = linear_x;
   next_state.angular_z = angular_z;
   next_state.line_tracking_enabled = LineControl_IsEnabled();
   Ps2Control_CopyState(&ps2_state, &next_state);
 
-  if (command_active == 0U)
+  if (command_active != 0U)
   {
-    ControlManager_ClearSource(CONTROL_SOURCE_PS2);
+    if (heading_control.active != 0U)
+    {
+      Ps2Control_SubmitHeadingCommand(angular_z);
+    }
+    else
+    {
+      Ps2Control_SubmitCommand(linear_x, angular_z, input_generation);
+    }
     return;
   }
-
-  Ps2Control_SubmitCommand(linear_x, angular_z);
+  if (heading_zero_pending != 0U)
+  {
+    heading_zero_pending = 0U;
+    Ps2Control_SubmitCommand(0.0f, 0.0f, input_generation);
+  }
+  else if (LineControl_IsEnabled() != 0U)
+  {
+    ControlManager_ClearSource(CONTROL_SOURCE_PS2);
+  }
+  else
+  {
+    Ps2Control_SubmitCommand(0.0f, 0.0f, input_generation);
+  }
 }
 
 void Ps2Control_GetState(ps2_control_state_t *state)

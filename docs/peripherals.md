@@ -385,3 +385,10 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 ### 10.4 调试台输出
 
 上电时自动打印 `RESET` 和 `RESETTRACE` 行；`status` 命令也包含这些信息。详见 [调试命令台 — 复位诊断](debug-console.md#55-复位诊断reset-trace)。
+
+## 11. P0 硬件参数与保护
+
+- 实物轮径 70mm，默认轮半径 `0.035m`；轮距 `0.178m` 暂作默认；编码器 2464 count/轮圈。轮半径/轮距可运行时调整，电机/编码器方向仍为编译期参数。
+- 3S 电池：有效样本 <10.5V 置 `LOW_BATTERY`，>11.0V 解除；<9.0V 连续 500ms 锁存 `BATTERY_CRITICAL` bit18；>9.6V 连续 2s 仅自动清该位。
+- 用户确认的板级连线：四路 nFAULT 经两组 BAT54A 汇聚、47k 上拉，同时连到 PE15/TIM1_BKIN 与 PA6/TIM8_BKIN。仓库不含原理图/KiCad，该连线是用户确认的板级事实，不是从仓库原理图复核得出。
+- TIM1 是权威硬切断与软件锁存；TIM8 只是同网冗余诊断。`SYSTEM_ERROR_TIM_BREAK` 不把两路 BIF 计为两个独立故障。

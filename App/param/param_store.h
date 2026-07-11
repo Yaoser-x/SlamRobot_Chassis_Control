@@ -35,6 +35,7 @@ typedef struct
 void ParamStore_Defaults(param_store_t *params);
 void ParamStore_SetDefaults(void);
 void ParamStore_Get(param_store_t *params);
+uint32_t ParamStore_GetSnapshot(param_store_t *params);
 uint8_t ParamStore_Set(const param_store_t *params);
 uint8_t ParamStore_Validate(const param_store_t *params);
 uint8_t ParamStore_GetFloat(const param_store_t *params, const char *name, float *value);

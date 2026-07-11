@@ -1,5 +1,6 @@
 #include "esp12f_flash_bridge.h"
 
+#include "chassis_maintenance.h"
 #include "chassis_control.h"
 #include "control_manager.h"
 #include "esp12f_comm.h"
@@ -30,6 +31,7 @@ static uint8_t usart2_rx_byte;
 static volatile uint8_t pc_to_esp_tx_busy;
 static volatile uint8_t esp_to_pc_tx_busy;
 static esp12f_flash_bridge_state_t bridge_state;
+static uint8_t bridge_maintenance_lock_held;
 
 static uint32_t Esp12fFlashBridge_GetIdleMsLocked(void)
 {
@@ -225,6 +227,7 @@ static void Esp12fFlashBridge_ResetRuntimeState(uint32_t now_ms)
 void Esp12fFlashBridge_Init(void)
 {
   bridge_state = (esp12f_flash_bridge_state_t){0};
+  bridge_maintenance_lock_held = 0U;
   BridgeRing_Clear(&pc_to_esp_ring);
   BridgeRing_Clear(&esp_to_pc_ring);
   Esp12fFlashBridge_ResetTxBusy();
@@ -239,10 +242,15 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
   {
     return 1U;
   }
+  if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+  {
+    return 0U;
+  }
+  bridge_maintenance_lock_held = 1U;
 
   ControlManager_ClearCommand();
-  ChassisControl_OpenLoopTest(0, 0);
-  ChassisControl_RawInputTest(0, 0, 0, 0);
+  Usart1DebugConsole_RevokeMaintenanceAuthorization();
+  ChassisControl_CancelTestMode();
 
   (void)HAL_UART_Abort(&huart1);
   (void)HAL_UART_Abort(&huart2);
@@ -291,6 +299,8 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
     Esp12fFlashBridge_StartNormalBoot();
     Usart1DebugConsole_RestartRx();
     Esp12fComm_RestartRx();
+    bridge_maintenance_lock_held = 0U;
+    ChassisMaintenance_End();
     return 0U;
   }
 
@@ -302,6 +312,11 @@ void Esp12fFlashBridge_Disable(void)
   if (bridge_state.active == 0U)
   {
     Esp12fComm_SetDownloadMode(0U);
+    if (bridge_maintenance_lock_held != 0U)
+    {
+      bridge_maintenance_lock_held = 0U;
+      ChassisMaintenance_End();
+    }
     return;
   }
 
@@ -316,6 +331,8 @@ void Esp12fFlashBridge_Disable(void)
   Esp12fFlashBridge_StartNormalBoot();
   Usart1DebugConsole_RestartRx();
   Esp12fComm_RestartRx();
+  bridge_maintenance_lock_held = 0U;
+  ChassisMaintenance_End();
 }
 
 uint8_t Esp12fFlashBridge_IsActive(void)

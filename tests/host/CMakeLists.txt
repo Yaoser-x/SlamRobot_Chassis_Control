@@ -18,6 +18,7 @@ add_executable(test_f407_v2
     ../../App/chassis/chassis_math.c
     ../../App/chassis/chassis_task_timing.c
     ../../App/control/control_manager.c
+    ../../App/param/param_store.c
     ../../App/protocol/upper_protocol.c
     ../../BSP/encoder/encoder_math.c
     ../../BSP/motor/motor_output_logic.c
@@ -28,6 +29,7 @@ target_include_directories(test_f407_v2 PRIVATE
     .
     ../../App/chassis
     ../../App/control
+    ../../App/param
     ../../App/protocol
     ../../BSP
     ../../BSP/encoder
@@ -89,6 +91,21 @@ target_include_directories(test_line_uart PRIVATE
 )
 
 add_test(NAME line_uart COMMAND test_line_uart)
+
+add_executable(test_line_control
+    test_line_control.c
+    ../../App/control/line_control.c
+)
+
+target_include_directories(test_line_control PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../BSP
+    ../../BSP/line
+)
+
+add_test(NAME line_control COMMAND test_line_control)
 
 add_executable(test_upper_uart
     test_upper_uart.c
@@ -216,6 +233,7 @@ add_executable(test_chassis_control_current_limit
     ../../App/chassis/chassis_control.c
     ../../App/chassis/chassis_math.c
     ../../App/current/current_guard.c
+    ../../App/param/param_store.c
     ../../BSP/chassis_layout.c
     ../../BSP/pid/pid_controller.c
 )
@@ -225,6 +243,8 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
     ../../App/chassis
     ../../App/current
     ../../App/control
+    ../../App/monitor
+    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -233,6 +253,65 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
 )
 
 add_test(NAME chassis_control_current_limit COMMAND test_chassis_control_current_limit)
+
+add_executable(test_chassis_maintenance
+    test_chassis_maintenance.c
+    ../../App/chassis/chassis_maintenance.c
+)
+
+target_include_directories(test_chassis_maintenance PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../BSP
+    ../../BSP/encoder
+    ../../BSP/motor
+)
+
+add_test(NAME chassis_maintenance COMMAND test_chassis_maintenance)
+
+add_executable(test_debug_maintenance_policy
+    test_debug_maintenance_policy.c
+    ../../App/debug/debug_maintenance_policy.c
+)
+
+target_include_directories(test_debug_maintenance_policy PRIVATE
+    ../../App/debug
+)
+
+add_test(NAME debug_maintenance_policy COMMAND test_debug_maintenance_policy)
+
+add_executable(test_relative_yaw_control
+    test_relative_yaw_control.c
+    ../../App/control/relative_yaw_control.c
+)
+
+target_include_directories(test_relative_yaw_control PRIVATE
+    ../../App/control
+)
+
+target_link_libraries(test_relative_yaw_control PRIVATE m)
+
+add_test(NAME relative_yaw_control COMMAND test_relative_yaw_control)
+
+add_executable(test_ps2_control
+    test_ps2_control.c
+    ../../App/control/ps2_control.c
+    ../../App/control/relative_yaw_control.c
+)
+
+target_include_directories(test_ps2_control PRIVATE
+    .
+    ../../App/chassis
+    ../../App/control
+    ../../BSP
+    ../../BSP/imu
+    ../../BSP/ps2
+)
+
+target_link_libraries(test_ps2_control PRIVATE m)
+
+add_test(NAME ps2_control COMMAND test_ps2_control)
 
 add_executable(test_oled_ssd1306
     test_oled_ssd1306.c
@@ -282,6 +361,26 @@ target_include_directories(test_param_store PRIVATE
 )
 
 add_test(NAME param_store COMMAND test_param_store)
+
+add_executable(test_encoder_driver
+    test_encoder_driver.c
+    ../../App/param/param_store.c
+    ../../BSP/encoder/encoder_driver.c
+    ../../BSP/encoder/encoder_math.c
+)
+
+target_include_directories(test_encoder_driver PRIVATE
+    .
+    ../../App/chassis
+    ../../App/param
+    ../../BSP
+    ../../BSP/encoder
+    ../../BSP/motor
+)
+
+target_link_libraries(test_encoder_driver PRIVATE m)
+
+add_test(NAME encoder_driver COMMAND test_encoder_driver)
 
 add_executable(test_flash_param
     test_flash_param.c

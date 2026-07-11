@@ -6,6 +6,14 @@
 #include "line_uart.h"
 
 static volatile uint8_t g_line_enabled;
+static uint32_t g_line_enable_generation;
+
+static uint8_t LineControl_SafetyActive(void)
+{
+  return (ControlManager_IsEmergencyStop() != 0U ||
+          ControlManager_IsFaultStop() != 0U ||
+          ControlManager_IsMaintenanceLocked() != 0U) ? 1U : 0U;
+}
 
 static void LineControl_SubmitCommand(float linear_x, float angular_z)
 {
@@ -16,7 +24,7 @@ static void LineControl_SubmitCommand(float linear_x, float angular_z)
     .source = CONTROL_SOURCE_LINE,
     .timestamp_ms = osKernelGetTickCount(),
   };
-  (void)ControlManager_SetCommand(&cmd);
+  (void)ControlManager_SetCommandForGeneration(&cmd, g_line_enable_generation);
 }
 
 static float LineControl_ClampFloat(float value, float limit)
@@ -35,6 +43,7 @@ static float LineControl_ClampFloat(float value, float limit)
 void LineControl_Init(void)
 {
   g_line_enabled = LINE_DEFAULT_ENABLED;
+  g_line_enable_generation = ControlManager_GetMotionRevokeGeneration();
 }
 
 void LineControl_Update(void)
@@ -50,6 +59,12 @@ void LineControl_Update(void)
 
   if (g_line_enabled == 0U)
   {
+    return;
+  }
+  if (LineControl_SafetyActive() != 0U ||
+      g_line_enable_generation != ControlManager_GetMotionRevokeGeneration())
+  {
+    LineControl_Enable(0U);
     return;
   }
 
@@ -99,6 +114,22 @@ void LineControl_Enable(uint8_t enable)
 {
   if (enable != 0U)
   {
+    uint32_t generation = ControlManager_GetMotionRevokeGeneration();
+
+    if (LineControl_SafetyActive() != 0U)
+    {
+      g_line_enabled = 0U;
+      ControlManager_ClearSource(CONTROL_SOURCE_LINE);
+      return;
+    }
+    g_line_enable_generation = generation;
+    if (LineControl_SafetyActive() != 0U ||
+        generation != ControlManager_GetMotionRevokeGeneration())
+    {
+      g_line_enabled = 0U;
+      ControlManager_ClearSource(CONTROL_SOURCE_LINE);
+      return;
+    }
     g_line_enabled = 1U;
   }
   else
