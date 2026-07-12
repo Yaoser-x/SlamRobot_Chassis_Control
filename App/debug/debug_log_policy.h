@@ -5,14 +5,14 @@
 
 typedef enum
 {
-  DEBUG_LOG_FORMAT_CSV = 0,
-  DEBUG_LOG_FORMAT_JSON = 1
+    DEBUG_LOG_FORMAT_CSV  = 0,
+    DEBUG_LOG_FORMAT_JSON = 1
 } debug_log_format_t;
 
 typedef struct
 {
-  uint32_t period_ms;
-  debug_log_format_t format;
+    uint32_t           period_ms;
+    debug_log_format_t format;
 } debug_log_policy_t;
 
 /** Initialize deterministic console logging defaults. */

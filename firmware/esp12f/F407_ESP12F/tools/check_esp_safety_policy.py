@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -117,10 +118,12 @@ def main() -> int:
     bridge_update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_OnTxCplt")
     bridge_rx_failure = section(bridge_enable, "if (rx_ok == 0U)", "return 1U;")
     begin_index = bridge_enable.find("ChassisMaintenance_Begin()")
-    active_index = bridge_enable.find("bridge_state.active = 1U")
+    active_match = re.search(r'bridge_state\.active\s*=\s*1U', bridge_enable)
+    active_index = active_match.start() if active_match else -1
     failure_end_index = bridge_rx_failure.find("ChassisMaintenance_End();")
     failure_return_index = bridge_rx_failure.find("return 0U;")
-    disable_active_index = bridge_disable.find("bridge_state.active = 0U")
+    disable_match = re.search(r'bridge_state\.active\s*=\s*0U', bridge_disable)
+    disable_active_index = disable_match.start() if disable_match else -1
     disable_end_index = bridge_disable.rfind("ChassisMaintenance_End();")
     idle_condition_index = bridge_update.find("idle_ms >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS")
     idle_disable_index = bridge_update.find("Esp12fFlashBridge_Disable();", idle_condition_index)

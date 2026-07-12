@@ -15,8 +15,8 @@
 
 #include <stdint.h>
 
-#define OLED_FONT_12X12_WIDTH   12
-#define OLED_FONT_12X12_HEIGHT  12
+#define OLED_FONT_12X12_WIDTH          12
+#define OLED_FONT_12X12_HEIGHT         12
 #define OLED_FONT_12X12_BYTES_PER_CHAR 24
 
 /*

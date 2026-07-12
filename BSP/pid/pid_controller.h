@@ -4,42 +4,43 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef struct
-{
-  float kp;
-  float ki;
-  float kd;
-  float integral_limit;
-  float output_limit;
-} pid_params_t;
+    typedef struct
+    {
+        float kp;
+        float ki;
+        float kd;
+        float integral_limit;
+        float output_limit;
+    } pid_params_t;
 
-typedef struct
-{
-  pid_params_t params;
-  float integral;
-  float prev_error;
-  uint8_t initialized;
-} pid_state_t;
+    typedef struct
+    {
+        pid_params_t params;
+        float        integral;
+        float        prev_error;
+        uint8_t      initialized;
+    } pid_state_t;
 
-void PidController_Init(pid_state_t *pid, const pid_params_t *params);
-void PidController_Reset(pid_state_t *pid);
-float PidController_Step(pid_state_t *pid, float target, float actual, float dt_s);
-float PidController_StepLimited(pid_state_t *pid,
-                                float target,
-                                float actual,
-                                float dt_s,
-                                int8_t actuator_limit_direction);
-float PidController_StepBounded(pid_state_t *pid,
-                                float target,
-                                float actual,
-                                float dt_s,
-                                int8_t actuator_limit_direction,
-                                float output_min,
-                                float output_max);
-void PidController_SetParams(pid_state_t *pid, const pid_params_t *params);
+    void  PidController_Init(pid_state_t *pid, const pid_params_t *params);
+    void  PidController_Reset(pid_state_t *pid);
+    float PidController_Step(pid_state_t *pid, float target, float actual, float dt_s);
+    float PidController_StepLimited(pid_state_t *pid,
+                                    float        target,
+                                    float        actual,
+                                    float        dt_s,
+                                    int8_t       actuator_limit_direction);
+    float PidController_StepBounded(pid_state_t *pid,
+                                    float        target,
+                                    float        actual,
+                                    float        dt_s,
+                                    int8_t       actuator_limit_direction,
+                                    float        output_min,
+                                    float        output_max);
+    void  PidController_SetParams(pid_state_t *pid, const pid_params_t *params);
 
 #ifdef __cplusplus
 }

@@ -8,15 +8,16 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef enum
-{
-  OLED_PHASE_WELCOME = 0,
-  OLED_PHASE_SELFCHECK,
-  OLED_PHASE_NORMAL
-} oled_phase_t;
+    typedef enum
+    {
+        OLED_PHASE_WELCOME = 0,
+        OLED_PHASE_SELFCHECK,
+        OLED_PHASE_NORMAL
+    } oled_phase_t;
 
 /* Self-check error bitmask (bits 9~16, to avoid conflict with motor/battery bits 0~8) */
 #define OLED_SC_ERROR_I2C        (1UL << 9)
@@ -28,11 +29,11 @@ typedef enum
 #define OLED_SC_ERROR_UART4_LINE (1UL << 15)
 #define OLED_SC_ERROR_ESP12F     (1UL << 16)
 
-void OLED_UI_Init(void);
-void OLED_UI_Update(void);
-oled_phase_t OLED_UI_GetPhase(void);
-uint8_t OLED_UI_SelfCheckDone(void);
-uint32_t OLED_UI_GetSelfCheckErrors(void);
+    void         OLED_UI_Init(void);
+    void         OLED_UI_Update(void);
+    oled_phase_t OLED_UI_GetPhase(void);
+    uint8_t      OLED_UI_SelfCheckDone(void);
+    uint32_t     OLED_UI_GetSelfCheckErrors(void);
 
 #ifdef __cplusplus
 }

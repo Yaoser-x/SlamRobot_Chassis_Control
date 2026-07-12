@@ -5,7 +5,7 @@
 
 typedef int32_t osStatus_t;
 
-uint32_t osKernelGetTickCount(void);
+uint32_t   osKernelGetTickCount(void);
 osStatus_t osDelayUntil(uint32_t ticks);
 
 #endif

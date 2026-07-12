@@ -4,13 +4,14 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/** Capture the hardware reset flags before application initialization changes them. */
-void ResetReason_Capture(uint32_t flags);
-/** Return the reset flags captured during startup. */
-uint32_t ResetReason_GetFlags(void);
+    /** Capture the hardware reset flags before application initialization changes them. */
+    void ResetReason_Capture(uint32_t flags);
+    /** Return the reset flags captured during startup. */
+    uint32_t ResetReason_GetFlags(void);
 
 #ifdef __cplusplus
 }

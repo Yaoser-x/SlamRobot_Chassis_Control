@@ -12,10 +12,10 @@
 
 #include <stdint.h>
 
-#define OLED_FONT_8X16_WIDTH   8
-#define OLED_FONT_8X16_HEIGHT  16
-#define OLED_FONT_8X16_START   0x20
-#define OLED_FONT_8X16_COUNT   95
+#define OLED_FONT_8X16_WIDTH          8
+#define OLED_FONT_8X16_HEIGHT         16
+#define OLED_FONT_8X16_START          0x20
+#define OLED_FONT_8X16_COUNT          95
 #define OLED_FONT_8X16_BYTES_PER_CHAR 16
 
 extern const uint8_t OLED_FONT_8X16_DATA[OLED_FONT_8X16_COUNT * OLED_FONT_8X16_BYTES_PER_CHAR];

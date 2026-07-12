@@ -7,18 +7,18 @@
 #include "chassis_control.h"
 
 /** Format stable JSON fields shared by straight-line HIL logging. */
-size_t DebugStraightTelemetry_FormatJson(char *buffer,
-                                         size_t buffer_size,
+size_t DebugStraightTelemetry_FormatJson(char                          *buffer,
+                                         size_t                         buffer_size,
                                          const chassis_control_state_t *chassis,
-                                         const adc_monitor_state_t *adc);
+                                         const adc_monitor_state_t     *adc);
 
 /** Format the CSV header suffix in the same field order as the data suffix. */
 size_t DebugStraightTelemetry_FormatCsvHeader(char *buffer, size_t buffer_size);
 
 /** Format stable CSV values from the same snapshots used by JSON logging. */
-size_t DebugStraightTelemetry_FormatCsv(char *buffer,
-                                        size_t buffer_size,
+size_t DebugStraightTelemetry_FormatCsv(char                          *buffer,
+                                        size_t                         buffer_size,
                                         const chassis_control_state_t *chassis,
-                                        const adc_monitor_state_t *adc);
+                                        const adc_monitor_state_t     *adc);
 
 #endif

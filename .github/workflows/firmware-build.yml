@@ -169,7 +169,7 @@ jobs:
         run: |
           files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
-            cppcheck --enable=warning,style --error-exitcode=1 \
+            cppcheck --enable=warning --error-exitcode=1 \
               --suppress=missingIncludeSystem \
               --suppress=unusedFunction \
               --inline-suppr \

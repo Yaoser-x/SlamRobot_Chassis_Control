@@ -12,8 +12,8 @@
 
 #include <stdint.h>
 
-#define OLED_FONT_16X16_WIDTH   16
-#define OLED_FONT_16X16_HEIGHT  16
+#define OLED_FONT_16X16_WIDTH          16
+#define OLED_FONT_16X16_HEIGHT         16
 #define OLED_FONT_16X16_BYTES_PER_CHAR 32
 
 extern const char    OLED_FONT_16X16_CHARS[];

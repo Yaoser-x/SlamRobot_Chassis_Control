@@ -305,6 +305,8 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
     ../../BSP/pid
 )
 
+target_link_libraries(test_chassis_control_current_limit PRIVATE m)
+
 add_test(NAME chassis_control_current_limit COMMAND test_chassis_control_current_limit)
 
 add_executable(test_chassis_maintenance
