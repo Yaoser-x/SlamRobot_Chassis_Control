@@ -116,6 +116,24 @@ static void test_update_publishes_after_unmasked_calculation(void)
   require_int(fake_primask == 0U, "encoder update restores interrupt state");
 }
 
+static void test_runtime_encoder_direction_reverses_delta(void)
+{
+  encoder_state_t state;
+  param_store_t params;
+
+  ParamStore_Defaults(&params);
+  params.encoder_dir[MOTOR_ID_M2] = -1;
+  require_int(ParamStore_Set(&params) != 0U, "runtime encoder direction accepted");
+  EncoderDriver_Init();
+  set_all_counters(100U);
+  EncoderDriver_Update(10U);
+  tim4_instance.CNT = 110U;
+  EncoderDriver_Update(20U);
+  EncoderDriver_GetState(&state);
+  require_int(state.delta[MOTOR_ID_M2] == -10, "runtime encoder direction reverses delta");
+  ParamStore_SetDefaults();
+}
+
 static void test_runtime_wheel_radius_changes_speed_generation(void)
 {
   encoder_state_t before;
@@ -146,6 +164,7 @@ static void test_runtime_wheel_radius_changes_speed_generation(void)
 
 int main(void)
 {
+  test_runtime_encoder_direction_reverses_delta();
   test_update_publishes_after_unmasked_calculation();
   test_runtime_wheel_radius_changes_speed_generation();
   (void)printf("PASS: encoder driver host tests\n");

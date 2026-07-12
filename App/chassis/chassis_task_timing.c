@@ -120,6 +120,20 @@ void ChassisTaskTiming_GetHealth(chassis_task_health_t *health)
   }
 }
 
+uint16_t ChassisTaskTiming_GetTimeoutMask(void)
+{
+  uint16_t mask = 0U;
+
+  for (uint32_t i = 0U; i < (uint32_t)CHASSIS_TASK_TIMING_COUNT && i < 16U; ++i)
+  {
+    if (timed_out[i] != 0U)
+    {
+      mask |= (uint16_t)(1U << i);
+    }
+  }
+  return mask;
+}
+
 void ChassisTaskTiming_Reset(void)
 {
   for (uint32_t i = 0U; i < (uint32_t)CHASSIS_TASK_TIMING_COUNT; ++i)

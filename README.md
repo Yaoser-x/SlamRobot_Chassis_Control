@@ -29,7 +29,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
-| **构建验证** | Debug — RAM 81.2KB (61.9%) / FLASH 180.7KB (34.5%) — Host 测试 18/18 通过 — CI 双 preset + host-tests + format-check + static-analysis + CubeMX 安全配置检查 |
+| **构建验证** | CI 双 preset + 34 项 Host 行为测试 + 全树 format/static analysis + CubeMX 安全检查 + ESP8266 Core 3.1.2 固定版本编译 |
 
 > V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 
@@ -51,7 +51,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 │   ├── flash/         STM32 Flash 参数镜像读写
 │   ├── imu/           BMI270 SPI 驱动 (配置表/校准/姿态估计/诊断)
 │   ├── led/           状态 LED
-│   ├── line/          八路巡线传感器 (帧解析 + P 控制)
+│   ├── line/          八路巡线传感器 (逐通道阈值/极性 + 参数化 PD)
 │   ├── motor/         DRV8874 H-bridge PWM 驱动
 │   ├── oled/          SSD1306 OLED 驱动 (I2C1 128×64)
 │   ├── pid/           速度环 PID
@@ -73,7 +73,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | --- | --- |
 | [外设资源](docs/peripherals.md) | 电机 PWM/编码器/ADC/通信接口/BMI270/ESP12F GPIO/PS2/巡线传感器 — 完整硬件规格 |
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
-| [Upper Protocol v2](docs/upper-protocol-v2.md) | USART3/ESP12F 帧格式、65B STATUS、99B IMU、温度编码与黄金测试向量 |
+| [Upper Protocol v2](docs/upper-protocol-v2.md) | USART3/ESP12F 帧格式、兼容旧帧的 28B DIAGNOSTIC、温度编码与黄金测试向量 |
 | [调试命令台](docs/debug-console.md) | USART1 全命令参考、CSV 日志字段过滤、line 命令输出格式 |
 | [STM32 主控烧录](docs/stm32-flashing.md) | STM32CubeProgrammer / OpenOCD / st-flash 烧录流程 |
 | [ESP12F 烧录](docs/esp12f-flashing.md) | esptool.py / Arduino IDE 烧录流程、透明桥行为、常见故障排查 |

@@ -145,12 +145,11 @@ jobs:
 
       - name: clang-format dry run
         run: |
-          files=$(git diff --name-only --diff-filter=ACMRT HEAD^ HEAD -- '*.c' '*.h' \
-            | grep -E '^(App|BSP|tests/host)/' || true)
+          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
             echo "$files" | xargs clang-format --dry-run --Werror
           else
-            echo "No changed App/BSP/tests C/H files."
+            echo "No App/BSP/tests C/H files."
           fi
 
   static-analysis:
@@ -168,8 +167,7 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          files=$(git diff --name-only --diff-filter=ACMRT HEAD^ HEAD -- '*.c' '*.h' \
-            | grep -E '^(App|BSP|tests/host)/' || true)
+          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
             cppcheck --enable=warning,style --error-exitcode=1 \
               --suppress=missingIncludeSystem \
@@ -177,5 +175,25 @@ jobs:
               --inline-suppr \
               $files
           else
-            echo "No changed App/BSP/tests C/H files."
+            echo "No App/BSP/tests C/H files."
           fi
+
+  esp8266-build:
+    name: ESP8266 Bridge (Core 3.1.2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install locked toolchain and library
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp8266:esp8266@3.1.2
+          arduino-cli lib install WebSockets@2.7.2
+      - name: Compile ESP8266 firmware
+        run: arduino-cli compile --fqbn esp8266:esp8266:generic firmware/esp12f/F407_ESP12F
+      - name: Check ESP safety and embedded page
+        run: |
+          python firmware/esp12f/F407_ESP12F/tools/check_ap_only.py
+          python firmware/esp12f/F407_ESP12F/tools/check_esp_safety_policy.py

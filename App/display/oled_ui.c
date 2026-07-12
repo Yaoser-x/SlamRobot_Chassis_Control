@@ -23,6 +23,9 @@
 #include "adc_monitor.h"
 #include "upper_uart.h"
 #include "oled_selfcheck.h"
+#include "oled_calibration_view.h"
+
+#include <stdio.h>
 
 /* ================================================================
  *  Self-Check Item Definitions
@@ -86,6 +89,8 @@ static uint8_t mod_adc_online;
 /* Error code blink */
 static uint32_t blink_tick;
 static uint8_t  blink_visible;
+static uint8_t  last_calibration_state;
+static uint32_t calibration_terminal_since_ms;
 
 /* ================================================================
  *  Chinese String Drawing Helper
@@ -399,7 +404,33 @@ static void OLED_UI_DrawNormal(void)
 {
   uint32_t now = osKernelGetTickCount();
   system_monitor_state_t mon;
+  imu_bmi270_state_t imu;
+  oled_calibration_view_t calibration_view;
   SystemMonitor_GetState(&mon);
+  ImuBmi270_GetState(&imu);
+
+  if (imu.gyro_auto_cal_state != last_calibration_state)
+  {
+    last_calibration_state = imu.gyro_auto_cal_state;
+    calibration_terminal_since_ms =
+      (imu.gyro_auto_cal_state == IMU_BMI270_GYRO_AUTO_CAL_DONE ||
+       imu.gyro_auto_cal_state == IMU_BMI270_GYRO_AUTO_CAL_FAILED) ? now : 0U;
+  }
+  calibration_view = OLED_CalibrationView_Build(imu.gyro_auto_cal_state,
+                                                 imu.gyro_cal_sample_count,
+                                                 500U,
+                                                 imu.gyro_cal_fail_reason,
+                                                 now,
+                                                 calibration_terminal_since_ms);
+  if (calibration_view.visible != 0U)
+  {
+    char progress[16];
+    SSD1306_DrawString(0, 0, calibration_view.title, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+    SSD1306_DrawString(0, 2, calibration_view.detail, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+    (void)snprintf(progress, sizeof(progress), "PROGRESS %3u%%", calibration_view.progress_percent);
+    SSD1306_DrawString(0, 4, progress, OLED_FONT_8X16_DATA, 8, 16, OLED_FONT_8X16_START);
+    return;
+  }
 
   /* Row 0: Runtime (pages 0~1) */
   {
@@ -519,6 +550,8 @@ void OLED_UI_Init(void)
 
   blink_tick = 0U;
   blink_visible = 1U;
+  last_calibration_state = IMU_BMI270_GYRO_AUTO_CAL_DISABLED;
+  calibration_terminal_since_ms = 0U;
 }
 
 void OLED_UI_Update(void)

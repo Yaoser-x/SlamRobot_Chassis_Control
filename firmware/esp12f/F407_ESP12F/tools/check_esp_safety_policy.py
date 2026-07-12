@@ -21,6 +21,9 @@ def section(text: str, start: str, end: str) -> str:
 
 def main() -> int:
     sketch = SKETCH_PATH.read_text(encoding="utf-8")
+    link_policy = (SKETCH_PATH.parent / "esp_link_policy.h").read_text(encoding="utf-8")
+    frame_parser = (SKETCH_PATH.parent / "esp_frame_parser.h").read_text(encoding="utf-8")
+    esp_source = sketch + "\n" + link_policy + "\n" + frame_parser
     upper_uart = (ROOT / "App/protocol/upper_uart.c").read_text(encoding="utf-8")
     esp_comm = (ROOT / "App/protocol/esp12f_comm.c").read_text(encoding="utf-8")
     bridge = (ROOT / "BSP/esp12f/esp12f_flash_bridge.c").read_text(encoding="utf-8")
@@ -60,6 +63,15 @@ def main() -> int:
         "buildEstopFrame(1U",
         "请本地解除",
         "sendNeutralControl();",
+        "EspLinkPolicy_Update",
+        "ESP_LINK_STATUS_TIMEOUT_MS 500UL",
+        "ESP_FRAME_INTERBYTE_TIMEOUT_MS 100UL",
+        "status_age_ms",
+        '\\"online\\":%s',
+        "Serial.hasOverrun()",
+        "Serial.hasRxError()",
+        "g_link_policy",
+        "EspFrameParser_OnUartError",
     )
     forbidden = (
         "#define AP_PASS",
@@ -72,7 +84,7 @@ def main() -> int:
     )
 
     for marker in required:
-        if marker not in sketch:
+        if marker not in esp_source:
             errors.append(f"missing ESP safety marker: {marker}")
     for marker in forbidden:
         if marker in sketch or marker in upper_uart or marker in esp_comm:
@@ -124,6 +136,14 @@ def main() -> int:
         errors.append("upper UART remote ESTOP is not set-only")
     if "UpperProtocol_RemoteEstopSetRequested" not in esp_comm:
         errors.append("STM32 ESP remote ESTOP is not set-only")
+    for marker in ("rx_timeout_resets", "uart_errors", "Esp12fComm_ResetParser();"):
+        if marker not in esp_comm:
+            errors.append(f"STM32 ESP recovery marker missing: {marker}")
+    loop_body = section(sketch, "void loop()", "// --- 推送遥测 ---")
+    uart_error_index = loop_body.find("Serial.hasOverrun()")
+    consume_index = loop_body.find("if (EspFrameParser_Feed", uart_error_index + 1)
+    if uart_error_index < 0 or consume_index < 0 or uart_error_index > consume_index:
+        errors.append("ESP UART hardware errors are not handled before consuming RX bytes")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)

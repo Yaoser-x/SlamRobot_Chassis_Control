@@ -13,6 +13,8 @@
 #include "param_store.h"
 #include "pid_controller.h"
 #include "system_monitor.h"
+#include "straight_controller.h"
+#include "imu_bmi270.h"
 
 static chassis_control_state_t chassis_state;
 static uint8_t open_loop_test_enabled;
@@ -34,6 +36,7 @@ static uint32_t test_mode_last_refresh_ms;
 static uint8_t test_mode_lease_active;
 static param_store_t runtime_params;
 static uint32_t runtime_params_generation;
+static straight_controller_t straight_controller;
 
 static int16_t ChassisControl_ClampPermille(int32_t permille)
 {
@@ -112,6 +115,21 @@ static void ChassisControl_ResetRamps(void)
 {
   ramped_linear_x = 0.0f;
   ramped_angular_z = 0.0f;
+  StraightController_Reset(&straight_controller);
+  chassis_state.straight_active = 0U;
+  chassis_state.straight_direction = 0;
+  chassis_state.straight_transition_distance_m = 0.0f;
+  chassis_state.straight_in_transition = 0U;
+  chassis_state.straight_trim_mps = 0.0f;
+  chassis_state.straight_wheel_correction_mps = 0.0f;
+  chassis_state.straight_heading_error_deg = 0.0f;
+  chassis_state.straight_heading_integral_deg_s = 0.0f;
+  chassis_state.straight_heading_correction_mps = 0.0f;
+  chassis_state.straight_total_correction_mps = 0.0f;
+  chassis_state.straight_heading_degraded = 0U;
+  chassis_state.straight_derated = 0U;
+  chassis_state.pwm_saturated = 0U;
+  chassis_state.control_source = CONTROL_SOURCE_NONE;
 }
 
 static void ChassisControl_ResetPidTargets(void)
@@ -534,6 +552,7 @@ void ChassisControl_Init(void)
   pid_motor[2] = (pid_state_t){0};
   pid_motor[3] = (pid_state_t){0};
   runtime_params_generation = 0UL;
+  StraightController_Init(&straight_controller);
   last_control_step_ms = 0U;
   control_dt_initialized = 0U;
   control_step_active = 0U;
@@ -580,6 +599,7 @@ static void ChassisControl_StepImpl(uint32_t now_ms)
     chassis_state.motor_actual_mps[i] = encoder_state.speed_mps[i];
     chassis_state.motor_speed_valid[i] = encoder_state.speed_valid[i];
   }
+  ChassisControl_SyncSideState();
 
   if (ControlManager_IsMaintenanceLocked() != 0U ||
       ControlManager_IsEmergencyStop() != 0U ||
@@ -732,6 +752,88 @@ static void ChassisControl_StepImpl(uint32_t now_ms)
                                                &runtime_params,
                                                &ramp_left,
                                                &ramp_right);
+    if (ChassisControl_AbsFloat(cmd.angular_z) <= 0.0001f &&
+        ChassisControl_AbsFloat(cmd.linear_x) > 0.001f)
+    {
+      imu_bmi270_state_t imu_state;
+      uint8_t imu_valid;
+      straight_controller_params_t straight_params;
+      straight_controller_input_t straight_input;
+      straight_controller_result_t straight_result;
+
+      ImuBmi270_GetState(&imu_state);
+      imu_valid = (imu_state.online != 0U && imu_state.gyro_calibrated != 0U &&
+                   (uint32_t)(now_ms - imu_state.last_update_ms) <= 100U &&
+                   (imu_state.quality_flags & (IMU_BMI270_QUALITY_SPI_ERROR |
+                                               IMU_BMI270_QUALITY_TIMESTAMP_ERROR |
+                                               IMU_BMI270_QUALITY_GYRO_SATURATION |
+                                               IMU_BMI270_QUALITY_INIT_FAILED |
+                                               IMU_BMI270_QUALITY_PROFILE_MISMATCH)) == 0U) ? 1U : 0U;
+      straight_params = (straight_controller_params_t){
+        .trim_forward_015_mps = runtime_params.straight_trim_forward_015_mps,
+        .trim_forward_030_mps = runtime_params.straight_trim_forward_030_mps,
+        .trim_reverse_015_mps = runtime_params.straight_trim_reverse_015_mps,
+        .trim_reverse_030_mps = runtime_params.straight_trim_reverse_030_mps,
+        .wheel_coupling_gain = runtime_params.straight_wheel_coupling_gain,
+        .heading_kp = runtime_params.straight_heading_kp,
+        .heading_ki = runtime_params.straight_heading_ki,
+        .heading_integral_limit_deg_s = runtime_params.straight_heading_integral_limit_deg_s,
+        .max_speed_mps = runtime_params.straight_max_speed_mps,
+        .heading_enabled = runtime_params.straight_heading_hold_enabled,
+      };
+      straight_input = (straight_controller_input_t){
+        .now_ms = now_ms,
+        .source = cmd.source,
+        .generation = ControlManager_GetMotionRevokeGeneration(),
+        .requested_linear_mps = ramped_linear_x,
+        .requested_angular_rps = cmd.angular_z,
+        .actual_left_mps = chassis_state.left_actual_mps,
+        .actual_right_mps = chassis_state.right_actual_mps,
+        .left_speed_valid = chassis_state.left_speed_valid,
+        .right_speed_valid = chassis_state.right_speed_valid,
+        .left_output_permille = chassis_state.left_output_permille,
+        .right_output_permille = chassis_state.right_output_permille,
+        .left_current_limited = chassis_state.left_current_limited,
+        .right_current_limited = chassis_state.right_current_limited,
+        .imu_valid = imu_valid,
+        .gyro_z_dps = imu_state.gyro_corrected_dps[2],
+      };
+      straight_result = StraightController_Step(&straight_controller, &straight_params, &straight_input);
+      ramp_left = straight_result.left_target_mps;
+      ramp_right = straight_result.right_target_mps;
+      chassis_state.straight_active = straight_result.active;
+      chassis_state.straight_direction = straight_result.direction;
+      chassis_state.straight_transition_distance_m = straight_result.transition_distance_m;
+      chassis_state.straight_in_transition = straight_result.in_transition;
+      chassis_state.straight_trim_mps = straight_result.trim_correction_mps;
+      chassis_state.straight_wheel_correction_mps = straight_result.wheel_correction_mps;
+      chassis_state.straight_heading_error_deg = straight_result.heading_error_deg;
+      chassis_state.straight_heading_integral_deg_s = straight_result.heading_integral_deg_s;
+      chassis_state.straight_heading_correction_mps = straight_result.heading_correction_mps;
+      chassis_state.straight_total_correction_mps = straight_result.total_correction_mps;
+      chassis_state.straight_heading_degraded = straight_result.heading_degraded;
+      chassis_state.straight_derated = straight_result.derated;
+    }
+    else
+    {
+      StraightController_Reset(&straight_controller);
+      chassis_state.straight_active = 0U;
+      chassis_state.straight_direction = 0;
+      chassis_state.straight_transition_distance_m = 0.0f;
+      chassis_state.straight_in_transition = 0U;
+      chassis_state.straight_trim_mps = 0.0f;
+      chassis_state.straight_wheel_correction_mps = 0.0f;
+      chassis_state.straight_heading_error_deg = 0.0f;
+      chassis_state.straight_heading_integral_deg_s = 0.0f;
+      chassis_state.straight_heading_correction_mps = 0.0f;
+      chassis_state.straight_total_correction_mps = 0.0f;
+      chassis_state.straight_heading_degraded = 0U;
+      chassis_state.straight_derated = 0U;
+    }
+    chassis_state.control_source = cmd.source;
+    chassis_state.pwm_saturated =
+      (uint8_t)(ChassisControl_AbsFloat((float)chassis_state.left_output_permille) >= 850.0f ||
+                ChassisControl_AbsFloat((float)chassis_state.right_output_permille) >= 850.0f);
     ChassisControl_ScaleWheelTargets(&ramp_left, &ramp_right);
     ChassisControl_SetSideTargets(ramp_left, ramp_right, 0U);
 
@@ -815,6 +917,9 @@ static void ChassisControl_StepImpl(uint32_t now_ms)
     }
     chassis_state.output_enabled = 1U;
     ChassisControl_SyncSideState();
+    chassis_state.pwm_saturated =
+      (uint8_t)(ChassisControl_AbsFloat((float)chassis_state.left_output_permille) >= 850.0f ||
+                ChassisControl_AbsFloat((float)chassis_state.right_output_permille) >= 850.0f);
   }
   else
   {

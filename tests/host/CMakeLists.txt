@@ -20,6 +20,7 @@ add_executable(test_f407_v2
     ../../App/control/control_manager.c
     ../../App/param/param_store.c
     ../../App/protocol/upper_protocol.c
+    ../../App/monitor/reset_reason.c
     ../../BSP/encoder/encoder_math.c
     ../../BSP/motor/motor_output_logic.c
     ../../BSP/pid/pid_controller.c
@@ -30,7 +31,10 @@ target_include_directories(test_f407_v2 PRIVATE
     ../../App/chassis
     ../../App/control
     ../../App/param
+    ../../App/param
+    ../../App/chassis
     ../../App/protocol
+    ../../App/monitor
     ../../BSP
     ../../BSP/encoder
     ../../BSP/imu
@@ -52,6 +56,28 @@ target_include_directories(test_chassis_layout_2wd PRIVATE
 )
 
 add_test(NAME chassis_layout_2wd COMMAND test_chassis_layout_2wd)
+
+add_executable(test_runtime_direction_apply test_runtime_direction_apply.c)
+target_include_directories(test_runtime_direction_apply PRIVATE ../../BSP)
+add_test(NAME runtime_direction_apply COMMAND test_runtime_direction_apply)
+
+add_executable(test_straight_controller
+    test_straight_controller.c
+    ../../App/chassis/straight_controller.c
+)
+target_include_directories(test_straight_controller PRIVATE ../../App/chassis)
+target_link_libraries(test_straight_controller PRIVATE m)
+add_test(NAME straight_controller COMMAND test_straight_controller)
+
+add_executable(test_esp_link_policy test_esp_link_policy.c)
+target_include_directories(test_esp_link_policy PRIVATE
+    ../../firmware/esp12f/F407_ESP12F)
+add_test(NAME esp_link_policy COMMAND test_esp_link_policy)
+
+add_executable(test_esp_frame_parser test_esp_frame_parser.c)
+target_include_directories(test_esp_frame_parser PRIVATE
+    ../../firmware/esp12f/F407_ESP12F)
+add_test(NAME esp_frame_parser COMMAND test_esp_frame_parser)
 
 add_executable(test_adc_monitor
     test_adc_monitor.c
@@ -83,11 +109,16 @@ add_test(NAME adc_monitor COMMAND test_adc_monitor)
 add_executable(test_line_uart
     test_line_uart.c
     ../../BSP/line/line_uart.c
+    ../../App/param/param_store.c
 )
 
 target_include_directories(test_line_uart PRIVATE
     .
     ../../BSP/line
+    ../../App/param
+    ../../App/chassis
+    ../../BSP
+    ../../BSP/motor
 )
 
 add_test(NAME line_uart COMMAND test_line_uart)
@@ -95,17 +126,31 @@ add_test(NAME line_uart COMMAND test_line_uart)
 add_executable(test_line_control
     test_line_control.c
     ../../App/control/line_control.c
+    ../../App/control/line_calibration.c
 )
 
 target_include_directories(test_line_control PRIVATE
     .
     ../../App/chassis
     ../../App/control
+    ../../App/param
     ../../BSP
     ../../BSP/line
+    ../../BSP/motor
 )
 
 add_test(NAME line_control COMMAND test_line_control)
+
+add_executable(test_line_calibration
+    test_line_calibration.c
+    ../../App/control/line_calibration.c
+)
+
+target_include_directories(test_line_calibration PRIVATE
+    ../../App/control
+)
+
+add_test(NAME line_calibration COMMAND test_line_calibration)
 
 add_executable(test_upper_uart
     test_upper_uart.c
@@ -134,11 +179,13 @@ add_executable(test_motor_driver_gpio
     ../../BSP/chassis_layout.c
     ../../BSP/motor/motor_driver.c
     ../../BSP/motor/motor_output_logic.c
+    ../../App/param/param_store.c
 )
 
 target_include_directories(test_motor_driver_gpio PRIVATE
     .
     ../../App/chassis
+    ../../App/param
     ../../BSP
     ../../BSP/motor
 )
@@ -156,6 +203,7 @@ target_include_directories(test_system_monitor PRIVATE
     ../../App/chassis
     ../../App/control
     ../../App/monitor
+    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -175,6 +223,7 @@ target_include_directories(test_system_monitor_fault_enabled PRIVATE
     ../../App/chassis
     ../../App/control
     ../../App/monitor
+    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -197,6 +246,7 @@ target_include_directories(test_current_guard PRIVATE
     .
     ../../App/chassis
     ../../App/current
+    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/motor
@@ -214,6 +264,7 @@ target_include_directories(test_current_guard_soft_limit PRIVATE
     .
     ../../App/chassis
     ../../App/current
+    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/motor
@@ -232,6 +283,7 @@ add_executable(test_chassis_control_current_limit
     test_chassis_control_current_limit.c
     ../../App/chassis/chassis_control.c
     ../../App/chassis/chassis_math.c
+    ../../App/chassis/straight_controller.c
     ../../App/current/current_guard.c
     ../../App/param/param_store.c
     ../../BSP/chassis_layout.c
@@ -248,6 +300,7 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
+    ../../BSP/imu
     ../../BSP/motor
     ../../BSP/pid
 )
@@ -281,6 +334,26 @@ target_include_directories(test_debug_maintenance_policy PRIVATE
 
 add_test(NAME debug_maintenance_policy COMMAND test_debug_maintenance_policy)
 
+add_executable(test_debug_log_policy
+    test_debug_log_policy.c
+    ../../App/debug/debug_log_policy.c
+)
+target_include_directories(test_debug_log_policy PRIVATE ../../App/debug)
+add_test(NAME debug_log_policy COMMAND test_debug_log_policy)
+
+add_executable(test_debug_straight_telemetry
+    test_debug_straight_telemetry.c
+    ../../App/debug/debug_straight_telemetry.c
+)
+target_include_directories(test_debug_straight_telemetry PRIVATE
+    ../../App/chassis
+    ../../App/debug
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/motor
+)
+add_test(NAME debug_straight_telemetry COMMAND test_debug_straight_telemetry)
+
 add_executable(test_relative_yaw_control
     test_relative_yaw_control.c
     ../../App/control/relative_yaw_control.c
@@ -306,6 +379,7 @@ target_include_directories(test_ps2_control PRIVATE
     ../../App/control
     ../../BSP
     ../../BSP/imu
+    ../../BSP/led
     ../../BSP/ps2
 )
 
@@ -441,7 +515,20 @@ target_include_directories(test_oled_selfcheck PRIVATE
 
 add_test(NAME oled_selfcheck COMMAND test_oled_selfcheck)
 
+add_executable(test_oled_calibration_view
+    test_oled_calibration_view.c
+    ../../App/display/oled_calibration_view.c
+)
+target_include_directories(test_oled_calibration_view PRIVATE
+    ../../App/display
+    ../../BSP/imu
+)
+add_test(NAME oled_calibration_view COMMAND test_oled_calibration_view)
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+add_test(NAME analysis_scripts
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_analysis_scripts.py)
 
 add_executable(generate_upper_v2_golden
     generate_upper_v2_golden.c

@@ -1,6 +1,7 @@
 #include "upper_uart.h"
 
 #include "chassis_config.h"
+#include "adc_monitor.h"
 #include "chassis_control.h"
 #include "chassis_layout.h"
 #include "cmsis_os2.h"
@@ -10,6 +11,8 @@
 #include "line_control.h"
 #include "main.h"
 #include "motor_driver.h"
+#include "power_on_self_test.h"
+#include "reset_reason.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -31,7 +34,8 @@ typedef enum
 typedef enum
 {
   UPPER_TX_PRIORITY_IMU = 0,
-  UPPER_TX_PRIORITY_STATUS = 1
+  UPPER_TX_PRIORITY_DIAGNOSTIC = 1,
+  UPPER_TX_PRIORITY_STATUS = 2
 } upper_tx_priority_t;
 
 typedef struct
@@ -59,6 +63,9 @@ static uint16_t upper_last_write_pos;
 static uint8_t upper_imu_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint8_t upper_imu_payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
 static uint32_t upper_last_imu_status_ms;
+static uint8_t upper_diagnostic_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
+static uint8_t upper_diagnostic_payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN];
+static uint32_t upper_last_diagnostic_ms;
 static upper_tx_slot_t upper_tx_queue[UPPER_UART_TX_QUEUE_CAPACITY];
 static uint8_t upper_tx_queue_count;
 static uint8_t upper_tx_active_slot;
@@ -166,7 +173,7 @@ static uint8_t UpperUart_EnqueueTx(const uint8_t *frame,
   __disable_irq();
   if (upper_tx_queue_count >= UPPER_UART_TX_QUEUE_CAPACITY)
   {
-    if (priority != UPPER_TX_PRIORITY_STATUS || UpperUart_DropQueuedImuLocked() == 0U)
+    if (priority == UPPER_TX_PRIORITY_IMU || UpperUart_DropQueuedImuLocked() == 0U)
     {
       upper_state.tx_busy_drops++;
       __set_PRIMASK(primask);
@@ -460,6 +467,7 @@ void UpperUart_Init(void)
   upper_last_write_pos = 0U;
   upper_last_status_ms = 0U;
   upper_last_imu_status_ms = 0U;
+  upper_last_diagnostic_ms = 0U;
   upper_state = (upper_uart_state_t){0};
   memset(upper_tx_queue, 0, sizeof(upper_tx_queue));
   upper_tx_queue_count = 0U;
@@ -468,6 +476,66 @@ void UpperUart_Init(void)
   upper_last_rx_timestamp_ms = 0U;
   UpperUart_ResetParser();
   (void)HAL_UART_Receive_DMA(&huart3, upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
+}
+
+static void UpperUart_SendDiagnostic(uint32_t now_ms)
+{
+  upper_diagnostic_payload_t diagnostic = {0};
+  post_result_t post;
+  adc_monitor_state_t adc;
+  system_monitor_state_t monitor;
+  imu_bmi270_state_t imu;
+  uint8_t payload_len;
+  uint16_t frame_len;
+
+  if ((now_ms - upper_last_diagnostic_ms) < UPPER_DIAGNOSTIC_PERIOD_MS)
+  {
+    return;
+  }
+
+  POST_GetResult(&post);
+  AdcMonitor_GetState(&adc);
+  SystemMonitor_GetState(&monitor);
+  ImuBmi270_GetState(&imu);
+  diagnostic.post_done = post.done;
+  if (imu.online != 0U)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_ONLINE;
+  }
+  if (imu.gyro_calibrated != 0U)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_CALIBRATED;
+  }
+  if (imu.quality_flags != 0UL || imu.last_error != IMU_BMI270_ERROR_NONE)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_ERROR;
+  }
+  if (imu.sensor_time_valid != 0U)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_SENSOR_TIME;
+  }
+  diagnostic.post_error_flags = post.error_flags;
+  diagnostic.adc_invalid_reason_flags = adc.invalid_reason_flags;
+  diagnostic.task_timeout_mask = monitor.task_timeout_mask;
+  diagnostic.imu_quality_flags = imu.quality_flags;
+  diagnostic.reset_reason_flags = ResetReason_GetFlags();
+  diagnostic.uptime_ms = now_ms;
+
+  payload_len = UpperProtocol_BuildDiagnosticPayload(&diagnostic,
+                                                      upper_diagnostic_payload,
+                                                      sizeof(upper_diagnostic_payload));
+  frame_len = UpperProtocol_BuildFrame(UPPER_CMD_DIAGNOSTIC,
+                                       upper_diagnostic_payload,
+                                       payload_len,
+                                       upper_diagnostic_tx_frame,
+                                       sizeof(upper_diagnostic_tx_frame));
+  if (frame_len > 0U &&
+      UpperUart_EnqueueTx(upper_diagnostic_tx_frame,
+                          frame_len,
+                          UPPER_TX_PRIORITY_DIAGNOSTIC) != 0U)
+  {
+    upper_last_diagnostic_ms = now_ms;
+  }
 }
 
 static void UpperUart_SendImuStatus(uint32_t now_ms)
@@ -537,6 +605,7 @@ void UpperUart_Update(void)
 
   UpperUart_PollRx();
   UpperUart_SendStatus(now_ms);
+  UpperUart_SendDiagnostic(now_ms);
   UpperUart_SendImuStatus(now_ms);
 }
 

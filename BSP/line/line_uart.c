@@ -2,6 +2,7 @@
 
 #include "cmsis_os2.h"
 #include "usart.h"
+#include "param_store.h"
 
 #define LINE_UART_RX_BUFFER_SIZE 128U
 
@@ -174,6 +175,9 @@ static void LineUart_ProcessByte(uint8_t byte)
 
         if (cmd == LINE_SENSOR_CMD_ANALOG && line_data_len >= 16U)
         {
+          param_store_t params;
+
+          (void)ParamStore_GetSnapshot(&params);
           /* 提取 8 通道数据 */
           for (uint8_t ch = 0U; ch < LINE_SENSOR_CHANNELS; ++ch)
           {
@@ -181,7 +185,9 @@ static void LineUart_ProcessByte(uint8_t byte)
             uint16_t raw = (uint16_t)line_frame_buf[base] | ((uint16_t)line_frame_buf[base + 1U] << 8);
 
             line_sensor_data.analog[ch] = raw;
-            line_sensor_data.state[ch] = (raw < LINE_ANALOG_THRESHOLD) ? 1U : 0U;
+            line_sensor_data.state[ch] = (params.line_active_low != 0U) ?
+                                           ((raw < params.line_threshold_raw[ch]) ? 1U : 0U) :
+                                           ((raw > params.line_threshold_raw[ch]) ? 1U : 0U);
           }
           line_sensor_data.timestamp_ms = osKernelGetTickCount();
           line_sensor_data.valid = 1U;

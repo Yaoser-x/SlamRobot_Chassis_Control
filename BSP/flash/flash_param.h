@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #define FLASH_PARAM_MAGIC 0x464B3037UL
-#define FLASH_PARAM_SCHEMA_VERSION 2UL
+#define FLASH_PARAM_SCHEMA_VERSION 4UL
 #define FLASH_PARAM_COMMIT_MARKER 0xC01117EDUL
 
 typedef struct
@@ -54,6 +54,10 @@ const char *FlashParam_StatusString(flash_param_status_t status);
 #ifdef FLASH_PARAM_HOST_TEST
 void FlashParamHost_Reset(void);
 void FlashParamHost_SetProgramBudget(int32_t word_budget);
+flash_param_status_t FlashParamHost_SeedSchema2(const param_store_t *params);
+flash_param_status_t FlashParamHost_SeedSchema2WithCalibration(
+  const param_store_t *params, const imu_bmi270_calibration_t *calibration);
+flash_param_status_t FlashParamHost_SeedSchema3(const param_store_t *params);
 flash_param_status_t FlashParamHost_SeedLegacy(const param_store_t *params);
 uint32_t FlashParamHost_GetWatchdogMaintenanceEnterCount(void);
 uint32_t FlashParamHost_GetWatchdogMaintenanceExitCount(void);

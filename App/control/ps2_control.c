@@ -4,6 +4,8 @@
 #include "cmsis_os2.h"
 #include "control_manager.h"
 #include "imu_bmi270.h"
+#include "led_status.h"
+#include "line_calibration.h"
 #include "line_control.h"
 #include "main.h"
 #include "ps2_hw.h"
@@ -13,6 +15,8 @@
 #define PS2_DPAD_RIGHT_MASK 0x20U
 #define PS2_DPAD_DOWN_MASK  0x40U
 #define PS2_DPAD_LEFT_MASK  0x80U
+#define PS2_HEADING_MACRO_MASK \
+  (PS2_MACRO_L1_MASK | PS2_MACRO_R1_MASK | PS2_MACRO_L2_MASK | PS2_MACRO_R2_MASK)
 
 static ps2_control_state_t ps2_state;
 static uint8_t last_btn2;
@@ -21,6 +25,7 @@ static relative_yaw_control_t heading_control;
 static uint8_t heading_button;
 static uint8_t heading_zero_pending;
 static uint32_t heading_motion_generation;
+static uint32_t ps2_idle_start_ms;
 
 #define PS2_HEADING_CRITICAL_QUALITY_MASK \
   (IMU_BMI270_QUALITY_SPI_ERROR | IMU_BMI270_QUALITY_INIT_FAILED | \
@@ -262,6 +267,7 @@ void Ps2Control_Update(void)
   float linear_x = 0.0f;
   float angular_z = 0.0f;
   uint8_t pressed_btn2;
+  uint8_t macro_pressed;
   uint8_t command_active;
   uint8_t manual_active;
   uint8_t input_revoked;
@@ -298,6 +304,7 @@ void Ps2Control_Update(void)
     next_state.linear_x = 0.0f;
     next_state.angular_z = 0.0f;
     Ps2Control_CopyState(&ps2_state, &next_state);
+    ps2_idle_start_ms = 0U;
     ControlManager_ClearSource(CONTROL_SOURCE_PS2);
     return;
   }
@@ -311,12 +318,69 @@ void Ps2Control_Update(void)
   angular_z = -Ps2Control_NormalizeAxis(sample.right_x) * PS2_ANGULAR_MAX_RPS;
   Ps2Control_ApplyDpad(&sample, &linear_x, &angular_z);
   pressed_btn2 = (uint8_t)(sample.btn2 & (uint8_t)~last_btn2);
+  macro_pressed = (uint8_t)(pressed_btn2 & PS2_HEADING_MACRO_MASK);
   last_btn2 = sample.btn2;
 
   /* 巡线模式切换：三角键上升沿触发 */
   if (input_revoked == 0U && (pressed_btn2 & PS2_LINE_TOGGLE_MASK) != 0U)
   {
     LineControl_Enable((LineControl_IsEnabled() == 0U) ? 1U : 0U);
+  }
+
+  /* 巡线标定：方块=地板，圆形=黑线（上升沿触发，不与其他操作冲突） */
+  if (input_revoked == 0U)
+  {
+    line_calibration_t cal_state;
+
+    LineControl_CalibrationGet(&cal_state);
+
+    if ((pressed_btn2 & PS2_LINECAL_FLOOR_MASK) != 0U)
+    {
+      if (cal_state.collecting == 0U)
+      {
+        (void)LineControl_CalibrationBegin(LINE_CALIBRATION_SURFACE_FLOOR, 100U);
+        LedStatus_SetMode(LED_STATUS_CAL_RUNNING);
+      }
+    }
+    if ((pressed_btn2 & PS2_LINECAL_LINE_MASK) != 0U)
+    {
+      if (cal_state.collecting == 0U)
+      {
+        (void)LineControl_CalibrationBegin(LINE_CALIBRATION_SURFACE_LINE, 100U);
+        LedStatus_SetMode(LED_STATUS_CAL_RUNNING);
+      }
+    }
+
+    /* 采集完成后提示单面成功 / 双面完成自动 apply */
+    {
+      static uint8_t prev_ready_mask;
+
+      if (cal_state.collecting == 0U && cal_state.ready_mask != prev_ready_mask)
+      {
+        if ((cal_state.ready_mask & 0x03U) == 0x03U)
+        {
+          /* 双面采集完成 → 自动 apply */
+          if (LineControl_CalibrationApplyAndSave() != 0U)
+          {
+            LedStatus_SetMode(LED_STATUS_CAL_APPLIED);
+          }
+          else
+          {
+            /* 分离度不足，标定失败 — 快闪提示 */
+            LedStatus_SetMode(LED_STATUS_CAL_RUNNING);
+          }
+          /* 清标定状态，防止重复触发 apply */
+          LineControl_CalibrationCancel();
+          prev_ready_mask = 0U;
+        }
+        else
+        {
+          /* 单面完成 */
+          LedStatus_SetMode(LED_STATUS_CAL_OK);
+          prev_ready_mask = cal_state.ready_mask;
+        }
+      }
+    }
   }
 
   linear_x = Ps2Control_ClampFloat(linear_x, PS2_LINEAR_MAX_MPS);
@@ -354,11 +418,17 @@ void Ps2Control_Update(void)
   {
     if (heading_control.active == 0U && heading_zero_pending == 0U)
     {
-      (void)Ps2Control_StartMacro(pressed_btn2,
-                                  &imu_state,
-                                  imu_now_ms,
-                                  now_ms,
-                                  input_generation);
+      uint8_t macro_started = Ps2Control_StartMacro(pressed_btn2,
+                                                    &imu_state,
+                                                    imu_now_ms,
+                                                    now_ms,
+                                                    input_generation);
+      if (macro_started == 0U && macro_pressed != 0U &&
+          Ps2Control_ImuGateFlags(&imu_state, imu_now_ms) != 0U)
+      {
+        /* Keep retrying only while the physical macro button remains held. */
+        last_btn2 = (uint8_t)(last_btn2 & (uint8_t)~macro_pressed);
+      }
     }
     if (heading_control.active != 0U)
     {
@@ -415,6 +485,7 @@ void Ps2Control_Update(void)
 
   if (command_active != 0U)
   {
+    ps2_idle_start_ms = 0U;
     if (heading_control.active != 0U)
     {
       Ps2Control_SubmitHeadingCommand(angular_z);
@@ -428,16 +499,28 @@ void Ps2Control_Update(void)
   if (heading_zero_pending != 0U)
   {
     heading_zero_pending = 0U;
+    ps2_idle_start_ms = 0U;
     Ps2Control_SubmitCommand(0.0f, 0.0f, input_generation);
+    return;
   }
-  else if (LineControl_IsEnabled() != 0U)
+  if (LineControl_IsEnabled() != 0U)
+  {
+    ps2_idle_start_ms = 0U;
+    ControlManager_ClearSource(CONTROL_SOURCE_PS2);
+    return;
+  }
+  /* PS2 is online but idle — after a grace period, release the slot so
+     lower-priority sources (ESP12F) can take over. */
+  if (ps2_idle_start_ms == 0U)
+  {
+    ps2_idle_start_ms = now_ms;
+  }
+  if ((uint32_t)(now_ms - ps2_idle_start_ms) >= PS2_IDLE_RELEASE_MS)
   {
     ControlManager_ClearSource(CONTROL_SOURCE_PS2);
+    return;
   }
-  else
-  {
-    Ps2Control_SubmitCommand(0.0f, 0.0f, input_generation);
-  }
+  Ps2Control_SubmitCommand(0.0f, 0.0f, input_generation);
 }
 
 void Ps2Control_GetState(ps2_control_state_t *state)

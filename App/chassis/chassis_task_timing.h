@@ -39,6 +39,7 @@ uint32_t ChassisTaskTiming_GetMissedCount(chassis_task_timing_id_t task);
 void ChassisTaskTiming_Heartbeat(chassis_task_timing_id_t task, uint32_t now_ms);
 void ChassisTaskTiming_UpdateTimeouts(uint32_t now_ms);
 void ChassisTaskTiming_GetHealth(chassis_task_health_t *health);
+uint16_t ChassisTaskTiming_GetTimeoutMask(void);
 void ChassisTaskTiming_Reset(void);
 
 #ifdef __cplusplus

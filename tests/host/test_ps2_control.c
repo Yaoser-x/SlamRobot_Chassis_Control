@@ -3,6 +3,8 @@
 #include "chassis_config.h"
 #include "control_manager.h"
 #include "imu_bmi270.h"
+#include "led_status.h"
+#include "line_calibration.h"
 #include "line_control.h"
 #include "ps2_hw.h"
 
@@ -25,6 +27,8 @@ static uint32_t set_command_count;
 static uint32_t clear_source_count;
 static uint32_t fake_motion_revoke_generation;
 static uint8_t fake_maintenance_crosses_on_query;
+static line_calibration_t fake_cal;
+static uint8_t fake_cal_build_result;
 
 static void require_int(int condition, const char *message)
 {
@@ -87,6 +91,18 @@ uint32_t ControlManager_GetMotionRevokeGeneration(void) { return fake_motion_rev
 
 void LineControl_Enable(uint8_t enable) { fake_line_enabled = (enable != 0U) ? 1U : 0U; }
 uint8_t LineControl_IsEnabled(void) { return fake_line_enabled; }
+void LineControl_CalibrationGet(line_calibration_t *cal) { if (cal) *cal = fake_cal; }
+uint8_t LineControl_CalibrationBegin(line_calibration_surface_t s, uint16_t n)
+{
+  (void)s; (void)n; fake_cal.collecting = 1U; return 1U;
+}
+uint8_t LineControl_CalibrationBuild(uint16_t thresh[8], uint8_t *al)
+{
+  (void)thresh; (void)al; return fake_cal_build_result;
+}
+void LineControl_CalibrationCancel(void) { fake_cal = (line_calibration_t){0}; }
+uint8_t LineControl_CalibrationApplyAndSave(void) { return fake_cal_build_result; }
+void LedStatus_SetMode(led_status_mode_t mode) { (void)mode; }
 void ImuBmi270_GetState(imu_bmi270_state_t *state) { *state = fake_imu; }
 
 static void reset_fake(void)
@@ -120,6 +136,8 @@ static void reset_fake(void)
   clear_source_count = 0UL;
   fake_motion_revoke_generation = 0UL;
   fake_maintenance_crosses_on_query = 0U;
+  fake_cal = (line_calibration_t){0};
+  fake_cal_build_result = 0U;
   Ps2Control_Init();
 }
 
@@ -216,6 +234,45 @@ static void test_imu_gate_and_runtime_cancel(void)
               "IMU error/offline does NOT cancel active heading");
 }
 
+static void test_held_macro_retries_after_transient_imu_gate(void)
+{
+  ps2_control_state_t state;
+
+  reset_fake();
+  fake_imu.last_update_ms = fake_hal_tick_ms - 51U;
+  fake_sample.btn2 = PS2_MACRO_L1_MASK;
+  Ps2Control_Update();
+  Ps2Control_GetState(&state);
+  require_int(state.heading_active == 0U, "stale IMU initially rejects held macro");
+
+  fake_tick_ms += 20U;
+  fake_hal_tick_ms += 20U;
+  fake_imu.last_update_ms = fake_hal_tick_ms;
+  Ps2Control_Update();
+  Ps2Control_GetState(&state);
+  require_int(state.heading_active != 0U && state.heading_target_deg == 90.0f,
+              "held macro starts when transient IMU gate clears");
+}
+
+static void test_released_macro_does_not_start_after_imu_gate_clears(void)
+{
+  ps2_control_state_t state;
+
+  reset_fake();
+  fake_imu.last_update_ms = fake_hal_tick_ms - 51U;
+  fake_sample.btn2 = PS2_MACRO_L1_MASK;
+  Ps2Control_Update();
+
+  fake_sample.btn2 = 0U;
+  fake_tick_ms += 20U;
+  fake_hal_tick_ms += 20U;
+  fake_imu.last_update_ms = fake_hal_tick_ms;
+  Ps2Control_Update();
+  Ps2Control_GetState(&state);
+  require_int(state.heading_active == 0U,
+              "released macro cannot start after transient IMU gate clears");
+}
+
 static void test_offline_and_safety_stop_cancel_heading(void)
 {
   ps2_control_state_t state;
@@ -298,6 +355,8 @@ int main(void)
   test_heading_button_mapping();
   test_heading_imu_freshness_uses_hal_tick_epoch();
   test_imu_gate_and_runtime_cancel();
+  test_held_macro_retries_after_transient_imu_gate();
+  test_released_macro_does_not_start_after_imu_gate_clears();
   test_offline_and_safety_stop_cancel_heading();
   test_revoke_generation_cancels_heading_after_short_safety_event();
   test_maintenance_rejects_new_heading_macro();

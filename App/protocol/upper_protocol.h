@@ -19,6 +19,8 @@ extern "C" {
 #define UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN 1U
 #define UPPER_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN 0U
 #define UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN 99U
+#define UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN 28U
+#define UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION 1U
 #define UPPER_PROTOCOL_MOTOR_COUNT 4U
 
 #define UPPER_STATUS_FLAG_ESTOP           (1U << 0)
@@ -47,6 +49,7 @@ typedef enum
   UPPER_CMD_LINE_CTRL = 0x03,
   UPPER_CMD_CLEAR_FAULT = 0x04,
   UPPER_CMD_STATUS = 0x81,
+  UPPER_CMD_DIAGNOSTIC = 0x82,
   UPPER_CMD_IMU_STATUS = 0x83
 } upper_protocol_cmd_t;
 
@@ -91,12 +94,27 @@ typedef struct
   int8_t temperature_c;
 } upper_imu_status_payload_t;
 
+typedef struct
+{
+  uint8_t post_done;
+  uint8_t imu_status_flags;
+  uint32_t post_error_flags;
+  uint32_t adc_invalid_reason_flags;
+  uint16_t task_timeout_mask;
+  uint32_t imu_quality_flags;
+  uint32_t reset_reason_flags;
+  uint32_t uptime_ms;
+} upper_diagnostic_payload_t;
+
 uint8_t UpperProtocol_Checksum8(const uint8_t *data, uint16_t length);
 uint8_t UpperProtocol_RemoteEstopSetRequested(const uint8_t *payload, uint8_t payload_len);
 uint16_t UpperProtocol_BuildFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len, uint8_t *out, uint16_t out_len);
 uint8_t UpperProtocol_ParseVelocityPayload(const uint8_t *payload, uint8_t payload_len, upper_velocity_payload_t *velocity);
 uint8_t UpperProtocol_BuildStatusPayload(const upper_status_payload_t *status, uint8_t *out, uint8_t out_len);
 uint8_t UpperProtocol_BuildImuStatusPayload(const upper_imu_status_payload_t *imu, uint8_t *out, uint8_t out_len);
+uint8_t UpperProtocol_BuildDiagnosticPayload(const upper_diagnostic_payload_t *diagnostic,
+                                             uint8_t *out,
+                                             uint8_t out_len);
 
 #ifdef __cplusplus
 }

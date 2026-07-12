@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "line_uart.h"
+#include "param_store.h"
 #include "usart.h"
 
 static USART_TypeDef uart4_instance = {0};
@@ -18,6 +19,10 @@ static uint32_t dma_stop_count;
 static HAL_StatusTypeDef next_tx_status = HAL_OK;
 static uint8_t last_tx_byte;
 static uint32_t tx_it_count;
+
+uint32_t __get_PRIMASK(void) { return 0U; }
+void __disable_irq(void) {}
+void __set_PRIMASK(uint32_t value) { (void)value; }
 
 uint32_t osKernelGetTickCount(void)
 {
@@ -157,6 +162,33 @@ static void test_rx_frame_still_parses_after_restart(void)
   require_int(LineUart_GetSensorData(&data) != 0U, "line frame valid");
   require_int(data.timestamp_ms == 1234U, "line timestamp");
   require_int(data.analog[7] == 107U, "line analog channel");
+
+  {
+    param_store_t params;
+    ParamStore_Get(&params);
+    params.line_active_low = 0U;
+    for (uint8_t ch = 0U; ch < LINE_SENSOR_CHANNELS; ++ch)
+    {
+      uint16_t raw = (ch & 1U) ? 100U : 600U;
+      params.line_threshold_raw[ch] = 500U;
+      frame[4U + (ch * 2U)] = (uint8_t)(raw & 0xFFU);
+      frame[5U + (ch * 2U)] = (uint8_t)(raw >> 8);
+    }
+    require_int(ParamStore_Set(&params) != 0U, "active-high polarity accepted");
+    checksum_sum = 0U;
+    for (uint8_t i = 2U; i < 20U; ++i) { checksum_sum += frame[i]; }
+    frame[20] = (uint8_t)(~checksum_sum);
+    for (uint8_t i = 0U; i < LINE_SENSOR_FRAME_LEN; ++i)
+    {
+      rx_buffer[LINE_SENSOR_FRAME_LEN + i] = frame[i];
+    }
+    fake_tick++;
+    huart4.hdmarx->Instance->NDTR = (uint32_t)(rx_size - (2U * LINE_SENSOR_FRAME_LEN));
+    LineUart_Update();
+    (void)LineUart_GetSensorData(&data);
+    require_int(data.state[0] == 1U && data.state[1] == 0U,
+                "runtime active-high polarity is applied in one mapping layer");
+  }
 }
 
 int main(void)

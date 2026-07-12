@@ -856,7 +856,6 @@ static void ImuBmi270_ProcessMeasurement(const int16_t accel_raw[3],
                          imu_calibration.accel_bias_g[i]) * imu_calibration.accel_scale[i];
     gyro_raw_dps[i] = (float)gyro_raw[i] / BMI270_GYRO_LSB_PER_DPS;
     gyro_corrected_dps[i] = gyro_raw_dps[i] -
-                            imu_state.gyro_bias_dps[i] -
                             ImuBmi270Calibration_GyroBiasAtTemperature(
                                 &imu_calibration,
                                 i,
@@ -1294,6 +1293,7 @@ void ImuBmi270_ServiceCalibration(uint32_t now_ms, uint8_t stationary)
     for (uint8_t axis = 0U; axis < 3U; ++axis)
     {
       imu_state.gyro_bias_dps[axis] = bias_dps[axis];
+      imu_calibration.gyro_bias_dps[axis] = bias_dps[axis];
       imu_state.gyro_corrected_dps[axis] = 0.0f;
       imu_state.gyro_filtered_dps[axis] = 0.0f;
       imu_state.gyro_dps[axis] = 0.0f;
@@ -1331,6 +1331,7 @@ void ImuBmi270_ClearCalibration(void)
   for (uint8_t i = 0U; i < 3U; ++i)
   {
     imu_state.gyro_bias_dps[i] = 0.0f;
+    imu_calibration.gyro_bias_dps[i] = 0.0f;
     imu_state.gyro_corrected_dps[i] = 0.0f;
     imu_state.gyro_filtered_dps[i] = 0.0f;
     imu_state.gyro_dps[i] = 0.0f;
@@ -1360,6 +1361,7 @@ void ImuBmi270_ApplyGyroBias(const float bias_dps[3])
   for (uint8_t i = 0U; i < 3U; ++i)
   {
     imu_state.gyro_bias_dps[i] = bias_dps[i];
+    imu_calibration.gyro_bias_dps[i] = bias_dps[i];
     imu_state.gyro_corrected_dps[i] = 0.0f;
     imu_state.gyro_filtered_dps[i] = 0.0f;
     imu_state.gyro_dps[i] = 0.0f;
@@ -1389,6 +1391,10 @@ uint8_t ImuBmi270_ApplyCalibration(const imu_bmi270_calibration_t *calibration)
   primask = __get_PRIMASK();
   __disable_irq();
   imu_calibration = *calibration;
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    imu_state.gyro_bias_dps[i] = imu_calibration.gyro_bias_dps[i];
+  }
   imu_state.filter_initialized = 0U;
   __set_PRIMASK(primask);
   return 1U;

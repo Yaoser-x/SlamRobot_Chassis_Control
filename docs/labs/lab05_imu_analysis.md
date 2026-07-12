@@ -258,3 +258,6 @@ plt.savefig('lab05_vibration_spectrum.png', dpi=150)
 | `imucal` 反复失败 | 底盘未完全静止 | 将底盘放在稳固桌面上，等待 2 秒后重试 |
 | yaw 漂移很快（>1°/s） | 陀螺零偏过大或校准不正确 | 重新 `imucal`，确认静止条件 |
 | 欧拉角在某角度附近跳变 | 万向节死锁（gimbal lock） | pitch 接近 ±90° 时 roll/yaw 奇异性，属正常现象 |
+# P3 精度分析
+
+JSON 日志同时记录 raw/filter 后加速度、陀螺、Euler、temperature、quality 和校准状态。将等价 CSV 交给 `python scripts/analyze_imu.py imu.csv --json imu-report.json`，分别检查静止标准差/峰峰值、yaw 漂移、动态回水平误差和温度相关性；不得用单一滤波系数掩盖安装矩阵、温漂或执行振动问题。

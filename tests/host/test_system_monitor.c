@@ -5,9 +5,24 @@
 #include "adc_monitor.h"
 #include "bsp_config.h"
 #include "chassis_layout.h"
+#include "chassis_task_timing.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
 #include "system_monitor.h"
+#include "chassis_config.h"
+#include "param_store.h"
+
+uint32_t ParamStore_GetSnapshot(param_store_t *params)
+{
+  *params = (param_store_t){0};
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    params->current_observe_a[i] = MOTOR_STALL_CURRENT_A;
+    params->current_fault_a[i] = MOTOR_STALL_CURRENT_A;
+  }
+  params->current_fault_debounce_ms = (uint16_t)(MOTOR_OVERCURRENT_DEBOUNCE_COUNT * CHASSIS_ADC_PERIOD_MS);
+  return 1U;
+}
 
 static uint32_t fake_primask;
 static uint32_t fake_tick_ms;
@@ -136,7 +151,22 @@ static void reset_fake_monitor(void)
   fake_encoder_state.speed_valid_all = 1U;
   fake_encoder_state.speed_valid[MOTOR_ID_M2] = 1U;
   fake_encoder_state.speed_valid[MOTOR_ID_M3] = 1U;
+  ChassisTaskTiming_Reset();
   SystemMonitor_Init();
+}
+
+static void test_task_timeout_mask_aggregates_only_timed_out_task(void)
+{
+  system_monitor_state_t state;
+
+  reset_fake_monitor();
+  ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_IMU, 100U);
+  fake_tick_ms = 181U;
+  SystemMonitor_Update();
+  SystemMonitor_GetState(&state);
+
+  require_int(state.task_timeout_mask == (uint16_t)(1U << CHASSIS_TASK_TIMING_IMU),
+              "system monitor exposes only imu timeout bit");
 }
 
 static void update_and_advance(uint32_t step_ms)
@@ -205,6 +235,14 @@ static void test_adc_overcurrent_faults_when_enabled_and_control_valid(void)
   require_int(fake_fault_stop != 0U, "enabled ADC software overcurrent requests fault stop");
   require_int(state.current_observe_over_limit_count[MOTOR_ID_M2] > 0UL,
               "enabled ADC software overcurrent records observations");
+
+  fake_adc_state.current_control_valid_mask = 0U;
+  fake_adc_state.current_a[MOTOR_ID_M2] = 0.0f;
+  SystemMonitor_Update();
+  SystemMonitor_ClearLatchedFaults(SYSTEM_ERROR_M2_OVERCURRENT);
+  SystemMonitor_GetState(&state);
+  require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) != 0U,
+              "invalid current sample cannot clear overcurrent latch");
 #endif
 }
 
@@ -406,6 +444,7 @@ static void test_invalid_battery_sample_resets_debounce_and_other_fault_survives
 
 int main(void)
 {
+  test_task_timeout_mask_aggregates_only_timed_out_task();
   test_adc_overcurrent_does_not_fault_stop_when_software_fault_disabled();
   test_adc_overcurrent_faults_when_enabled_and_control_valid();
   test_drv_fault_is_not_suppressed_by_startup_blanking();

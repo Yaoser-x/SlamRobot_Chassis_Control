@@ -14,6 +14,7 @@
 #include "motor_output_logic.h"
 #include "param_store.h"
 #include "pid_controller.h"
+#include "reset_reason.h"
 #include "upper_protocol.h"
 
 static uint32_t fake_primask;
@@ -283,6 +284,55 @@ static void test_imu_status_payload_extended_layout(void)
   require_int((int8_t)payload[98] == 87, "imu positive temperature is direct celsius");
 }
 
+static void test_diagnostic_payload_layout(void)
+{
+  upper_diagnostic_payload_t diagnostic = {0};
+  uint8_t payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN] = {0xA5U};
+  uint8_t payload_len;
+
+  require_int(UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN == 28U,
+              "diagnostic payload fixed length");
+  diagnostic.post_done = 1U;
+  diagnostic.imu_status_flags = UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_CALIBRATED;
+  diagnostic.post_error_flags = 0x01020304UL;
+  diagnostic.adc_invalid_reason_flags = 0x11223344UL;
+  diagnostic.task_timeout_mask = (uint16_t)(1U << CHASSIS_TASK_TIMING_IMU);
+  diagnostic.imu_quality_flags = 0x55667788UL;
+  diagnostic.reset_reason_flags = 0xA1B2C3D4UL;
+  diagnostic.uptime_ms = 0x10203040UL;
+
+  payload_len = UpperProtocol_BuildDiagnosticPayload(&diagnostic,
+                                                      payload,
+                                                      (uint8_t)sizeof(payload));
+  require_int(payload_len == UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN,
+              "diagnostic build length");
+  require_int(payload[0] == UPPER_PROTOCOL_VERSION, "diagnostic protocol version");
+  require_int(payload[1] == UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION,
+              "diagnostic schema version");
+  require_int(payload[2] == 1U, "diagnostic post done");
+  require_int(payload[3] == diagnostic.imu_status_flags, "diagnostic imu status");
+  require_int(read_u32_le(&payload[4]) == diagnostic.post_error_flags,
+              "diagnostic post flags");
+  require_int(read_u32_le(&payload[8]) == diagnostic.adc_invalid_reason_flags,
+              "diagnostic adc invalid reasons");
+  require_int(read_u16_le(&payload[12]) == diagnostic.task_timeout_mask,
+              "diagnostic task timeout mask");
+  require_int(read_u16_le(&payload[14]) == 0U, "diagnostic reserved field is zero");
+  require_int(read_u32_le(&payload[16]) == diagnostic.imu_quality_flags,
+              "diagnostic imu quality");
+  require_int(read_u32_le(&payload[20]) == diagnostic.reset_reason_flags,
+              "diagnostic reset reasons");
+  require_int(read_u32_le(&payload[24]) == diagnostic.uptime_ms,
+              "diagnostic uptime");
+}
+
+static void test_reset_reason_captures_boot_flags(void)
+{
+  ResetReason_Capture(0xA5A55A5AUL);
+  require_int(ResetReason_GetFlags() == 0xA5A55A5AUL,
+              "reset reason preserves startup snapshot");
+}
+
 static void test_control_priority_timeout_and_reject_stop(void)
 {
   chassis_cmd_t cmd = {0};
@@ -437,8 +487,8 @@ static void test_side_target_distribution(void)
   float right = 0.0f;
 
   ChassisMath_ResolveDifferentialTargets(0.2f, 2.0f, CHASSIS_WHEEL_BASE_M, &left, &right);
-  require_close(left, 0.022f, 0.0001f, "left target");
-  require_close(right, 0.378f, 0.0001f, "right target");
+  require_close(left, 0.2f - CHASSIS_WHEEL_BASE_M, 0.0001f, "left target");
+  require_close(right, 0.2f + CHASSIS_WHEEL_BASE_M, 0.0001f, "right target");
 }
 
 static void test_default_motor_layout(void)
@@ -656,6 +706,16 @@ static void test_task_timing_next_wake(void)
   ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_RPI, 170U);
   ChassisTaskTiming_GetHealth(&health);
   require_int(health.timed_out[CHASSIS_TASK_TIMING_RPI] == 0U, "heartbeat clears timeout state");
+
+  ChassisTaskTiming_Reset();
+  ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_IMU, 100U);
+  ChassisTaskTiming_UpdateTimeouts(181U);
+  require_int(ChassisTaskTiming_GetTimeoutMask() ==
+                (uint16_t)(1U << CHASSIS_TASK_TIMING_IMU),
+              "only imu timeout bit is reported");
+  ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_IMU, 182U);
+  require_int(ChassisTaskTiming_GetTimeoutMask() == 0U,
+              "imu heartbeat clears only timeout mask bit");
 }
 
 static void test_imu_state_contract(void)
@@ -891,6 +951,8 @@ int main(void)
   test_protocol_frame_and_velocity();
   test_status_v2_payload_layout_and_saturation();
   test_imu_status_payload_extended_layout();
+  test_diagnostic_payload_layout();
+  test_reset_reason_captures_boot_flags();
   test_control_priority_timeout_and_reject_stop();
   test_control_manager_uses_runtime_limits();
   test_control_manager_maintenance_rejects_commands();

@@ -107,10 +107,28 @@ static void emit_imu(const char *name, int8_t temperature_c, uint8_t is_last)
   print_frame(name, UPPER_CMD_IMU_STATUS, payload, sizeof(payload), is_last);
 }
 
+static void emit_diagnostic(void)
+{
+  upper_diagnostic_payload_t diagnostic = {0};
+  uint8_t payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN] = {0U};
+
+  diagnostic.post_done = 1U;
+  diagnostic.imu_status_flags = 0x0BU;
+  diagnostic.post_error_flags = 0x01020304UL;
+  diagnostic.adc_invalid_reason_flags = 0x11121314UL;
+  diagnostic.task_timeout_mask = 0x0123U;
+  diagnostic.imu_quality_flags = 0x21222324UL;
+  diagnostic.reset_reason_flags = 0x31323334UL;
+  diagnostic.uptime_ms = 0x41424344UL;
+  (void)UpperProtocol_BuildDiagnosticPayload(&diagnostic, payload, sizeof(payload));
+  print_frame("diagnostic_v1", UPPER_CMD_DIAGNOSTIC, payload, sizeof(payload), 0U);
+}
+
 int main(void)
 {
   (void)printf("{\n  \"schema\":1,\n  \"protocol_version\":2,\n  \"frames\":[\n");
   emit_status();
+  emit_diagnostic();
   emit_imu("imu_temp_23c", 23, 0U);
   emit_imu("imu_temp_minus_41c", -41, 0U);
   emit_imu("imu_temp_87c", 87, 1U);

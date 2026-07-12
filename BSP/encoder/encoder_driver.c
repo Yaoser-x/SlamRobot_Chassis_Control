@@ -4,6 +4,7 @@
 #include "chassis_layout.h"
 #include "encoder_math.h"
 #include "param_store.h"
+#include "direction_apply.h"
 #include "tim.h"
 
 #define TWO_PI_F 6.28318530718f
@@ -95,8 +96,8 @@ void EncoderDriver_Update(uint32_t now_ms)
     now_count[i] = __HAL_TIM_GET_COUNTER(encoder_hw[i].htim);
     if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
     {
-      delta[i] = EncoderDriver_DiffCount(now_count[i], last_count[i], period) *
-                 ChassisLayout_EncoderDirection((motor_id_t)i);
+      delta[i] = DirectionApply_Signed(
+        EncoderDriver_DiffCount(now_count[i], last_count[i], period), params.encoder_dir[i]);
     }
     else
     {

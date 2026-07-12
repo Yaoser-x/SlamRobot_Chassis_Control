@@ -8,6 +8,7 @@
 #include "chassis_control.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
+#include "imu_bmi270.h"
 #include "param_store.h"
 #include "pid_controller.h"
 #include "system_monitor.h"
@@ -23,6 +24,8 @@ static uint8_t fake_command_valid;
 static chassis_cmd_t fake_command;
 static motor_driver_state_t fake_motor_state;
 static uint32_t fake_encoder_fault_latch_count;
+static imu_bmi270_state_t fake_imu_state;
+static uint32_t fake_motion_generation;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -47,6 +50,11 @@ uint32_t HAL_GetTick(void)
 uint32_t osKernelGetTickCount(void)
 {
   return fake_tick_ms;
+}
+
+void ImuBmi270_GetState(imu_bmi270_state_t *state)
+{
+  *state = fake_imu_state;
 }
 
 void MotorDriver_Init(void)
@@ -136,6 +144,11 @@ void ControlManager_ClearCommand(void)
   fake_command_valid = 0U;
 }
 
+uint32_t ControlManager_GetMotionRevokeGeneration(void)
+{
+  return fake_motion_generation;
+}
+
 void SystemMonitor_LatchEncoderFeedbackFault(void)
 {
   fake_encoder_fault_latch_count++;
@@ -182,6 +195,8 @@ static void reset_fake_chassis(void)
   fake_command = (chassis_cmd_t){0};
   fake_motor_state = (motor_driver_state_t){0};
   fake_encoder_fault_latch_count = 0UL;
+  fake_imu_state = (imu_bmi270_state_t){0};
+  fake_motion_generation = 0UL;
   for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
   {
     fake_signed_pwm[i] = 0;
@@ -346,6 +361,114 @@ static void test_disabled_encoder_invalid_is_ignored(void)
   require_int(fake_encoder_fault_latch_count == 0UL, "disabled encoder invalid is ignored");
 }
 
+static void test_all_remote_sources_share_straight_controller_and_imu_degrade(void)
+{
+  static const uint8_t sources[] = {
+    CONTROL_SOURCE_UPPER, CONTROL_SOURCE_PS2, CONTROL_SOURCE_ESP12F, CONTROL_SOURCE_DEBUG,
+  };
+  for (uint8_t i = 0U; i < (uint8_t)(sizeof(sources) / sizeof(sources[0])); ++i)
+  {
+    param_store_t params;
+    chassis_control_state_t state;
+
+    reset_fake_chassis();
+    (void)ParamStore_GetSnapshot(&params);
+    params.straight_wheel_coupling_gain = 0.1f;
+    params.straight_heading_kp = 0.01f;
+    params.straight_heading_hold_enabled = 1U;
+    require_int(ParamStore_Set(&params) != 0U, "straight parameters accepted");
+    set_closed_loop_command(0.2f);
+    fake_command.source = sources[i];
+    ChassisControl_Step(1000U);
+    ChassisControl_GetState(&state);
+    require_int(state.straight_active != 0U, "zero-angular source enters shared compensation");
+    require_int(state.straight_heading_degraded != 0U,
+                "invalid IMU degrades to wheel-only compensation in same cycle");
+  }
+}
+
+static chassis_control_state_t run_straight_with_imu(const imu_bmi270_state_t *imu)
+{
+  param_store_t params;
+  chassis_control_state_t state;
+
+  reset_fake_chassis();
+  fake_imu_state = *imu;
+  (void)ParamStore_GetSnapshot(&params);
+  params.straight_wheel_coupling_gain = 0.1f;
+  params.straight_heading_kp = 0.01f;
+  params.straight_heading_hold_enabled = 1U;
+  require_int(ParamStore_Set(&params) != 0U, "IMU straight parameters accepted");
+  set_closed_loop_command(0.2f);
+  ChassisControl_Step(1000U);
+  ChassisControl_GetState(&state);
+  return state;
+}
+
+static void test_straight_heading_gate_distinguishes_imu_failures(void)
+{
+  imu_bmi270_state_t imu = {0};
+  chassis_control_state_t state;
+
+  imu.online = 1U;
+  imu.last_update_ms = 1000U;
+  state = run_straight_with_imu(&imu);
+  require_int(state.straight_heading_degraded != 0U, "uncalibrated IMU degrades");
+
+  imu.gyro_calibrated = 1U;
+  imu.last_update_ms = 899U;
+  state = run_straight_with_imu(&imu);
+  require_int(state.straight_heading_degraded != 0U, "stale IMU degrades");
+
+  imu.last_update_ms = 1000U;
+  imu.quality_flags = IMU_BMI270_QUALITY_ATTITUDE_INVALID;
+  state = run_straight_with_imu(&imu);
+  require_int(state.straight_heading_degraded == 0U,
+              "attitude-invalid IMU not degraded during settle — gyro rate damping works");
+
+  imu.quality_flags = 0U;
+  state = run_straight_with_imu(&imu);
+  require_int(state.straight_heading_degraded == 0U, "fresh calibrated quality-valid IMU accepted");
+}
+
+static void test_straight_integrates_gyro_without_settle_delay(void)
+{
+  param_store_t params;
+  chassis_control_state_t state;
+
+  reset_fake_chassis();
+  (void)ParamStore_GetSnapshot(&params);
+  params.straight_wheel_coupling_gain = 0.0f;
+  params.straight_heading_kp = 0.01f;
+  params.straight_heading_ki = 0.001f;
+  params.straight_heading_integral_limit_deg_s = 10.0f;
+  params.straight_heading_hold_enabled = 1U;
+  require_int(ParamStore_Set(&params) != 0U, "gyro PI parameters accepted");
+  fake_imu_state.online = 1U;
+  fake_imu_state.gyro_calibrated = 1U;
+  fake_imu_state.last_update_ms = 1000U;
+  set_closed_loop_command(0.2f);
+  ChassisControl_Step(1000U);
+
+  fake_imu_state.last_update_ms = 1020U;
+  fake_imu_state.gyro_corrected_dps[2] = 10.0f;
+  ChassisControl_Step(1020U);
+  ChassisControl_GetState(&state);
+  require_int(state.straight_direction == 1, "straight direction is observable");
+  require_int(state.straight_heading_error_deg < -0.19f,
+              "gyro z integrates from straight start without settle delay");
+  require_int(state.straight_heading_integral_deg_s < 0.0f,
+              "heading PI integral is observable");
+  require_int(state.straight_transition_distance_m >= 0.0f,
+              "caster transition distance is observable");
+
+  fake_command_valid = 0U;
+  ChassisControl_Step(1040U);
+  ChassisControl_GetState(&state);
+  require_int(state.straight_active == 0U, "command loss clears straight state");
+  require_int(state.control_source == CONTROL_SOURCE_NONE, "command loss clears logged source");
+}
+
 int main(void)
 {
   test_high_adc_current_does_not_throttle_pwm_output();
@@ -357,5 +480,8 @@ int main(void)
   test_zero_motion_feedback_fault_after_150ms_run();
   test_non_run_motor_phase_does_not_false_latch_feedback();
   test_disabled_encoder_invalid_is_ignored();
+  test_all_remote_sources_share_straight_controller_and_imu_degrade();
+  test_straight_heading_gate_distinguishes_imu_failures();
+  test_straight_integrates_gyro_without_settle_delay();
   return 0;
 }

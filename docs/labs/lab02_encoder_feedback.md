@@ -56,7 +56,7 @@ V2.0 逻辑电机与编码器定时器映射如下：
 | 四倍频倍率 | `CHASSIS_ENCODER_QUADRATURE_MULT` | 4 |
 | 减速比 | `CHASSIS_MOTOR_GEAR_RATIO` | 56 |
 | 轮半径 | `CHASSIS_WHEEL_RADIUS_M` | 0.035 m |
-| 轮距 | `CHASSIS_WHEEL_BASE_M` | 0.178 m |
+| 轮距 | `CHASSIS_WHEEL_BASE_M` | 0.176 m |（有效轮距，机械测量 181.5mm）|
 | 测速周期 | `CHASSIS_ENCODER_PERIOD_MS` | 10 ms |
 | 最大 dt | `CHASSIS_MAX_ENCODER_DT_MS` | 100 ms |
 

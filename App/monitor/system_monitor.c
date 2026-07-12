@@ -8,6 +8,7 @@
 #include "encoder_driver.h"
 #include "main.h"
 #include "motor_driver.h"
+#include "param_store.h"
 
 static system_monitor_state_t monitor_state;
 static uint8_t overcurrent_count[MOTOR_ID_COUNT];
@@ -35,9 +36,11 @@ static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
   SYSTEM_ERROR_M4_OVERCURRENT,
 };
 
-static uint8_t SystemMonitor_CurrentBelowFaultThreshold(float current_a)
+static uint8_t SystemMonitor_CurrentBelowFaultThreshold(uint8_t motor, float current_a)
 {
-  return (current_a <= MOTOR_STALL_CURRENT_A) ? 1U : 0U;
+  param_store_t params;
+  (void)ParamStore_GetSnapshot(&params);
+  return (current_a <= params.current_fault_a[motor]) ? 1U : 0U;
 }
 
 static uint8_t SystemMonitor_BatterySampleValid(const adc_monitor_state_t *adc_state)
@@ -63,6 +66,13 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
                                                     uint8_t next_count[MOTOR_ID_COUNT],
                                                     uint32_t *new_latched_flags)
 {
+  param_store_t params;
+  uint8_t debounce_count;
+
+  (void)ParamStore_GetSnapshot(&params);
+  debounce_count = (uint8_t)((params.current_fault_debounce_ms + CHASSIS_ADC_PERIOD_MS - 1U) /
+                             CHASSIS_ADC_PERIOD_MS);
+  if (debounce_count == 0U) { debounce_count = 1U; }
   if (MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U)
   {
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -94,13 +104,13 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
       next_count[i] = 0U;
       continue;
     }
-    if (adc_state->current_a[i] > MOTOR_STALL_CURRENT_A)
+    if (adc_state->current_a[i] > params.current_fault_a[i])
     {
-      if (next_count[i] < MOTOR_OVERCURRENT_DEBOUNCE_COUNT)
+      if (next_count[i] < debounce_count)
       {
         next_count[i]++;
       }
-      if (next_count[i] >= MOTOR_OVERCURRENT_DEBOUNCE_COUNT && new_latched_flags != 0)
+      if (next_count[i] >= debounce_count && new_latched_flags != 0)
       {
         *new_latched_flags |= overcurrent_flags[i];
       }
@@ -115,7 +125,14 @@ static void SystemMonitor_UpdateOvercurrentCounters(const adc_monitor_state_t *a
 static void SystemMonitor_UpdateCurrentDryRun(const adc_monitor_state_t *adc_state,
                                               const uint8_t blanked[MOTOR_ID_COUNT])
 {
+  param_store_t params;
+  uint8_t debounce_count;
   (void)blanked;
+
+  (void)ParamStore_GetSnapshot(&params);
+  debounce_count = (uint8_t)((params.current_fault_debounce_ms + CHASSIS_ADC_PERIOD_MS - 1U) /
+                             CHASSIS_ADC_PERIOD_MS);
+  if (debounce_count == 0U) { debounce_count = 1U; }
 
   if (adc_state == 0 || adc_state->current_control_valid == 0U)
   {
@@ -130,11 +147,11 @@ static void SystemMonitor_UpdateCurrentDryRun(const adc_monitor_state_t *adc_sta
     {
       continue;
     }
-    if (adc_state->current_a[i] > MOTOR_STALL_CURRENT_A)
+    if (adc_state->current_a[i] > params.current_observe_a[i])
     {
       current_observe_over_limit_count[i]++;
       if (MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U ||
-          overcurrent_count[i] + 1U >= MOTOR_OVERCURRENT_DEBOUNCE_COUNT)
+          overcurrent_count[i] + 1U >= debounce_count)
       {
         current_fault_would_latch_count[i]++;
       }
@@ -247,6 +264,7 @@ void SystemMonitor_Update(void)
   next_state.current_control_valid = adc_state.current_control_valid;
   next_state.current_control_valid_mask = adc_state.current_control_valid_mask;
   next_state.control_mode = active_source;
+  next_state.task_timeout_mask = ChassisTaskTiming_GetTimeoutMask();
   for (uint8_t i = 0U; i < (uint8_t)CHASSIS_TASK_TIMING_COUNT; ++i)
   {
     next_state.task_last_heartbeat_ms[i] = task_health.last_heartbeat_ms[i];
@@ -369,6 +387,7 @@ void SystemMonitor_Update(void)
     monitor_state.current_fault_would_latch_count[i] = next_state.current_fault_would_latch_count[i];
   }
   monitor_state.control_mode = next_state.control_mode;
+  monitor_state.task_timeout_mask = next_state.task_timeout_mask;
   for (uint8_t i = 0U; i < (uint8_t)CHASSIS_TASK_TIMING_COUNT; ++i)
   {
     monitor_state.task_last_heartbeat_ms[i] = next_state.task_last_heartbeat_ms[i];
@@ -437,7 +456,8 @@ void SystemMonitor_ClearLatchedFaults(uint32_t mask)
   {
     if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U &&
         (mask & overcurrent_flags[i]) != 0U &&
-        SystemMonitor_CurrentBelowFaultThreshold(snapshot.motor_current_a[i]) == 0U)
+        (((snapshot.current_control_valid_mask & (uint8_t)(1U << i)) == 0U) ||
+         SystemMonitor_CurrentBelowFaultThreshold(i, snapshot.motor_current_a[i]) == 0U))
     {
       clearable &= ~overcurrent_flags[i];
     }

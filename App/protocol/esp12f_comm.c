@@ -1,6 +1,7 @@
 #include "esp12f_comm.h"
 
 #include "chassis_config.h"
+#include "adc_monitor.h"
 #include "chassis_control.h"
 #include "chassis_layout.h"
 #include "cmsis_os2.h"
@@ -8,12 +9,16 @@
 #include "encoder_driver.h"
 #include "esp12f_flash_bridge.h"
 #include "line_control.h"
+#include "imu_bmi270.h"
 #include "motor_driver.h"
+#include "power_on_self_test.h"
+#include "reset_reason.h"
 #include "system_monitor.h"
 #include "upper_protocol.h"
 #include "usart.h"
 
 #define ESP12F_RX_RING_SIZE 128U
+#define ESP12F_RX_INTERBYTE_TIMEOUT_MS 100U
 
 typedef enum
 {
@@ -31,9 +36,13 @@ static esp12f_rx_state_t esp12f_rx_state;
 static uint8_t esp12f_frame_buf[UPPER_PROTOCOL_MAX_PAYLOAD + 3U];
 static uint8_t esp12f_frame_len;
 static uint8_t esp12f_frame_index;
+static uint32_t esp12f_parser_last_byte_ms;
 static uint8_t esp12f_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint8_t esp12f_status_payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN];
 static uint32_t esp12f_last_status_ms;
+static uint8_t esp12f_diagnostic_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
+static uint8_t esp12f_diagnostic_payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN];
+static uint32_t esp12f_last_diagnostic_ms;
 static esp12f_comm_state_t esp12f_state;
 static uint8_t esp12f_isolated;
 
@@ -42,6 +51,7 @@ static void Esp12fComm_ResetParser(void)
   esp12f_rx_state = ESP12F_RX_WAIT_HEAD0;
   esp12f_frame_len = 0U;
   esp12f_frame_index = 0U;
+  esp12f_parser_last_byte_ms = 0U;
 }
 
 static void Esp12fComm_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len)
@@ -87,6 +97,7 @@ static void Esp12fComm_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t 
 
 static void Esp12fComm_ProcessByte(uint8_t byte)
 {
+  esp12f_parser_last_byte_ms = osKernelGetTickCount();
   switch (esp12f_rx_state)
   {
     case ESP12F_RX_WAIT_HEAD0:
@@ -236,12 +247,72 @@ static void Esp12fComm_SendStatus(uint32_t now_ms)
   }
 }
 
+static void Esp12fComm_SendDiagnostic(uint32_t now_ms)
+{
+  upper_diagnostic_payload_t diagnostic = {0};
+  post_result_t post;
+  adc_monitor_state_t adc;
+  system_monitor_state_t monitor;
+  imu_bmi270_state_t imu;
+  uint8_t payload_len;
+  uint16_t frame_len;
+
+  if ((now_ms - esp12f_last_diagnostic_ms) < UPPER_DIAGNOSTIC_PERIOD_MS ||
+      huart2.gState != HAL_UART_STATE_READY)
+  {
+    return;
+  }
+
+  POST_GetResult(&post);
+  AdcMonitor_GetState(&adc);
+  SystemMonitor_GetState(&monitor);
+  ImuBmi270_GetState(&imu);
+  diagnostic.post_done = post.done;
+  if (imu.online != 0U)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_ONLINE;
+  }
+  if (imu.gyro_calibrated != 0U)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_CALIBRATED;
+  }
+  if (imu.quality_flags != 0UL || imu.last_error != IMU_BMI270_ERROR_NONE)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_ERROR;
+  }
+  if (imu.sensor_time_valid != 0U)
+  {
+    diagnostic.imu_status_flags |= UPPER_IMU_FLAG_SENSOR_TIME;
+  }
+  diagnostic.post_error_flags = post.error_flags;
+  diagnostic.adc_invalid_reason_flags = adc.invalid_reason_flags;
+  diagnostic.task_timeout_mask = monitor.task_timeout_mask;
+  diagnostic.imu_quality_flags = imu.quality_flags;
+  diagnostic.reset_reason_flags = ResetReason_GetFlags();
+  diagnostic.uptime_ms = now_ms;
+  payload_len = UpperProtocol_BuildDiagnosticPayload(&diagnostic,
+                                                      esp12f_diagnostic_payload,
+                                                      sizeof(esp12f_diagnostic_payload));
+  frame_len = UpperProtocol_BuildFrame(UPPER_CMD_DIAGNOSTIC,
+                                       esp12f_diagnostic_payload,
+                                       payload_len,
+                                       esp12f_diagnostic_tx_frame,
+                                       sizeof(esp12f_diagnostic_tx_frame));
+  if (frame_len > 0U &&
+      HAL_UART_Transmit_IT(&huart2, esp12f_diagnostic_tx_frame, frame_len) == HAL_OK)
+  {
+    esp12f_last_diagnostic_ms = now_ms;
+    esp12f_state.tx_frames++;
+  }
+}
+
 void Esp12fComm_Init(void)
 {
   esp12f_isolated = 0U;
   esp12f_rx_head = 0U;
   esp12f_rx_tail = 0U;
   esp12f_last_status_ms = 0U;
+  esp12f_last_diagnostic_ms = 0U;
   esp12f_state = (esp12f_comm_state_t){0};
   esp12f_state.last_rx_timestamp_ms = 0U;
   Esp12fComm_SetDownloadMode(0U);
@@ -270,8 +341,15 @@ void Esp12fComm_Update(void)
     return;
   }
 
+  if (esp12f_rx_state != ESP12F_RX_WAIT_HEAD0 &&
+      (uint32_t)(now_ms - esp12f_parser_last_byte_ms) > ESP12F_RX_INTERBYTE_TIMEOUT_MS)
+  {
+    esp12f_state.rx_timeout_resets++;
+    Esp12fComm_ResetParser();
+  }
   Esp12fComm_PollRx();
   Esp12fComm_SendStatus(now_ms);
+  Esp12fComm_SendDiagnostic(now_ms);
 }
 
 void Esp12fComm_ResetModule(void)
@@ -319,6 +397,10 @@ void Esp12fComm_OnRxCplt(void)
 
 void Esp12fComm_OnUartError(void)
 {
+  esp12f_state.uart_errors++;
+  esp12f_rx_head = 0U;
+  esp12f_rx_tail = 0U;
+  Esp12fComm_ResetParser();
   (void)HAL_UART_Receive_IT(&huart2, &esp12f_rx_byte, 1U);
 }
 

@@ -10,6 +10,13 @@
       "frame_hex": "a55a4281020f030f78563412efcdab903930e2040cfe010030f801000000feffffffffffff7f000000806400b0046009fffffa0006ffdc0524fa64009cffe80318fc050a156d"
     },
     {
+      "name": "diagnostic_v1",
+      "command": 130,
+      "payload_length": 28,
+      "frame_length": 33,
+      "frame_hex": "a55a1d820201010b04030201141312112301000024232221343332314443424149"
+    },
+    {
       "name": "imu_temp_23c",
       "command": 131,
       "payload_length": 99,

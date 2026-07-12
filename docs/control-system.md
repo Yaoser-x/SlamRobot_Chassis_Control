@@ -8,6 +8,7 @@
          → ChassisLayout         电机启用/侧别/方向查表
          → 差速模型              linear_x / angular_z → left_mps / right_mps
          → 速度斜坡              按 CHASSIS_SPEED_RAMP_MPS2 平滑过渡
+         → StraightController    方向 trim + 轮速耦合 + gyro PI (angular_z=0 自动激活)
          → PID 速度环            独立四路 PID 控制器 (M1-M3 PID, M4 纯 P)
          → permille 输出          限幅到 CHASSIS_PWM_MAX_PERMILLE
          → MotorDriver           TIM1 EN/PWM + GPIO PH/DIR 输出
@@ -79,7 +80,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 ### 3.3 P0 运动安全
 
-- ParamStore generation 快照供 ControlManager、ChassisControl 和 EncoderDriver 同代消费；代际变化清 PID/斜坡。方向仍由 `ChassisLayout` 编译期配置。
+- ParamStore generation 快照供 ControlManager、ChassisControl 和 EncoderDriver 同代消费；代际变化清 PID/斜坡。电机/编码器方向支持编译期默认（`ChassisLayout`）和运行时覆盖（`set motor_dir`/`set encoder_dir`）。
 - 维护锁先阻止新命令，再清控制源/raw/open-loop/PWM 并确认编码器静止。raw/open-loop 租约 400ms；Release 还需本地 `maint arm` 60s 授权。
 - 维护、ESTOP 和 fault-stop 首次置位都会递增 motion-revoke generation；此前启用的 LINE 和自动续发 DEBUG `vel` 会失效，解除安全锁后必须重新执行 `line on` 或发送新的本地 `vel`，不会恢复旧运动模式。
 - 正常闭环任一 enabled encoder 无效，或 RUN/PWM 有效时非零 requested target 持续 150ms 无运动，当前 motorTask 周期立即整车停车并锁存 bit17。
@@ -91,7 +92,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 | 任务 | 入口函数 | 优先级 | 周期 | 调度方式 | 栈大小 | 核心职责 |
 | --- | --- | --- | --- | --- | --- | --- |
-| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 384W (1536B) | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳和 motorTask 心跳守卫 |
+| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 4096B | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳和 motorTask 心跳守卫 |
 | **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `EncoderDriver_Update` + `ChassisControl_Step`：编码器刷新、差速+PID+PWM |
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUart_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
@@ -164,3 +165,9 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 - **IMU / PS2 / ESP12F / 巡线**：离线不阻塞底盘实验，状态在 `status` 中可见
 - **巡线安全**：默认不启用；需 PS2/ESP12F/调试台显式开启；PS2 摇杆随时可覆盖；丢线自动退让不锁死
 - **ESP12F flash bridge**：维护功能。进入前获取统一维护锁并确认静止，active 全生命周期拒绝所有控制源；USART1 被二进制透传接管，30s 无活动自动退出并释放锁
+# P1-P3 运行时增强
+
+- 电机/编码器方向、巡线阈值/极性/PD/速度、电流三层阈值与直行补偿增益均由 ParamStore 原子快照驱动；编译期宏只提供安全默认值。
+- 所有来源的 `angular_z=0` 在底盘层统一进入 `StraightController`。控制器按前进/后退和 0.15/0.30m/s 插值 trim，再叠加轮速耦合与 gyro-z 积分航向 PI；不等待 400ms，也不使用 Mahony yaw。
+- IMU stale、未校准、SPI/timestamp/gyro quality 异常时同周期退化为 trim + wheel，恢复周期清零航向参考，禁止输出阶跃。纠偏/PWM/电流饱和时冻结积分；弱侧无法增速时降低共同速度以保留差速。
+- 默认 trim、Kp、Ki 和航向保持关闭，必须用匹配固件身份的双向 2m 基线/改后报告决定参数。前 0.30m 万向轮翻转段单独记录，不计入稳态验收。

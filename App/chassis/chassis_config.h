@@ -31,13 +31,14 @@ extern "C" {
 /* 巡线跟踪控制参数 */
 #define LINE_DEFAULT_ENABLED                0U
 #define LINE_SPEED_MPS                      0.15f
-#define LINE_KP                             2.5f
+#define LINE_KP                             0.6f
 #define LINE_ANGULAR_MAX_RPS                2.0f
 #define LINE_SENSOR_TIMEOUT_MS              50U
 #define LINE_DETECT_THRESHOLD_COUNT         1U
 #define UPPER_UART_TASK_PERIOD_MS           5U
 #define UPPER_UART_STATUS_PERIOD_MS         50U
 #define UPPER_IMU_STATUS_PERIOD_MS          20U
+#define UPPER_DIAGNOSTIC_PERIOD_MS          200U
 #define ESP12F_STATUS_PERIOD_MS             100U
 
 #define CHASSIS_CMD_TIMEOUT_MS              500U  /* @deprecated 已迁移至下方 CONTROL_TIMEOUT_* 按源独立配置，保留兼容 */
@@ -67,11 +68,14 @@ extern "C" {
 #define PS2_HEADING_QUARTER_TIMEOUT_MS      6000U
 #define PS2_HEADING_FULL_TIMEOUT_MS         20000U
 #define PS2_HEADING_IMU_FRESH_MS            50U
+#define PS2_IDLE_RELEASE_MS                 2000U
 #define PS2_MACRO_L1_MASK                   0x04U
 #define PS2_MACRO_R1_MASK                   0x08U
 #define PS2_MACRO_L2_MASK                   0x01U
 #define PS2_MACRO_R2_MASK                   0x02U
 #define PS2_LINE_TOGGLE_MASK                0x10U
+#define PS2_LINECAL_FLOOR_MASK              0x80U  /* Square — 地板标定 */
+#define PS2_LINECAL_LINE_MASK               0x20U  /* Circle — 黑线标定 */
 
 /* 速度斜坡 */
 #define CHASSIS_SPEED_RAMP_MPS2             1.0f

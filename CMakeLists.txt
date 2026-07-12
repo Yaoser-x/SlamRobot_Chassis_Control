@@ -28,6 +28,30 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" F407_FIRMWARE_VERSION LIMIT_COUNT 1)
+execute_process(
+    COMMAND git rev-parse --short=8 HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE F407_GIT_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT F407_GIT_SHA)
+    set(F407_GIT_SHA "unknown")
+endif()
+execute_process(
+    COMMAND git status --porcelain --untracked-files=no
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE F407_GIT_STATUS
+    ERROR_QUIET
+)
+if(F407_GIT_STATUS)
+    set(F407_BUILD_DIRTY 1)
+else()
+    set(F407_BUILD_DIRTY 0)
+endif()
+configure_file(cmake/build_identity.h.in generated/build_identity.h @ONLY)
+
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
@@ -47,21 +71,27 @@ set(F407_APP_BSP_SOURCES
     App/chassis/chassis_control.c
     App/chassis/chassis_maintenance.c
     App/chassis/chassis_math.c
+    App/chassis/straight_controller.c
     App/chassis/chassis_task_timing.c
     App/chassis/chassis_tasks.c
     App/control/control_manager.c
     App/control/line_control.c
+    App/control/line_calibration.c
     App/control/ps2_control.c
     App/control/relative_yaw_control.c
     App/current/current_guard.c
     App/debug/reset_trace.c
     App/debug/debug_maintenance_policy.c
+    App/debug/debug_log_policy.c
+    App/debug/debug_straight_telemetry.c
     App/debug/usart1_debug_console.c
     App/display/oled_ui.c
     App/display/oled_selfcheck.c
+    App/display/oled_calibration_view.c
     App/imu/imu_calibration_gate.c
     App/monitor/system_monitor.c
     App/monitor/power_on_self_test.c
+    App/monitor/reset_reason.c
     App/param/param_store.c
     App/protocol/esp12f_comm.c
     App/protocol/upper_protocol.c
@@ -94,6 +124,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${F407_APP_BSP_SOURCES})
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
     App/chassis
     App/control
     App/current

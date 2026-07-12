@@ -20,6 +20,8 @@
 #include <ESP8266WebServer.h>
 #include <EEPROM.h>
 #include <WebSocketsServer.h>
+#include "esp_link_policy.h"
+#include "esp_frame_parser.h"
 
 #include "html_page_gz.h"
 
@@ -68,6 +70,18 @@ struct ChassisStatus {
   uint8_t  motor_speed_valid_mask;
   uint8_t  encoder_anomaly_mask;
   uint8_t  comm_health_flags;
+};
+
+struct DiagnosticStatus {
+  uint8_t schema;
+  uint8_t post_done;
+  uint8_t imu_status_flags;
+  uint32_t post_error_flags;
+  uint32_t adc_invalid_reason_flags;
+  uint16_t task_timeout_mask;
+  uint32_t imu_quality_flags;
+  uint32_t reset_reason_flags;
+  uint32_t uptime_ms;
 };
 
 // ============================================================================
@@ -197,8 +211,10 @@ static bool saveConfig(const String &password) {
 #define CMD_LINE_CTRL       0x03
 #define CMD_CLEAR_FAULT     0x04
 #define CMD_STATUS          0x81
+#define CMD_DIAGNOSTIC      0x82
 #define VELOCITY_PAYLOAD_LEN 10
 #define STATUS_PAYLOAD_LEN  65
+#define DIAGNOSTIC_PAYLOAD_LEN 28
 
 #define STATUS_FLAG_ESTOP           (1U << 0)
 #define STATUS_FLAG_FAULT_STOP      (1U << 1)
@@ -284,6 +300,25 @@ static bool parseStatusFrame(const uint8_t *payload, uint8_t len, ChassisStatus 
   return true;
 }
 
+static uint32_t readU32LE(const uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+         ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static bool parseDiagnosticFrame(const uint8_t *payload, uint8_t len, DiagnosticStatus &d) {
+  if (len != DIAGNOSTIC_PAYLOAD_LEN || payload[0] != PROTO_VERSION || payload[1] != 1U) return false;
+  d.schema = payload[1];
+  d.post_done = payload[2];
+  d.imu_status_flags = payload[3];
+  d.post_error_flags = readU32LE(&payload[4]);
+  d.adc_invalid_reason_flags = readU32LE(&payload[8]);
+  d.task_timeout_mask = (uint16_t)payload[12] | ((uint16_t)payload[13] << 8);
+  d.imu_quality_flags = readU32LE(&payload[16]);
+  d.reset_reason_flags = readU32LE(&payload[20]);
+  d.uptime_ms = readU32LE(&payload[24]);
+  return true;
+}
+
 // ============================================================================
 // 4. 帧接收状态机
 // ============================================================================
@@ -291,59 +326,7 @@ static bool parseStatusFrame(const uint8_t *payload, uint8_t len, ChassisStatus 
 #define RX_BUF_SIZE 128
 static uint8_t  rx_buf[RX_BUF_SIZE];
 static uint16_t rx_pos = 0;
-static uint8_t  rx_frame_buf[PROTO_MAX_PAYLOAD + 5];
-static uint16_t rx_frame_len = 0;
-
-enum RxState {
-  WAIT_HEAD0,
-  WAIT_HEAD1,
-  WAIT_LEN,
-  WAIT_BODY
-};
-static RxState rx_state = WAIT_HEAD0;
-static uint8_t  rx_cmd_len = 0;
-static uint16_t rx_body_idx = 0;
-
-// 处理一字节，返回 true 表示收到一个有效帧
-static bool feedRxByte(uint8_t b) {
-  switch (rx_state) {
-  case WAIT_HEAD0:
-    if (b == PROTO_HEAD_0) rx_state = WAIT_HEAD1;
-    break;
-  case WAIT_HEAD1:
-    if (b == PROTO_HEAD_1) {
-      rx_state = WAIT_LEN;
-      rx_frame_buf[0] = PROTO_HEAD_0;
-      rx_frame_buf[1] = PROTO_HEAD_1;
-    } else {
-      rx_state = WAIT_HEAD0;
-    }
-    break;
-  case WAIT_LEN:
-    if (b >= 1 && b <= (PROTO_MAX_PAYLOAD + 1)) {
-      rx_cmd_len = b;
-      rx_body_idx = 0;
-      rx_frame_buf[2] = b;
-      rx_state = WAIT_BODY;
-    } else {
-      rx_state = WAIT_HEAD0;
-    }
-    break;
-  case WAIT_BODY:
-    rx_frame_buf[3 + rx_body_idx] = b;
-    rx_body_idx++;
-    if (rx_body_idx >= (uint16_t)rx_cmd_len + 1) {
-      // 收完一帧，验证校验和
-      rx_state = WAIT_HEAD0;
-      uint8_t calc = crc8(&rx_frame_buf[2], (uint16_t)rx_cmd_len + 1);
-      if (calc == b) {
-        return true;
-      }
-    }
-    break;
-  }
-  return false;
-}
+static esp_frame_parser_t g_rx_parser = {};
 
 // ============================================================================
 // 5. WiFi 管理（首次配置 AP / 受保护控制 AP）
@@ -381,7 +364,8 @@ static float jsonFloatValue(const String &cmd, const char *key, float fallback) 
 static ESP8266WebServer    http(HTTP_PORT);
 static WebSocketsServer    ws(WEB_SOCKET_PORT);
 static ChassisStatus       g_status = {};
-static bool                g_status_valid = false;
+static DiagnosticStatus    g_diagnostic = {};
+static esp_link_policy_t   g_link_policy = {};
 #define NO_OWNER 0xFFU
 #define OWNER_LEASE_MS 500UL
 #define OWNER_HEARTBEAT_MS 200UL
@@ -392,6 +376,10 @@ static unsigned long       g_last_telem_ms = 0;
 static unsigned long       g_last_vel_ms = 0;
 static bool                g_vel_active = false;
 static float               g_lx = 0, g_az = 0;
+
+static unsigned long statusAgeMs(unsigned long now) {
+  return EspLinkPolicy_StatusAge(&g_link_policy, now);
+}
 
 // 发送帧到 STM32
 static void sendToSTM32(const uint8_t *data, uint16_t len) {
@@ -456,6 +444,10 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
     }
 
     if (cmd.startsWith("{\"cmd\":\"claim\"")) {
+      if (!g_link_policy.online) {
+        sendControlRole(num, "offline");
+        break;
+      }
       if (g_owner_client == NO_OWNER || clientIsOwner(num)) {
         g_owner_client = num;
         g_owner_last_heartbeat_ms = millis();
@@ -497,6 +489,10 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
         sendControlRole(num, "readonly");
         break;
       }
+      if (!g_link_policy.online) {
+        sendControlRole(num, "offline");
+        break;
+      }
       // {"cmd":"vel","lx":0.30,"az":0.00}
       int lxIdx = cmd.indexOf("\"lx\":");
       int azIdx = cmd.indexOf("\"az\":");
@@ -526,6 +522,10 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
     else if (cmd.startsWith("{\"cmd\":\"line\"")) {
       if (!clientIsOwner(num)) {
         sendControlRole(num, "readonly");
+        break;
+      }
+      if (!g_link_policy.online) {
+        sendControlRole(num, "offline");
         break;
       }
       // {"cmd":"line","v":1}  or  {"cmd":"line","v":0}
@@ -626,12 +626,13 @@ connect();
 
 // 推送遥测 JSON 到 WebSocket 客户端
 static void pushTelemetry() {
-  if (g_ws_client_count == 0U || !g_status_valid) return;
+  if (g_ws_client_count == 0U || !g_link_policy.status_valid) return;
   unsigned long now = millis();
   if (now - g_last_telem_ms < TELEM_INTERVAL_MS) return;
   g_last_telem_ms = now;
 
-  char json[512];
+  unsigned long status_age_ms = statusAgeMs(now);
+  char json[768];
   snprintf(json, sizeof(json),
     "{\"pv\":%u,\"flags\":%u,\"src\":%u,\"mask\":%u,\"valid\":%u,"
     "\"err\":%lu,\"lat\":%lu,\"bat\":%.2f,"
@@ -640,7 +641,9 @@ static void pushTelemetry() {
     "\"cur\":[%.2f,%.2f,%.2f,%.2f],"
     "\"tgt\":[%.2f,%.2f,%.2f,%.2f],"
     "\"pwm\":[%d,%d,%d,%d],"
-    "\"lx\":%.2f,\"az\":%.2f}",
+    "\"lx\":%.2f,\"az\":%.2f,\"online\":%s,\"status_age_ms\":%lu,"
+    "\"diag\":{\"schema\":%u,\"post_done\":%u,\"imu_status\":%u,\"post\":%lu,\"adc_invalid\":%lu,\"task_timeout\":%u,\"imu_quality\":%lu,\"reset\":%lu,\"uptime_ms\":%lu},"
+    "\"rx\":{\"timeout\":%lu,\"crc\":%lu,\"length\":%lu,\"uart\":%lu}}",
     g_status.protocol_version, g_status.status_flags, g_status.control_source,
     g_status.motor_enabled_mask, g_status.motor_speed_valid_mask,
     (unsigned long)g_status.error_flags,
@@ -662,7 +665,14 @@ static void pushTelemetry() {
     (float)g_status.motor_target_mmps[3] / 1000.0f,
     g_status.motor_output_permille[0], g_status.motor_output_permille[1],
     g_status.motor_output_permille[2], g_status.motor_output_permille[3],
-    g_lx, g_az);
+    g_lx, g_az, g_link_policy.online ? "true" : "false", status_age_ms,
+    g_diagnostic.schema, g_diagnostic.post_done, g_diagnostic.imu_status_flags,
+    (unsigned long)g_diagnostic.post_error_flags,
+    (unsigned long)g_diagnostic.adc_invalid_reason_flags, g_diagnostic.task_timeout_mask,
+    (unsigned long)g_diagnostic.imu_quality_flags, (unsigned long)g_diagnostic.reset_reason_flags,
+    (unsigned long)g_diagnostic.uptime_ms,
+    (unsigned long)g_rx_parser.timeout_count, (unsigned long)g_rx_parser.crc_error_count,
+    (unsigned long)g_rx_parser.length_error_count, (unsigned long)g_rx_parser.uart_error_count);
   ws.broadcastTXT(json);
 }
 
@@ -705,16 +715,28 @@ static void handleConfigure() {
 
 // HTTP 路由：状态 JSON（方便调试）
 static void handleStatus() {
-  char json[256];
+  unsigned long now = millis();
+  unsigned long status_age_ms = statusAgeMs(now);
+  char json[512];
   snprintf(json, sizeof(json),
     "{\"pv\":%u,\"bat\":%.2f,\"err\":%lu,\"lat\":%lu,\"src\":%u,"
-    "\"wifi\":\"%s\",\"ws\":%d}",
+    "\"wifi\":\"%s\",\"ws\":%d,\"online\":%s,\"status_age_ms\":%lu,"
+    "\"diag_schema\":%u,\"post_done\":%u,\"imu_status\":%u,\"post_errors\":%lu,"
+    "\"adc_invalid\":%lu,\"task_timeout\":%u,\"imu_quality\":%lu,\"reset_reason\":%lu,\"uptime_ms\":%lu,"
+    "\"rx_timeout\":%lu,\"rx_crc\":%lu,\"rx_length\":%lu,\"rx_uart\":%lu}",
     g_status.protocol_version,
     (float)g_status.battery_mv / 1000.0f,
     (unsigned long)g_status.error_flags,
     (unsigned long)g_status.latched_error_flags,
     g_status.control_source,
-    my_ip.c_str(), g_ws_client_count);
+    my_ip.c_str(), g_ws_client_count, g_link_policy.online ? "true" : "false", status_age_ms,
+    g_diagnostic.schema, g_diagnostic.post_done, g_diagnostic.imu_status_flags,
+    (unsigned long)g_diagnostic.post_error_flags,
+    (unsigned long)g_diagnostic.adc_invalid_reason_flags, g_diagnostic.task_timeout_mask,
+    (unsigned long)g_diagnostic.imu_quality_flags, (unsigned long)g_diagnostic.reset_reason_flags,
+    (unsigned long)g_diagnostic.uptime_ms,
+    (unsigned long)g_rx_parser.timeout_count, (unsigned long)g_rx_parser.crc_error_count,
+    (unsigned long)g_rx_parser.length_error_count, (unsigned long)g_rx_parser.uart_error_count);
   http.send(200, "application/json", json);
 }
 
@@ -723,6 +745,7 @@ static void handleStatus() {
 // ============================================================================
 
 void setup() {
+  EspFrameParser_Init(&g_rx_parser);
   Serial.begin(UART_BAUD);
   sendNeutralControl();
   // ESP12F 的 UART0 TX/RX 默认在 GPIO1/GPIO3，与 STM32 USART2 交叉连接
@@ -763,19 +786,31 @@ void loop() {
   }
 
   // --- 收 STM32 数据 ---
+  if (Serial.hasOverrun() || Serial.hasRxError()) {
+    while (Serial.available()) (void)Serial.read();
+    EspFrameParser_OnUartError(&g_rx_parser);
+  }
   while (Serial.available()) {
     uint8_t b = Serial.read();
-    if (feedRxByte(b)) {
+    if (EspFrameParser_Feed(&g_rx_parser, b, now)) {
       // 收到有效帧
-      uint8_t cmd = rx_frame_buf[3];
-      uint8_t cmd_len = rx_frame_buf[2];
-      uint8_t *payload = &rx_frame_buf[4];
+      uint8_t cmd = g_rx_parser.frame[3];
+      uint8_t cmd_len = g_rx_parser.frame[2];
+      uint8_t *payload = &g_rx_parser.frame[4];
       uint8_t payload_len = cmd_len - 1;
 
       if (cmd == CMD_STATUS && parseStatusFrame(payload, payload_len, g_status)) {
-        g_status_valid = true;
+        EspLinkPolicy_OnStatus(&g_link_policy, now);
+      } else if (cmd == CMD_DIAGNOSTIC) {
+        (void)parseDiagnosticFrame(payload, payload_len, g_diagnostic);
       }
     }
+  }
+
+  EspFrameParser_CheckTimeout(&g_rx_parser, now);
+  if (EspLinkPolicy_Update(&g_link_policy, now)) {
+    if (g_owner_client != NO_OWNER) releaseOwnerAndStop();
+    else sendNeutralControl();
   }
 
   // --- 推送遥测 ---
@@ -801,7 +836,7 @@ void loop() {
   if (g_config_valid) ws.loop();
 
   // --- 心跳 LED（收到遥测时闪） ---
-  if (g_status_valid) {
+  if (g_link_policy.online) {
     digitalWrite(2, (now % 1000) < 100 ? LOW : HIGH);
   } else {
     digitalWrite(2, (now % 2000) < 200 ? LOW : HIGH);

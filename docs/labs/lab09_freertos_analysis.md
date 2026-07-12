@@ -166,7 +166,7 @@ rtos                # 再次对比
 log 0
 ```
 
-**观察**：`debugTask` 的 `stack_free` 在打印全字段日志时是否明显减少（`snprintf` 需要较大的临时缓冲区：`DEBUG_CONSOLE_TX_LINE_SIZE = 768B`）。
+**观察**：`debugTask` 的 `stack_free` 在打印全字段日志时是否明显减少（`snprintf` 需要较大的临时缓冲区：`DEBUG_CONSOLE_TX_LINE_SIZE = 1536B`）。
 
 ### 步骤 4：Heap 水位监测
 

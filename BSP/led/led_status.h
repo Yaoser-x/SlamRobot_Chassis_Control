@@ -13,7 +13,10 @@ typedef enum
   LED_STATUS_UPPER_LINK = 1,
   LED_STATUS_LOW_BATTERY = 2,
   LED_STATUS_FAULT = 3,
-  LED_STATUS_ESTOP = 4
+  LED_STATUS_ESTOP = 4,
+  LED_STATUS_CAL_RUNNING = 5,
+  LED_STATUS_CAL_OK = 6,
+  LED_STATUS_CAL_APPLIED = 7
 } led_status_mode_t;
 
 void LedStatus_Init(void);

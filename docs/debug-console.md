@@ -15,16 +15,23 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | `help` / `h` | — | 打印命令列表 |
 | `status` / `s` | — | 打印所有子系统单次快照（编码器/底盘/ADC/POST/参数/IMU/系统/巡线/ResetTrace） |
 | `rtos` | — | FreeRTOS heap、各任务栈余量、missed-period、通信统计 |
+| `version` | — | 固定格式输出固件版本、短 SHA、dirty、构建类型及协议/参数/诊断 schema |
+| `config export` | — | 输出可存档的 JSON 参数快照；写入 schema 4 前建议先执行 |
 | `get` | `<param>` | 读取运行时参数 |
 | `set` | `<param> <value>` | 修改运行时参数（RAM 生效） |
 | `set save` | — | 保存当前参数与校准快照到 STM32 Flash |
 | `set reset` | — | 擦除 Flash 参数并恢复默认参数 |
+| `set motor_dir` | `m1..m4 -1|1` | 维护锁与零 PWM 门禁下修改电机方向，仅 RAM 生效 |
+| `set encoder_dir` | `m1..m4 -1|1` | 维护锁与零 PWM 门禁下修改编码器方向，仅 RAM 生效 |
 | `header` | — | 打印全字段 CSV 日志标题行 |
 | **`log 0`** | — | 停止 CSV 日志输出 |
 | **`log 1`** | `[field...]` | 启动 2 Hz CSV 日志，可选字段过滤（见第 3 节） |
+| `log rate` | `<50..5000>` | 运行时修改日志周期，单位 ms |
+| `log csv` / `log json` | — | 选择同一快照的 CSV 或逐行 JSON 格式 |
 | **`line`** | — | 打印巡线传感器原始数据与控制状态 |
 | **`line on`** | — | 启用巡线控制 |
 | **`line off`** | — | 禁用巡线控制 |
+| `linecal` | `floor|line N` | 采集双表面样本；`show|apply|cancel` 查看、应用到 RAM 或取消 |
 | `motor` | `<L> <R>` | 左右侧开环 permille（范围 -900…900） |
 | `left` / `right` | `<P>` | 单侧开环快捷命令 |
 | `m1`…`m4` | `<F> <R>` | 单路 raw EN/PH 测试；输出按 `F-R` 解析为有符号 PWM |
@@ -56,7 +63,7 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 
 ### 3.1 基本用法
 
-日志以 500ms 间隔（2 Hz）向 USART1 输出 CSV 行。**全字段模式**（`log 1` 无参数）输出全部 42 列，兼容历史数据解析脚本。**过滤模式**仅输出指定字段，减少串口带宽占用：
+日志默认以 500ms 间隔输出；可用 `log rate` 在 50–5000ms 调整。CSV 保留历史列并追加每电机 PID error/output、IMU 温度和校准状态；JSON 每行一个对象。两种格式从同一快照追加 `requested_mps`、`target_mps`、`actual_left_mps`、`actual_right_mps`、`speed_valid`、`pwm_saturated`、`source`、`battery_v` 以及 `straight_*` 的方向、0.30m transition 路程、trim、轮速/PI 修正和降速状态。
 
 ```
 log 0                          停止日志
@@ -182,6 +189,19 @@ angular_ramp_rps2
 wheel_radius_m
 track_width_m
 pid_integral_limit
+line_kp
+line_kd
+line_speed_mps
+line_slowdown_gain
+straight_wheel_coupling_gain
+straight_heading_kp
+straight_trim_forward_015_mps
+straight_trim_forward_030_mps
+straight_trim_reverse_015_mps
+straight_trim_reverse_030_mps
+straight_heading_ki
+straight_heading_integral_limit_deg_s
+straight_max_speed_mps
 ```
 
 Flash 参数镜像带 magic、版本号和 CRC32。启动时若镜像为空、CRC 错误或版本不兼容，则使用编译期默认值；若镜像有效，会恢复 ADC current-zero 和 IMU gyro bias 快照。

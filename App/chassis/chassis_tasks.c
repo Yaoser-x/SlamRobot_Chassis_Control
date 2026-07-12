@@ -26,6 +26,7 @@
 #include "flash_param.h"
 #include "param_store.h"
 #include "power_on_self_test.h"
+#include "reset_reason.h"
 #include "control_manager.h"
 #include "main.h"
 
@@ -92,14 +93,6 @@ static void ChassisTasks_ServiceFirstImuCalibrationSave(uint32_t now_ms)
     }
     bundle.params.current_zero_valid = 1U;
   }
-  if (imu_state.gyro_calibrated != 0U)
-  {
-    for (uint8_t axis = 0U; axis < 3U; ++axis)
-    {
-      bundle.params.imu_gyro_bias_dps[axis] = imu_state.gyro_bias_dps[axis];
-    }
-    bundle.params.imu_gyro_bias_valid = 1U;
-  }
   ImuBmi270_GetCalibration(&bundle.imu_calibration);
   imu_calibration_save_attempts++;
   if (FlashParam_SaveBundle(&bundle) == FLASH_PARAM_STATUS_OK)
@@ -125,6 +118,7 @@ void ChassisTasks_InitHardware(void)
   param_store_t params;
   uint8_t params_loaded;
 
+  ResetReason_Capture(RCC->CSR);
   ChassisTaskTiming_Reset();
   ParamStore_SetDefaults();
   params_loaded = (FlashParam_LoadBundle(&bundle) == FLASH_PARAM_STATUS_OK) ? 1U : 0U;
@@ -148,11 +142,9 @@ void ChassisTasks_InitHardware(void)
     {
       AdcMonitor_ApplyCurrentZeroCalibration(params.current_zero_raw);
     }
-    if (params.imu_gyro_bias_valid != 0U)
-    {
-      ImuBmi270_ApplyGyroBias(params.imu_gyro_bias_dps);
-      imu_first_calibration_save_needed = 0U;
-    }
+    imu_first_calibration_save_needed = (bundle.imu_calibration.gyro_bias_dps[0] == 0.0f &&
+                                         bundle.imu_calibration.gyro_bias_dps[1] == 0.0f &&
+                                         bundle.imu_calibration.gyro_bias_dps[2] == 0.0f) ? 1U : 0U;
   }
   LedStatus_Init();
   SystemMonitor_Init();
@@ -249,6 +241,7 @@ void Task_Imu(void *argument)
                             CHASSIS_IMU_PERIOD_MS);
     (void)ImuBmi270_Update();
     now_ms = osKernelGetTickCount();
+    ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_IMU, now_ms);
     EncoderDriver_GetState(&encoder_state);
     MotorDriver_GetState(&motor_state);
     ImuBmi270_GetState(&imu_state);

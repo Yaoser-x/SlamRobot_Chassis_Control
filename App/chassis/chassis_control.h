@@ -39,6 +39,20 @@ typedef struct
   uint8_t right_feedback_lost;
   uint8_t left_current_limited;
   uint8_t right_current_limited;
+  float straight_wheel_correction_mps;
+  float straight_trim_mps;
+  float straight_heading_error_deg;
+  float straight_heading_integral_deg_s;
+  float straight_heading_correction_mps;
+  float straight_total_correction_mps;
+  float straight_transition_distance_m;
+  int8_t straight_direction;
+  uint8_t straight_active;
+  uint8_t straight_heading_degraded;
+  uint8_t straight_derated;
+  uint8_t straight_in_transition;
+  uint8_t pwm_saturated;
+  uint8_t control_source;
 } chassis_control_state_t;
 
 void ChassisControl_Init(void);

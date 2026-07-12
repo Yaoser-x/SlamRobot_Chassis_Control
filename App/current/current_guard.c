@@ -2,6 +2,7 @@
 
 #include "bsp_config.h"
 #include "chassis_layout.h"
+#include "param_store.h"
 
 static current_guard_state_t current_guard_state;
 static uint8_t current_guard_over_limit_debounce[MOTOR_ID_COUNT];
@@ -51,6 +52,8 @@ int16_t CurrentGuard_ApplyMotorLimit(motor_id_t motor,
   uint8_t over_soft_limit = 0U;
   uint8_t over_fault_limit = 0U;
   int16_t applied;
+  param_store_t params;
+  uint8_t debounce_count;
 
   (void)now_ms;
   if (limited != 0)
@@ -76,6 +79,9 @@ int16_t CurrentGuard_ApplyMotorLimit(motor_id_t motor,
   }
 
   applied = requested_permille;
+  (void)ParamStore_GetSnapshot(&params);
+  debounce_count = (uint8_t)((params.current_fault_debounce_ms + 9U) / 10U);
+  if (debounce_count == 0U) { debounce_count = 1U; }
   control_valid = CurrentGuard_IsControlValid(motor, adc_state);
   current_guard_state.control_valid[motor] = control_valid;
   if (control_valid == 0U || adc_state == 0)
@@ -83,12 +89,15 @@ int16_t CurrentGuard_ApplyMotorLimit(motor_id_t motor,
     return applied;
   }
 
-  if (adc_state->current_a[motor] > MOTOR_STALL_CURRENT_A)
+  if (adc_state->current_a[motor] > params.current_observe_a[motor])
   {
-    over_fault_limit = 1U;
     current_guard_state.observe_over_limit_count[motor]++;
     current_guard_state.observe_over_limit[motor] = 1U;
-    if (current_guard_over_limit_debounce[motor] < MOTOR_OVERCURRENT_DEBOUNCE_COUNT)
+  }
+  if (adc_state->current_a[motor] > params.current_fault_a[motor])
+  {
+    over_fault_limit = 1U;
+    if (current_guard_over_limit_debounce[motor] < debounce_count)
     {
       current_guard_over_limit_debounce[motor]++;
     }
@@ -98,8 +107,8 @@ int16_t CurrentGuard_ApplyMotorLimit(motor_id_t motor,
     current_guard_over_limit_debounce[motor] = 0U;
   }
 
-  if (MOTOR_CURRENT_LIMIT_A > 0.0f &&
-      adc_state->current_a[motor] > MOTOR_CURRENT_LIMIT_A &&
+  if (params.current_soft_limit_a[motor] > 0.0f &&
+      adc_state->current_a[motor] > params.current_soft_limit_a[motor] &&
       requested_permille != 0)
   {
     over_soft_limit = 1U;
@@ -107,7 +116,7 @@ int16_t CurrentGuard_ApplyMotorLimit(motor_id_t motor,
   }
 
   if (over_fault_limit != 0U &&
-      current_guard_over_limit_debounce[motor] >= MOTOR_OVERCURRENT_DEBOUNCE_COUNT)
+      current_guard_over_limit_debounce[motor] >= debounce_count)
   {
     current_guard_state.fault_would_latch[motor] = 1U;
     current_guard_state.fault_would_latch_count[motor]++;
@@ -118,7 +127,8 @@ int16_t CurrentGuard_ApplyMotorLimit(motor_id_t motor,
       over_soft_limit != 0U)
   {
     applied = CurrentGuard_ClampPermille((int32_t)((float)requested_permille *
-                                                  (MOTOR_CURRENT_LIMIT_A / adc_state->current_a[motor])));
+                                                  (params.current_soft_limit_a[motor] /
+                                                   adc_state->current_a[motor])));
     current_guard_state.soft_limit_applied[motor] = 1U;
     if (limited != 0)
     {

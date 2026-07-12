@@ -46,9 +46,13 @@
 #define FREERTOS_FATAL_TASK_CREATE     4UL
 #define SAFETY_TASK_STACK_SIZE_BYTES   4096U
 #define SAFETY_TASK_STACK_MIN_BYTES    3072U
+#define OLED_TASK_STACK_SIZE_BYTES     2048U
+#define OLED_TASK_STACK_MIN_BYTES      2048U
 
 _Static_assert(SAFETY_TASK_STACK_SIZE_BYTES >= SAFETY_TASK_STACK_MIN_BYTES,
                "safetyTask stack is below the monitored-control budget");
+_Static_assert(OLED_TASK_STACK_SIZE_BYTES >= OLED_TASK_STACK_MIN_BYTES,
+               "oledTask stack is below the runtime-page budget");
 
 /* USER CODE END PD */
 
@@ -66,7 +70,7 @@ volatile const char *freertos_fatal_file;
 osThreadId_t usart1DebugTaskHandle;
 const osThreadAttr_t usart1DebugTask_attributes = {
   .name = "debugTask",
-  .stack_size = 2048 * 4,
+  .stack_size = 2048 * 6,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 
@@ -87,7 +91,7 @@ const osThreadAttr_t ledTask_attributes = {
 osThreadId_t oledTaskHandle;
 const osThreadAttr_t oledTask_attributes = {
   .name = "oledTask",
-  .stack_size = 256 * 4,
+  .stack_size = OLED_TASK_STACK_SIZE_BYTES,
   .priority = (osPriority_t) osPriorityLow,
 };
 

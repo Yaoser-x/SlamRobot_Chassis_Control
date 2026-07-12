@@ -5,6 +5,20 @@
 #include "adc_monitor.h"
 #include "bsp_config.h"
 #include "current_guard.h"
+#include "param_store.h"
+
+uint32_t ParamStore_GetSnapshot(param_store_t *params)
+{
+  *params = (param_store_t){0};
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    params->current_observe_a[i] = MOTOR_STALL_CURRENT_A;
+    params->current_soft_limit_a[i] = MOTOR_CURRENT_LIMIT_A;
+    params->current_fault_a[i] = MOTOR_STALL_CURRENT_A;
+  }
+  params->current_fault_debounce_ms = (uint16_t)(MOTOR_OVERCURRENT_DEBOUNCE_COUNT * 10U);
+  return 1U;
+}
 
 static void require_int(int condition, const char *message)
 {

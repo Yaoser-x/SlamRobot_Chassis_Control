@@ -38,6 +38,18 @@ jobs:
           python scripts/hil_smoke.py
           --port "${{ inputs.port }}"
           --baud "${{ inputs.baud }}"
+          --json-out "hil-smoke.json"
+          --transcript-out "hil-smoke.txt"
+
+      - name: Upload structured HIL evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hil-smoke-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            hil-smoke.json
+            hil-smoke.txt
 
       - name: Run IMU calibration scheduling check
         if: ${{ inputs.imu_calibration_scheduling }}

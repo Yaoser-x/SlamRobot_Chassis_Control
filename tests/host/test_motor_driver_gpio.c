@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "motor_driver.h"
+#include "param_store.h"
 #include "bsp_config.h"
 #include "tim.h"
 
@@ -212,6 +213,23 @@ static void test_motor_driver_uses_gpio_for_phase(void)
   require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_1) == 0U, "disabled M1 keeps EN off");
   require_int(gpio_c_state(M1_IN2_Pin) == GPIO_PIN_RESET, "disabled M1 keeps PH low");
   require_int(state.output_permille[MOTOR_ID_M1] == 0, "disabled M1 state records off output");
+}
+
+static void test_motor_driver_uses_runtime_direction(void)
+{
+  motor_driver_state_t state;
+  param_store_t params;
+
+  reset_fake_hw();
+  ParamStore_Defaults(&params);
+  params.motor_dir[MOTOR_ID_M3] = -1;
+  require_int(ParamStore_Set(&params) != 0U, "runtime motor direction accepted");
+  MotorDriver_Init();
+  MotorDriver_SetPermille(MOTOR_ID_M3, 300);
+  MotorDriver_GetState(&state);
+  require_int(state.requested_pwm[MOTOR_ID_M3] == -300,
+              "runtime motor direction reverses requested output");
+  ParamStore_SetDefaults();
 }
 
 static void test_motor_driver_ramps_up_and_down_without_changing_phase(void)
@@ -499,6 +517,7 @@ static void test_startup_transient_must_recover_then_remain_stable(void)
 
 int main(void)
 {
+  test_motor_driver_uses_runtime_direction();
   test_motor_driver_uses_gpio_for_phase();
   test_motor_driver_ramps_up_and_down_without_changing_phase();
   test_motor_driver_reverses_only_after_brake_and_phase_settle();

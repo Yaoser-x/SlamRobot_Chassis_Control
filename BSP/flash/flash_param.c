@@ -16,11 +16,102 @@
 
 typedef struct
 {
+  uint32_t version;
+  float max_linear_mps;
+  float max_angular_rps;
+  float speed_ramp_mps2;
+  float angular_ramp_rps2;
+  float wheel_radius_m;
+  float track_width_m;
+  float pid_kp[MOTOR_ID_COUNT];
+  float pid_ki[MOTOR_ID_COUNT];
+  float pid_kd[MOTOR_ID_COUNT];
+  float pid_integral_limit;
+  int8_t motor_dir[MOTOR_ID_COUNT];
+  int8_t encoder_dir[MOTOR_ID_COUNT];
+  uint16_t current_zero_raw[MOTOR_ID_COUNT];
+  uint8_t current_zero_valid;
+  float imu_gyro_bias_dps[3];
+  uint8_t imu_gyro_bias_valid;
+} param_store_v1_t;
+
+typedef struct
+{
+  param_store_v1_t params;
+  imu_bmi270_calibration_t imu_calibration;
+} flash_param_bundle_v2_t;
+
+typedef struct
+{
+  uint32_t version;
+  float max_linear_mps;
+  float max_angular_rps;
+  float speed_ramp_mps2;
+  float angular_ramp_rps2;
+  float wheel_radius_m;
+  float track_width_m;
+  float pid_kp[MOTOR_ID_COUNT];
+  float pid_ki[MOTOR_ID_COUNT];
+  float pid_kd[MOTOR_ID_COUNT];
+  float pid_integral_limit;
+  int8_t motor_dir[MOTOR_ID_COUNT];
+  int8_t encoder_dir[MOTOR_ID_COUNT];
+  uint16_t current_zero_raw[MOTOR_ID_COUNT];
+  uint8_t current_zero_valid;
+  float imu_gyro_bias_dps[3];
+  uint8_t imu_gyro_bias_valid;
+  uint16_t line_threshold_raw[PARAM_STORE_LINE_CHANNELS];
+  uint8_t line_active_low;
+  float line_kp;
+  float line_kd;
+  float line_speed_mps;
+  float line_slowdown_gain;
+  uint8_t line_detect_debounce_frames;
+  uint8_t line_lost_debounce_frames;
+  float current_observe_a[MOTOR_ID_COUNT];
+  float current_soft_limit_a[MOTOR_ID_COUNT];
+  float current_fault_a[MOTOR_ID_COUNT];
+  uint16_t current_fault_debounce_ms;
+  float straight_wheel_coupling_gain;
+  float straight_heading_kp;
+  uint8_t straight_heading_hold_enabled;
+} param_store_v2_t;
+
+typedef struct
+{
+  param_store_v2_t params;
+  imu_bmi270_calibration_t imu_calibration;
+} flash_param_bundle_v3_t;
+
+typedef struct
+{
+  uint32_t magic;
+  uint32_t schema_version;
+  uint32_t sequence;
+  uint32_t payload_size;
+  flash_param_bundle_v2_t payload;
+  uint32_t crc32;
+  uint32_t commit_marker;
+} flash_param_image_v2_t;
+
+typedef struct
+{
+  uint32_t magic;
+  uint32_t schema_version;
+  uint32_t sequence;
+  uint32_t payload_size;
+  flash_param_bundle_v3_t payload;
+  uint32_t crc32;
+  uint32_t commit_marker;
+} flash_param_image_v3_t;
+
+typedef struct
+{
   uint32_t magic;
   uint32_t version;
   uint32_t data_size;
   uint32_t crc32;
-  param_store_t data;
+  param_store_v1_t data;
 } flash_param_legacy_image_t;
 
 typedef struct
@@ -76,6 +167,101 @@ static uint8_t FlashParam_BundleValid(const flash_param_bundle_t *bundle)
   return ImuBmi270Calibration_Validate(&bundle->imu_calibration);
 }
 
+static void FlashParam_MigrateV1Params(const param_store_v1_t *old,
+                                       param_store_t *params)
+{
+  ParamStore_Defaults(params);
+  params->max_linear_mps = old->max_linear_mps;
+  params->max_angular_rps = old->max_angular_rps;
+  params->speed_ramp_mps2 = old->speed_ramp_mps2;
+  params->angular_ramp_rps2 = old->angular_ramp_rps2;
+  params->wheel_radius_m = old->wheel_radius_m;
+  params->track_width_m = old->track_width_m;
+  params->pid_integral_limit = old->pid_integral_limit;
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    params->pid_kp[i] = old->pid_kp[i];
+    params->pid_ki[i] = old->pid_ki[i];
+    params->pid_kd[i] = old->pid_kd[i];
+    params->motor_dir[i] = old->motor_dir[i];
+    params->encoder_dir[i] = old->encoder_dir[i];
+    params->current_zero_raw[i] = old->current_zero_raw[i];
+  }
+  params->current_zero_valid = old->current_zero_valid;
+}
+
+static void FlashParam_MigrateV2Bundle(const flash_param_bundle_v2_t *old,
+                                       flash_param_bundle_t *bundle)
+{
+  FlashParam_MigrateV1Params(&old->params, &bundle->params);
+  bundle->imu_calibration = old->imu_calibration;
+  if (ImuBmi270Calibration_Validate(&bundle->imu_calibration) == 0U)
+  {
+    ImuBmi270Calibration_Default(&bundle->imu_calibration);
+  }
+  if (old->params.imu_gyro_bias_valid != 0U &&
+      bundle->imu_calibration.gyro_bias_dps[0] == 0.0f &&
+      bundle->imu_calibration.gyro_bias_dps[1] == 0.0f &&
+      bundle->imu_calibration.gyro_bias_dps[2] == 0.0f)
+  {
+    for (uint8_t i = 0U; i < 3U; ++i)
+    {
+      bundle->imu_calibration.gyro_bias_dps[i] = old->params.imu_gyro_bias_dps[i];
+    }
+    bundle->imu_calibration.crc = ImuBmi270Calibration_Crc(&bundle->imu_calibration);
+  }
+  bundle->params.imu_gyro_bias_valid = 0U;
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    bundle->params.imu_gyro_bias_dps[i] = 0.0f;
+  }
+}
+
+static void FlashParam_MigrateV3Bundle(const flash_param_bundle_v3_t *old,
+                                       flash_param_bundle_t *bundle)
+{
+  ParamStore_Defaults(&bundle->params);
+  bundle->params.max_linear_mps = old->params.max_linear_mps;
+  bundle->params.max_angular_rps = old->params.max_angular_rps;
+  bundle->params.speed_ramp_mps2 = old->params.speed_ramp_mps2;
+  bundle->params.angular_ramp_rps2 = old->params.angular_ramp_rps2;
+  bundle->params.wheel_radius_m = old->params.wheel_radius_m;
+  bundle->params.track_width_m = old->params.track_width_m;
+  memcpy(bundle->params.pid_kp, old->params.pid_kp, sizeof(bundle->params.pid_kp));
+  memcpy(bundle->params.pid_ki, old->params.pid_ki, sizeof(bundle->params.pid_ki));
+  memcpy(bundle->params.pid_kd, old->params.pid_kd, sizeof(bundle->params.pid_kd));
+  bundle->params.pid_integral_limit = old->params.pid_integral_limit;
+  memcpy(bundle->params.motor_dir, old->params.motor_dir, sizeof(bundle->params.motor_dir));
+  memcpy(bundle->params.encoder_dir, old->params.encoder_dir, sizeof(bundle->params.encoder_dir));
+  memcpy(bundle->params.current_zero_raw, old->params.current_zero_raw,
+         sizeof(bundle->params.current_zero_raw));
+  bundle->params.current_zero_valid = old->params.current_zero_valid;
+  memcpy(bundle->params.line_threshold_raw, old->params.line_threshold_raw,
+         sizeof(bundle->params.line_threshold_raw));
+  bundle->params.line_active_low = old->params.line_active_low;
+  bundle->params.line_kp = old->params.line_kp;
+  bundle->params.line_kd = old->params.line_kd;
+  bundle->params.line_speed_mps = old->params.line_speed_mps;
+  bundle->params.line_slowdown_gain = old->params.line_slowdown_gain;
+  bundle->params.line_detect_debounce_frames = old->params.line_detect_debounce_frames;
+  bundle->params.line_lost_debounce_frames = old->params.line_lost_debounce_frames;
+  memcpy(bundle->params.current_observe_a, old->params.current_observe_a,
+         sizeof(bundle->params.current_observe_a));
+  memcpy(bundle->params.current_soft_limit_a, old->params.current_soft_limit_a,
+         sizeof(bundle->params.current_soft_limit_a));
+  memcpy(bundle->params.current_fault_a, old->params.current_fault_a,
+         sizeof(bundle->params.current_fault_a));
+  bundle->params.current_fault_debounce_ms = old->params.current_fault_debounce_ms;
+  bundle->params.straight_wheel_coupling_gain = old->params.straight_wheel_coupling_gain;
+  bundle->params.straight_heading_kp = old->params.straight_heading_kp;
+  bundle->params.straight_heading_hold_enabled = 0U;
+  bundle->imu_calibration = old->imu_calibration;
+  if (ImuBmi270Calibration_Validate(&bundle->imu_calibration) == 0U)
+  {
+    ImuBmi270Calibration_Default(&bundle->imu_calibration);
+  }
+}
+
 flash_param_status_t FlashParam_EncodeBundle(const flash_param_bundle_t *bundle,
                                              uint32_t sequence,
                                              uint8_t *image,
@@ -97,6 +283,11 @@ flash_param_status_t FlashParam_EncodeBundle(const flash_param_bundle_t *bundle,
   encoded.sequence = sequence;
   encoded.payload_size = sizeof(encoded.payload);
   encoded.payload = *bundle;
+  encoded.payload.params.imu_gyro_bias_valid = 0U;
+  for (uint8_t i = 0U; i < 3U; ++i)
+  {
+    encoded.payload.params.imu_gyro_bias_dps[i] = 0.0f;
+  }
   encoded.crc32 = FlashParam_Crc32((const uint8_t *)&encoded,
                                    offsetof(flash_param_image_t, crc32));
   encoded.commit_marker = FLASH_PARAM_COMMIT_MARKER;
@@ -112,15 +303,73 @@ flash_param_status_t FlashParam_DecodeBundle(const uint8_t *image,
   const flash_param_image_t *encoded;
   uint32_t crc;
 
-  if (image == 0 || bundle == 0 || image_size < sizeof(flash_param_image_t))
+  if (image == 0 || bundle == 0 || image_size < (sizeof(uint32_t) * 2U))
   {
     return FLASH_PARAM_STATUS_INVALID;
   }
-  if (FlashParam_IsBlank(image, sizeof(flash_param_image_t)) != 0U)
+  if (FlashParam_IsBlank(image, image_size) != 0U)
   {
     return FLASH_PARAM_STATUS_EMPTY;
   }
   encoded = (const flash_param_image_t *)image;
+  if (encoded->magic == FLASH_PARAM_MAGIC && encoded->schema_version == 2UL)
+  {
+    const flash_param_image_v2_t *old = (const flash_param_image_v2_t *)image;
+    uint32_t old_crc;
+
+    if (image_size < sizeof(*old) || old->payload_size != sizeof(old->payload) ||
+        old->commit_marker != FLASH_PARAM_COMMIT_MARKER)
+    {
+      return FLASH_PARAM_STATUS_UNSUPPORTED;
+    }
+    old_crc = FlashParam_Crc32((const uint8_t *)old,
+                               offsetof(flash_param_image_v2_t, crc32));
+    if (old_crc != old->crc32)
+    {
+      return FLASH_PARAM_STATUS_CRC_ERROR;
+    }
+    FlashParam_MigrateV2Bundle(&old->payload, bundle);
+    if (ParamStore_Validate(&bundle->params) == 0U)
+    {
+      return FLASH_PARAM_STATUS_INVALID;
+    }
+    if (sequence != 0)
+    {
+      *sequence = old->sequence;
+    }
+    return FLASH_PARAM_STATUS_OK;
+  }
+  if (encoded->magic == FLASH_PARAM_MAGIC && encoded->schema_version == 3UL)
+  {
+    const flash_param_image_v3_t *old = (const flash_param_image_v3_t *)image;
+    uint32_t old_crc;
+
+    if (image_size < sizeof(*old) || old->payload_size != sizeof(old->payload) ||
+        old->commit_marker != FLASH_PARAM_COMMIT_MARKER)
+    {
+      return FLASH_PARAM_STATUS_UNSUPPORTED;
+    }
+    old_crc = FlashParam_Crc32((const uint8_t *)old,
+                               offsetof(flash_param_image_v3_t, crc32));
+    if (old_crc != old->crc32)
+    {
+      return FLASH_PARAM_STATUS_CRC_ERROR;
+    }
+    FlashParam_MigrateV3Bundle(&old->payload, bundle);
+    if (ParamStore_Validate(&bundle->params) == 0U)
+    {
+      return FLASH_PARAM_STATUS_INVALID;
+    }
+    if (sequence != 0)
+    {
+      *sequence = old->sequence;
+    }
+    return FLASH_PARAM_STATUS_OK;
+  }
+  if (image_size < sizeof(*encoded))
+  {
+    return FLASH_PARAM_STATUS_INVALID;
+  }
   if (encoded->magic != FLASH_PARAM_MAGIC ||
       encoded->schema_version != FLASH_PARAM_SCHEMA_VERSION ||
       encoded->payload_size != sizeof(encoded->payload))
@@ -200,8 +449,8 @@ static flash_param_status_t FlashParam_DecodeLegacy(const uint8_t *image,
   }
   legacy = (const flash_param_legacy_image_t *)image;
   if (legacy->magic != FLASH_PARAM_MAGIC ||
-      legacy->version != PARAM_STORE_VERSION ||
-      legacy->data_size != sizeof(param_store_t))
+      legacy->version != 1UL ||
+      legacy->data_size != sizeof(param_store_v1_t))
   {
     return FLASH_PARAM_STATUS_UNSUPPORTED;
   }
@@ -210,11 +459,7 @@ static flash_param_status_t FlashParam_DecodeLegacy(const uint8_t *image,
   {
     return FLASH_PARAM_STATUS_CRC_ERROR;
   }
-  if (ParamStore_Validate(&legacy->data) == 0U)
-  {
-    return FLASH_PARAM_STATUS_INVALID;
-  }
-  bundle->params = legacy->data;
+  FlashParam_MigrateV1Params(&legacy->data, &bundle->params);
   ImuBmi270Calibration_Default(&bundle->imu_calibration);
   return FLASH_PARAM_STATUS_OK;
 }
@@ -313,12 +558,135 @@ flash_param_status_t FlashParamHost_SeedLegacy(const param_store_t *params)
   }
   legacy = (flash_param_legacy_image_t){0};
   legacy.magic = FLASH_PARAM_MAGIC;
-  legacy.version = PARAM_STORE_VERSION;
+  legacy.version = 1UL;
   legacy.data_size = sizeof(legacy.data);
-  legacy.data = *params;
+  legacy.data.version = 1UL;
+  legacy.data.max_linear_mps = params->max_linear_mps;
+  legacy.data.max_angular_rps = params->max_angular_rps;
+  legacy.data.speed_ramp_mps2 = params->speed_ramp_mps2;
+  legacy.data.angular_ramp_rps2 = params->angular_ramp_rps2;
+  legacy.data.wheel_radius_m = params->wheel_radius_m;
+  legacy.data.track_width_m = params->track_width_m;
+  legacy.data.pid_integral_limit = params->pid_integral_limit;
+  memcpy(legacy.data.pid_kp, params->pid_kp, sizeof(legacy.data.pid_kp));
+  memcpy(legacy.data.pid_ki, params->pid_ki, sizeof(legacy.data.pid_ki));
+  memcpy(legacy.data.pid_kd, params->pid_kd, sizeof(legacy.data.pid_kd));
+  memcpy(legacy.data.motor_dir, params->motor_dir, sizeof(legacy.data.motor_dir));
+  memcpy(legacy.data.encoder_dir, params->encoder_dir, sizeof(legacy.data.encoder_dir));
+  memcpy(legacy.data.current_zero_raw, params->current_zero_raw, sizeof(legacy.data.current_zero_raw));
+  legacy.data.current_zero_valid = params->current_zero_valid;
   legacy.crc32 = FlashParam_Crc32((const uint8_t *)&legacy.data, sizeof(legacy.data));
   memset(flash_param_host_slots[1], 0xFF, FLASH_PARAM_IMAGE_SIZE);
   memcpy(flash_param_host_slots[1], &legacy, sizeof(legacy));
+  return FLASH_PARAM_STATUS_OK;
+}
+
+flash_param_status_t FlashParamHost_SeedSchema2WithCalibration(
+  const param_store_t *params, const imu_bmi270_calibration_t *calibration)
+{
+  flash_param_image_v2_t image = {0};
+
+  if (ParamStore_Validate(params) == 0U)
+  {
+    return FLASH_PARAM_STATUS_INVALID;
+  }
+  image.magic = FLASH_PARAM_MAGIC;
+  image.schema_version = 2UL;
+  image.sequence = 7UL;
+  image.payload_size = sizeof(image.payload);
+  image.payload.params.version = 1UL;
+  image.payload.params.max_linear_mps = params->max_linear_mps;
+  image.payload.params.max_angular_rps = params->max_angular_rps;
+  image.payload.params.speed_ramp_mps2 = params->speed_ramp_mps2;
+  image.payload.params.angular_ramp_rps2 = params->angular_ramp_rps2;
+  image.payload.params.wheel_radius_m = params->wheel_radius_m;
+  image.payload.params.track_width_m = params->track_width_m;
+  image.payload.params.pid_integral_limit = params->pid_integral_limit;
+  memcpy(image.payload.params.pid_kp, params->pid_kp, sizeof(image.payload.params.pid_kp));
+  memcpy(image.payload.params.pid_ki, params->pid_ki, sizeof(image.payload.params.pid_ki));
+  memcpy(image.payload.params.pid_kd, params->pid_kd, sizeof(image.payload.params.pid_kd));
+  memcpy(image.payload.params.motor_dir, params->motor_dir, sizeof(image.payload.params.motor_dir));
+  memcpy(image.payload.params.encoder_dir, params->encoder_dir, sizeof(image.payload.params.encoder_dir));
+  memcpy(image.payload.params.current_zero_raw, params->current_zero_raw,
+         sizeof(image.payload.params.current_zero_raw));
+  image.payload.params.current_zero_valid = params->current_zero_valid;
+  memcpy(image.payload.params.imu_gyro_bias_dps, params->imu_gyro_bias_dps,
+         sizeof(image.payload.params.imu_gyro_bias_dps));
+  image.payload.params.imu_gyro_bias_valid = params->imu_gyro_bias_valid;
+  if (calibration != 0)
+  {
+    image.payload.imu_calibration = *calibration;
+  }
+  else
+  {
+    ImuBmi270Calibration_Default(&image.payload.imu_calibration);
+  }
+  image.crc32 = FlashParam_Crc32((const uint8_t *)&image,
+                                 offsetof(flash_param_image_v2_t, crc32));
+  image.commit_marker = FLASH_PARAM_COMMIT_MARKER;
+  memset(flash_param_host_slots[0], 0xFF, FLASH_PARAM_IMAGE_SIZE);
+  memcpy(flash_param_host_slots[0], &image, sizeof(image));
+  return FLASH_PARAM_STATUS_OK;
+}
+
+flash_param_status_t FlashParamHost_SeedSchema2(const param_store_t *params)
+{
+  return FlashParamHost_SeedSchema2WithCalibration(params, 0);
+}
+
+flash_param_status_t FlashParamHost_SeedSchema3(const param_store_t *params)
+{
+  flash_param_image_v3_t image = {0};
+
+  if (ParamStore_Validate(params) == 0U)
+  {
+    return FLASH_PARAM_STATUS_INVALID;
+  }
+  image.magic = FLASH_PARAM_MAGIC;
+  image.schema_version = 3UL;
+  image.sequence = 8UL;
+  image.payload_size = sizeof(image.payload);
+  image.payload.params.version = 2UL;
+  image.payload.params.max_linear_mps = params->max_linear_mps;
+  image.payload.params.max_angular_rps = params->max_angular_rps;
+  image.payload.params.speed_ramp_mps2 = params->speed_ramp_mps2;
+  image.payload.params.angular_ramp_rps2 = params->angular_ramp_rps2;
+  image.payload.params.wheel_radius_m = params->wheel_radius_m;
+  image.payload.params.track_width_m = params->track_width_m;
+  memcpy(image.payload.params.pid_kp, params->pid_kp, sizeof(image.payload.params.pid_kp));
+  memcpy(image.payload.params.pid_ki, params->pid_ki, sizeof(image.payload.params.pid_ki));
+  memcpy(image.payload.params.pid_kd, params->pid_kd, sizeof(image.payload.params.pid_kd));
+  image.payload.params.pid_integral_limit = params->pid_integral_limit;
+  memcpy(image.payload.params.motor_dir, params->motor_dir, sizeof(image.payload.params.motor_dir));
+  memcpy(image.payload.params.encoder_dir, params->encoder_dir, sizeof(image.payload.params.encoder_dir));
+  memcpy(image.payload.params.current_zero_raw, params->current_zero_raw,
+         sizeof(image.payload.params.current_zero_raw));
+  image.payload.params.current_zero_valid = params->current_zero_valid;
+  memcpy(image.payload.params.line_threshold_raw, params->line_threshold_raw,
+         sizeof(image.payload.params.line_threshold_raw));
+  image.payload.params.line_active_low = params->line_active_low;
+  image.payload.params.line_kp = params->line_kp;
+  image.payload.params.line_kd = params->line_kd;
+  image.payload.params.line_speed_mps = params->line_speed_mps;
+  image.payload.params.line_slowdown_gain = params->line_slowdown_gain;
+  image.payload.params.line_detect_debounce_frames = params->line_detect_debounce_frames;
+  image.payload.params.line_lost_debounce_frames = params->line_lost_debounce_frames;
+  memcpy(image.payload.params.current_observe_a, params->current_observe_a,
+         sizeof(image.payload.params.current_observe_a));
+  memcpy(image.payload.params.current_soft_limit_a, params->current_soft_limit_a,
+         sizeof(image.payload.params.current_soft_limit_a));
+  memcpy(image.payload.params.current_fault_a, params->current_fault_a,
+         sizeof(image.payload.params.current_fault_a));
+  image.payload.params.current_fault_debounce_ms = params->current_fault_debounce_ms;
+  image.payload.params.straight_wheel_coupling_gain = params->straight_wheel_coupling_gain;
+  image.payload.params.straight_heading_kp = params->straight_heading_kp;
+  image.payload.params.straight_heading_hold_enabled = params->straight_heading_hold_enabled;
+  ImuBmi270Calibration_Default(&image.payload.imu_calibration);
+  image.crc32 = FlashParam_Crc32((const uint8_t *)&image,
+                                 offsetof(flash_param_image_v3_t, crc32));
+  image.commit_marker = FLASH_PARAM_COMMIT_MARKER;
+  memset(flash_param_host_slots[0], 0xFF, FLASH_PARAM_IMAGE_SIZE);
+  memcpy(flash_param_host_slots[0], &image, sizeof(image));
   return FLASH_PARAM_STATUS_OK;
 }
 #else

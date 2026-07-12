@@ -12,6 +12,9 @@
 - **安全保护**：配置前不启动 WebSocket；500ms 速度 deadman 与 owner 租约独立；任意客户端可设置 ESTOP，但不能远程解除。
 - **故障处理**：页面按名称显示活动/锁存原因；仅 owner 可发送 `clearfault`，并以 STM32 后续 STATUS 为准确认成功。ESTOP 始终只能在 STM32 本地解除。
 - **重启中和**：ESP 每次启动都主动向 STM32 发送速度零和 `LINE_CTRL=0`，因此模块重启/掉电恢复不会遗留旧巡线模式。
+- **STM32 在线真源**：最后一帧有效 STATUS 超过 500ms 后页面/API 标记离线，只发送一次 neutral 并释放 owner；重新收到 STATUS 只恢复遥测，不恢复旧租约或旧运动。
+- **串口恢复**：100ms 帧内超时、CRC/长度错误及 `Serial.hasOverrun()`/`hasRxError()` 分别计数，清空解析状态后允许下一完整帧恢复。
+- **诊断遥测**：`/status` 与 WebSocket 保留旧字段并增加 `online`、`status_age_ms`、DIAGNOSTIC 字段和串口恢复计数。
 
 ## 编译环境
 

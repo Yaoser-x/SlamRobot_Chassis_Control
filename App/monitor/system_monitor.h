@@ -37,6 +37,7 @@ typedef struct
   uint32_t task_last_heartbeat_ms[CHASSIS_TASK_TIMING_COUNT];
   uint32_t task_timeout_count[CHASSIS_TASK_TIMING_COUNT];
   uint8_t task_timed_out[CHASSIS_TASK_TIMING_COUNT];
+  uint16_t task_timeout_mask;
   uint8_t control_mode;
   uint8_t current_control_valid;
   uint8_t current_control_valid_mask;

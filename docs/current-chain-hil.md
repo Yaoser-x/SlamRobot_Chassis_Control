@@ -34,3 +34,12 @@
 
 全部满足并保留示波器截图/原始数据后，才将
 `MOTOR_ADC_OVERCURRENT_FAULT_ENABLED` 设为 `1U`。比例软限流继续关闭。
+# P1 参数化采集
+
+使用 `log json` 或 CSV 留存空载、瞬态、峰值和堵转前数据，再运行：
+
+```bash
+python scripts/analyze_roadmap_data.py current current.csv --json current.json --markdown current.md
+```
+
+分析结果用于提出 observe/soft/fault 与去抖参数，但不得在没有电源、电机、样本量和原始 CSV 的情况下关闭验收。

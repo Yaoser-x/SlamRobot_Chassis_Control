@@ -74,14 +74,14 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 | --- | --- |
 | Debug | `build/Debug/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
 | Release | `build/Release/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
-| Host 测试 | 17 个 CTest target，覆盖控制逻辑、ADC/电流保护、UART 协议、OLED/IMU 管线、POST、参数存储与 Flash 参数镜像 |
+| Host 测试 | 34 个 CTest target，覆盖控制逻辑、ADC/电流保护、UART 协议、OLED/IMU 管线、POST、参数存储与 Flash 参数镜像 |
 
 ### 2.4 当前构建验证
 
 ```
 Debug:  RAM   81.2 KB / 128 KB (61.9%)
         FLASH 180.7 KB / 512 KB (34.5%)
-        Host 测试 17/17 通过 (CI host-tests)
+        Host 测试 34/34 通过 (CI host-tests)
 ```
 
 ---
@@ -100,7 +100,7 @@ Debug:  RAM   81.2 KB / 128 KB (61.9%)
 | 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc`；静态检查: `clang-format`、`cppcheck` |
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
-| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（17 个 target），通过后输出测试摘要 |
+| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（34 个 target），通过后输出测试摘要 |
 | 格式检查 | `clang-format --dry-run --Werror` 检查本次变更涉及的 App/BSP/tests C/H 文件 |
 | 静态分析 | `cppcheck --enable=warning,style --error-exitcode=1` 检查本次变更涉及的 App/BSP/tests C/H 文件 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
@@ -246,7 +246,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | `git status` 显示大量 `Drivers/` 修改 | Windows `core.autocrlf` 转换行尾 | 确认 `.gitattributes` 存在 → `git restore --worktree -- Drivers` |
 | CubeMX 重新生成后构建失败 | CubeMX 生成的文件覆盖了业务配置或源文件清单 | 重点复查 `CMakeLists.txt`（缺失 `App/``BSP/` 源文件）、`freertos.c`（任务创建代码可能被覆盖） |
 | `ninja: build stopped: subcommand failed` | 编译错误 | 查看完整编译输出定位具体错误文件和行号 |
-| 调试台 `log 1` 输出不完整或乱码 | TX 缓冲区不足或 UART 阻塞 | 减少 log 字段数（使用过滤模式）；检查 `DEBUG_CONSOLE_TX_LINE_SIZE` (768B) |
+| 调试台 `log 1` 输出不完整或乱码 | TX 缓冲区不足或 UART 阻塞 | 减少 log 字段数（使用过滤模式）；检查 `DEBUG_CONSOLE_TX_LINE_SIZE` (1536B) |
 | 任务栈溢出 | `configASSERT` 触发或 `stack_free` 急剧下降 | 增大对应任务栈（`freertos.c` 中 `osThreadAttr_t.stack_size`），每次 +128W |
 | 电机不转但无 fault 报错 | DRV_SLEEP_ALL 被拉低或 PWM 占空比为零 | `status` 检查 `out` 位和 `pwm` 值；`estop`/`fault` 是否激活 |
 | OLED 不显示 | I2C 连接异常或器件地址不匹配 | `i2cscan` 确认地址 `0x3C` 有 ACK；检查 PB8/PB9 接线和供电 |

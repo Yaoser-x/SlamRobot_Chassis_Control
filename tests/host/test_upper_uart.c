@@ -3,12 +3,15 @@
 #include <stdlib.h>
 
 #include "chassis_control.h"
+#include "adc_monitor.h"
 #include "chassis_layout.h"
 #include "control_manager.h"
 #include "encoder_driver.h"
 #include "imu_bmi270.h"
 #include "line_control.h"
 #include "motor_driver.h"
+#include "power_on_self_test.h"
+#include "reset_reason.h"
 #include "system_monitor.h"
 #include "upper_uart.h"
 #include "upper_protocol.h"
@@ -30,6 +33,8 @@ static uint16_t tx_last_size;
 static UART_HandleTypeDef *tx_last_uart;
 static uint32_t fake_tick;
 static imu_bmi270_state_t fake_imu_state;
+static adc_monitor_state_t fake_adc_state;
+static post_result_t fake_post_result;
 static uint32_t fake_primask;
 static uint32_t estop_set_count;
 static uint8_t estop_last_value;
@@ -188,6 +193,21 @@ void SystemMonitor_GetState(system_monitor_state_t *state)
   }
 }
 
+void AdcMonitor_GetState(adc_monitor_state_t *state)
+{
+  *state = fake_adc_state;
+}
+
+void POST_GetResult(post_result_t *result)
+{
+  *result = fake_post_result;
+}
+
+uint32_t ResetReason_GetFlags(void)
+{
+  return 0xA1B2C3D4UL;
+}
+
 uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
 {
   return (motor == MOTOR_ID_M2 || motor == MOTOR_ID_M3) ? 1U : 0U;
@@ -214,6 +234,8 @@ static void reset_host_uart_state(void)
   tx_last_uart = 0;
   fake_tick = 0U;
   fake_imu_state = (imu_bmi270_state_t){0};
+  fake_adc_state = (adc_monitor_state_t){0};
+  fake_post_result = (post_result_t){0};
   fake_primask = 0U;
   estop_set_count = 0UL;
   estop_last_value = 0U;
@@ -362,16 +384,32 @@ static void test_status_and_imu_share_async_priority_queue(void)
   huart3.gState = HAL_UART_STATE_READY;
   UpperUart_OnTxComplete();
   UpperUart_GetState(&state);
-  require_int(tx_it_count == 2U, "imu starts after status completion");
-  require_int(tx_last_frame[3] == UPPER_CMD_IMU_STATUS, "queued imu follows status");
-  require_int(tx_last_frame[4U + UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN - 1U] == 23U,
-              "imu temperature is direct signed celsius");
-  require_int(state.tx_frames == 1U, "first completion counted");
+  require_int(tx_it_count == 2U, "diagnostic starts after status completion");
+  require_int(tx_last_frame[3] == UPPER_CMD_DIAGNOSTIC,
+              "queued diagnostic follows status");
+  require_int(tx_last_frame[2] == UPPER_PROTOCOL_CMD_LEN(UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN),
+              "diagnostic frame carries fixed payload length");
+  require_int(tx_last_frame[4] == UPPER_PROTOCOL_VERSION,
+              "diagnostic frame carries protocol version");
+  require_int(tx_last_frame[5] == UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION,
+              "diagnostic frame carries schema version");
+  require_int(tx_last_frame[24] == 0xD4U && tx_last_frame[27] == 0xA1U,
+              "diagnostic frame carries reset reason flags");
+  require_int(state.tx_frames == 1U, "status completion counted");
 
   huart3.gState = HAL_UART_STATE_READY;
   UpperUart_OnTxComplete();
   UpperUart_GetState(&state);
-  require_int(state.tx_frames == 2U, "both async frames complete");
+  require_int(tx_it_count == 3U, "imu starts after diagnostic completion");
+  require_int(tx_last_frame[3] == UPPER_CMD_IMU_STATUS, "queued imu follows diagnostic");
+  require_int(tx_last_frame[4U + UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN - 1U] == 23U,
+              "imu temperature is direct signed celsius");
+  require_int(state.tx_frames == 2U, "diagnostic completion counted");
+
+  huart3.gState = HAL_UART_STATE_READY;
+  UpperUart_OnTxComplete();
+  UpperUart_GetState(&state);
+  require_int(state.tx_frames == 3U, "all async frames complete");
 }
 
 static void test_uart_error_releases_active_tx_and_continues_queue(void)
@@ -391,8 +429,8 @@ static void test_uart_error_releases_active_tx_and_continues_queue(void)
   UpperUart_GetState(&state);
   require_int(state.tx_busy_drops == 1U, "failed active frame is dropped once");
   require_int(tx_it_count == 2U, "queued IMU starts after UART error recovery");
-  require_int(tx_last_frame[3] == UPPER_CMD_IMU_STATUS,
-              "UART error recovery advances to next queued frame");
+  require_int(tx_last_frame[3] == UPPER_CMD_DIAGNOSTIC,
+              "UART error recovery advances to diagnostic frame");
 }
 
 static void test_full_queue_drops_imu_for_status_priority(void)
@@ -413,8 +451,8 @@ static void test_full_queue_drops_imu_for_status_priority(void)
   fake_tick = 1050U;
   UpperUart_Update();
   UpperUart_GetState(&state);
-  require_int(state.tx_busy_drops == 1U,
-              "full queue drops one queued IMU to admit status");
+  require_int(state.tx_busy_drops == 3U,
+              "full queue drops due IMU frames while admitting status priority");
 
   huart3.gState = HAL_UART_STATE_READY;
   UpperUart_OnTxComplete();

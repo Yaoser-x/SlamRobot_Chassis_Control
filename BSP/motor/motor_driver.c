@@ -4,6 +4,8 @@
 #include "chassis_layout.h"
 #include "cmsis_os2.h"
 #include "main.h"
+#include "param_store.h"
+#include "direction_apply.h"
 #include "tim.h"
 
 typedef struct
@@ -436,6 +438,7 @@ void MotorDriver_Init(void)
 
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 {
+  param_store_t params;
   motor_runtime_t *runtime;
   int16_t corrected;
   int8_t target_dir;
@@ -461,7 +464,9 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
     return;
   }
 
-  corrected = MotorDriver_ClampSignedPermille((int32_t)permille * (int32_t)ChassisLayout_MotorDirection(motor));
+  (void)ParamStore_GetSnapshot(&params);
+  corrected = MotorDriver_ClampSignedPermille(
+    DirectionApply_Signed((int32_t)permille, params.motor_dir[(uint32_t)motor]));
   runtime->requested_pwm = corrected;
   target_dir = MotorDriver_Sign(corrected);
   target_mag = (uint16_t)MotorDriver_AbsSigned(corrected);

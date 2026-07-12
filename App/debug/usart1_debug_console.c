@@ -9,6 +9,8 @@
 #include "cmsis_os2.h"
 #include "control_manager.h"
 #include "debug_maintenance_policy.h"
+#include "debug_log_policy.h"
+#include "debug_straight_telemetry.h"
 #include "encoder_driver.h"
 #include "encoder_math.h"
 #include "esp12f_comm.h"
@@ -26,7 +28,9 @@
 #include "system_monitor.h"
 #include "tim.h"
 #include "upper_uart.h"
+#include "upper_protocol.h"
 #include "usart.h"
+#include "build_identity.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -37,7 +41,7 @@
 
 #define DEBUG_CONSOLE_RX_LINE_SIZE   96U
 #define DEBUG_CONSOLE_RX_RING_SIZE   160U
-#define DEBUG_CONSOLE_TX_LINE_SIZE   768U
+#define DEBUG_CONSOLE_TX_LINE_SIZE   1536U
 #define DEBUG_CONSOLE_TASK_PERIOD_MS 10U
 #define DEBUG_CONSOLE_LOG_PERIOD_MS  500U
 #define DEBUG_CONSOLE_TX_TIMEOUT_MS  100U
@@ -71,6 +75,7 @@
 static char rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t rx_len;
 static uint8_t stream_mode;
+static debug_log_policy_t log_policy;
 static uint8_t debug_velocity_enabled;
 static uint32_t debug_velocity_generation;
 static chassis_cmd_t debug_velocity_cmd;
@@ -477,7 +482,7 @@ static void DebugConsole_PrintFilteredLogFrame(uint32_t now_ms)
 
 static void DebugConsole_PrintLineStatus(void)
 {
-  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  static char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
   line_sensor_data_t sensor;
   line_control_state_t lc_state;
   line_uart_state_t line_state;
@@ -487,13 +492,13 @@ static void DebugConsole_PrintLineStatus(void)
   LineUart_GetState(&line_state);
 
   (void)snprintf(tx, sizeof(tx),
-    "LINE enabled=%u active=%u pos=%.2f err=%.2f lx=%.3f az=%.3f det=%u\r\n"
+    "LINE enabled=%u active=%u pos=%.2f err=%.2f derr=%.2f lx=%.3f az=%.3f det=%u sat=%u lost=%u polarity=%u\r\n"
     "LINE st=%u%u%u%u%u%u%u%u an=%u,%u,%u,%u,%u,%u,%u,%u\r\n"
     "LINE rx_bytes=%lu frames=%lu proto_err=%lu ovf=%lu\r\n",
     lc_state.globally_enabled, lc_state.tracking_active,
-    (double)lc_state.line_position, (double)lc_state.error,
+    (double)lc_state.line_position, (double)lc_state.error, (double)lc_state.error_derivative,
     (double)lc_state.linear_x, (double)lc_state.angular_z,
-    lc_state.detected_count,
+    lc_state.detected_count, lc_state.output_saturated, lc_state.lost_reason, lc_state.active_low,
     sensor.state[0], sensor.state[1], sensor.state[2], sensor.state[3],
     sensor.state[4], sensor.state[5], sensor.state[6], sensor.state[7],
     sensor.analog[0], sensor.analog[1], sensor.analog[2], sensor.analog[3],
@@ -508,10 +513,14 @@ static void DebugConsole_PrintHelp(void)
   DebugConsole_Write(
     "\r\nF407 V2 debug console\r\n"
     "help/status/header\r\n"
+    "version | config export\r\n"
     "get <param> | set <param> <value> | set save | set reset\r\n"
+    "set motor_dir m1|m2|m3|m4 -1|1\r\n"
+    "set encoder_dir m1|m2|m3|m4 -1|1\r\n"
     "maint arm|off          Release raw/open-loop authorization (60s)\r\n"
     "log 0                  stop streaming\r\n"
     "log 1 [fld...]         start CSV stream, optional field filter\r\n"
+    "log rate <50..5000> | log csv|json\r\n"
     "                       fields: motor adc imu errors source ps2 line esp\r\n"
     "rtos                   heap and task stack status\r\n"
     "motor L R              side open-loop permille\r\n"
@@ -524,6 +533,7 @@ static void DebugConsole_PrintHelp(void)
     "estop 0|1              clear/set emergency stop\r\n"
     "clearfault             clear latched overcurrent/driver faults\r\n"
     "line/line on/off       line sensor raw data / toggle control\r\n"
+    "linecal floor|line N | show|apply|cancel\r\n"
     "imutest/imudiag/imuinit/imucal [n]/imucalclear/imu 0|1\r\n"
     "espreset/espboot 0|1/espisolate\r\n"
     "espflash on|off|status bridge USART1 to ESP12F (download mode)\r\n"
@@ -821,7 +831,103 @@ static void DebugConsole_PrintEspFlashStatus(void)
 
 static void DebugConsole_PrintHeader(void)
 {
-  DebugConsole_Write("t_ms,m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm,vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma,imu_online,imu_chip,errors,source,ps2_ok,ps2_fail,line_bytes,line_frames,esp_rx,esp_tx,imu_acc_x_g,imu_acc_y_g,imu_acc_z_g,imu_gyro_corr_x_dps,imu_gyro_corr_y_dps,imu_gyro_corr_z_dps,imu_gyro_filt_x_dps,imu_gyro_filt_y_dps,imu_gyro_filt_z_dps,imu_roll_deg,imu_pitch_deg,imu_yaw_deg,imu_stime,imu_qw,imu_qx,imu_qy,imu_qz,imu_quality\r\n");
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  size_t pos;
+
+  pos = (size_t)snprintf(tx, sizeof(tx),
+    "t_ms,m1_mms,m2_mms,m3_mms,m4_mms,m1_pwm,m2_pwm,m3_pwm,m4_pwm,vbat_mv,m1_ma,m2_ma,m3_ma,m4_ma,imu_online,imu_chip,errors,source,ps2_ok,ps2_fail,line_bytes,line_frames,esp_rx,esp_tx,imu_acc_x_g,imu_acc_y_g,imu_acc_z_g,imu_gyro_corr_x_dps,imu_gyro_corr_y_dps,imu_gyro_corr_z_dps,imu_gyro_filt_x_dps,imu_gyro_filt_y_dps,imu_gyro_filt_z_dps,imu_roll_deg,imu_pitch_deg,imu_yaw_deg,imu_stime,imu_qw,imu_qx,imu_qy,imu_qz,imu_quality,m1_pid_err,m2_pid_err,m3_pid_err,m4_pid_err,m1_pid_out,m2_pid_out,m3_pid_out,m4_pid_out,imu_temp_c,imu_cal_state,");
+  pos += DebugStraightTelemetry_FormatCsvHeader(tx + pos, sizeof(tx) - pos);
+  (void)snprintf(tx + pos, sizeof(tx) - pos, "\r\n");
+  DebugConsole_Write(tx);
+}
+
+static void DebugConsole_PrintVersion(void)
+{
+  LOG_INFO("version fw=%s sha=%s%s build=%s protocol=%u param=%lu diagnostic=%u",
+           F407_FIRMWARE_VERSION, F407_GIT_SHA, F407_BUILD_DIRTY ? "-dirty" : "",
+           F407_BUILD_TYPE, UPPER_PROTOCOL_VERSION, (unsigned long)PARAM_STORE_VERSION,
+           UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION);
+}
+
+static void DebugConsole_PrintConfigExport(void)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  param_store_t params;
+
+  ParamStore_Get(&params);
+  (void)snprintf(tx, sizeof(tx),
+                 "{\"param_version\":%lu,\"wheel_radius_m\":%.6f,\"track_width_m\":%.6f,"
+                 "\"motor_dir\":[%d,%d,%d,%d],\"encoder_dir\":[%d,%d,%d,%d],"
+                 "\"line_threshold\":[%u,%u,%u,%u,%u,%u,%u,%u],\"line_active_low\":%u,"
+                 "\"line_kp\":%.6f,\"line_kd\":%.6f,\"line_speed_mps\":%.6f,"
+                 "\"current_observe_a\":[%.3f,%.3f,%.3f,%.3f],"
+                 "\"current_soft_limit_a\":[%.3f,%.3f,%.3f,%.3f],"
+                 "\"current_fault_a\":[%.3f,%.3f,%.3f,%.3f],\"current_debounce_ms\":%u,"
+                 "\"straight_wheel_coupling_gain\":%.6f,\"straight_heading_kp\":%.6f,"
+                 "\"straight_trim_forward_015_mps\":%.6f,\"straight_trim_forward_030_mps\":%.6f,"
+                 "\"straight_trim_reverse_015_mps\":%.6f,\"straight_trim_reverse_030_mps\":%.6f,"
+                 "\"straight_heading_ki\":%.6f,\"straight_heading_integral_limit_deg_s\":%.6f,"
+                 "\"straight_max_speed_mps\":%.6f,"
+                 "\"straight_heading_hold_enabled\":%u}\r\n",
+                 (unsigned long)params.version, params.wheel_radius_m, params.track_width_m,
+                 params.motor_dir[0], params.motor_dir[1], params.motor_dir[2], params.motor_dir[3],
+                 params.encoder_dir[0], params.encoder_dir[1], params.encoder_dir[2], params.encoder_dir[3],
+                 params.line_threshold_raw[0], params.line_threshold_raw[1],
+                 params.line_threshold_raw[2], params.line_threshold_raw[3],
+                 params.line_threshold_raw[4], params.line_threshold_raw[5],
+                 params.line_threshold_raw[6], params.line_threshold_raw[7], params.line_active_low,
+                 params.line_kp, params.line_kd, params.line_speed_mps,
+                 params.current_observe_a[0], params.current_observe_a[1],
+                 params.current_observe_a[2], params.current_observe_a[3],
+                 params.current_soft_limit_a[0], params.current_soft_limit_a[1],
+                 params.current_soft_limit_a[2], params.current_soft_limit_a[3],
+                 params.current_fault_a[0], params.current_fault_a[1],
+                 params.current_fault_a[2], params.current_fault_a[3],
+                 params.current_fault_debounce_ms,
+                 params.straight_wheel_coupling_gain, params.straight_heading_kp,
+                 params.straight_trim_forward_015_mps, params.straight_trim_forward_030_mps,
+                 params.straight_trim_reverse_015_mps, params.straight_trim_reverse_030_mps,
+                 params.straight_heading_ki, params.straight_heading_integral_limit_deg_s,
+                 params.straight_max_speed_mps,
+                 params.straight_heading_hold_enabled);
+  DebugConsole_Write(tx);
+}
+
+static uint8_t DebugConsole_SetDirection(const char *line, uint8_t encoder)
+{
+  char motor_name[4];
+  int direction;
+  motor_id_t motor;
+  param_store_t params;
+
+  if (sscanf(line, encoder ? "set encoder_dir %3s %d" : "set motor_dir %3s %d",
+             motor_name, &direction) != 2 ||
+      DebugConsole_ParseMotorToken(motor_name, &motor) == 0U ||
+      (direction != -1 && direction != 1))
+  {
+    return 0U;
+  }
+  if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+  {
+    LOG_WARN("direction change rejected: chassis not stationary");
+    return 1U;
+  }
+  ParamStore_Get(&params);
+  if (encoder != 0U)
+  {
+    params.encoder_dir[motor] = (int8_t)direction;
+  }
+  else
+  {
+    params.motor_dir[motor] = (int8_t)direction;
+  }
+  if (ParamStore_Set(&params) != 0U)
+  {
+    LOG_INFO("%s_dir %s=%d applied in RAM", encoder ? "encoder" : "motor",
+             motor_name, direction);
+  }
+  ChassisMaintenance_End();
+  return 1U;
 }
 
 static void DebugConsole_PrintStatus(void)
@@ -1065,33 +1171,56 @@ static void DebugConsole_PrintStatus(void)
   DebugConsole_PrintResetTrace();
 }
 
-static void DebugConsole_PrintLogFrame(uint32_t now_ms)
+typedef struct
+{
+  adc_monitor_state_t adc;
+  encoder_state_t encoder;
+  chassis_control_state_t chassis;
+  system_monitor_state_t monitor;
+  motor_driver_state_t motor;
+  imu_bmi270_state_t imu;
+  ps2_control_state_t ps2;
+  line_uart_state_t line;
+  esp12f_comm_state_t esp;
+  float motor_log_speed_mps[MOTOR_ID_COUNT];
+} debug_full_log_snapshot_t;
+
+static void DebugConsole_CaptureFullLogSnapshot(uint32_t now_ms,
+                                                debug_full_log_snapshot_t *snapshot)
+{
+  AdcMonitor_GetState(&snapshot->adc);
+  EncoderDriver_GetState(&snapshot->encoder);
+  DebugConsole_GetMotorLogSpeed(now_ms, &snapshot->encoder, snapshot->motor_log_speed_mps);
+  ChassisControl_GetState(&snapshot->chassis);
+  MotorDriver_GetState(&snapshot->motor);
+  SystemMonitor_GetState(&snapshot->monitor);
+  ImuBmi270_GetState(&snapshot->imu);
+  Ps2Control_GetState(&snapshot->ps2);
+  LineUart_GetState(&snapshot->line);
+  Esp12fComm_GetState(&snapshot->esp);
+}
+
+static void DebugConsole_PrintCsvLogFrame(uint32_t now_ms,
+                                          const debug_full_log_snapshot_t *snapshot)
 {
   char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-  adc_monitor_state_t adc_state;
-  encoder_state_t encoder_state;
-  chassis_control_state_t chassis_state;
-  system_monitor_state_t monitor_state;
-  motor_driver_state_t motor_state;
-  imu_bmi270_state_t imu_state;
-  ps2_control_state_t ps2_state;
-  line_uart_state_t line_state;
-  esp12f_comm_state_t esp_state;
+  adc_monitor_state_t adc_state = snapshot->adc;
+  chassis_control_state_t chassis_state = snapshot->chassis;
+  system_monitor_state_t monitor_state = snapshot->monitor;
+  motor_driver_state_t motor_state = snapshot->motor;
+  imu_bmi270_state_t imu_state = snapshot->imu;
+  ps2_control_state_t ps2_state = snapshot->ps2;
+  line_uart_state_t line_state = snapshot->line;
+  esp12f_comm_state_t esp_state = snapshot->esp;
   float motor_log_speed_mps[MOTOR_ID_COUNT];
 
-  AdcMonitor_GetState(&adc_state);
-  EncoderDriver_GetState(&encoder_state);
-  DebugConsole_GetMotorLogSpeed(now_ms, &encoder_state, motor_log_speed_mps);
-  ChassisControl_GetState(&chassis_state);
-  MotorDriver_GetState(&motor_state);
-  SystemMonitor_GetState(&monitor_state);
-  ImuBmi270_GetState(&imu_state);
-  Ps2Control_GetState(&ps2_state);
-  LineUart_GetState(&line_state);
-  Esp12fComm_GetState(&esp_state);
+  for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+  {
+    motor_log_speed_mps[i] = snapshot->motor_log_speed_mps[i];
+  }
 
-  (void)snprintf(tx, sizeof(tx),
-                 "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%lu,%.4f,%.4f,%.4f,%.4f,%lu\r\n",
+  size_t pos = (size_t)snprintf(tx, sizeof(tx),
+                 "%lu,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%u,%u,%lu,%u,%lu,%lu,%lu,%lu,%lu,%lu,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%lu,%.4f,%.4f,%.4f,%.4f,%lu,%.4f,%.4f,%.4f,%.4f,%d,%d,%d,%d,%.2f,%u\r\n",
                  (unsigned long)now_ms,
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M1]),
                  (long)DebugConsole_Milli(motor_log_speed_mps[MOTOR_ID_M2]),
@@ -1133,8 +1262,73 @@ static void DebugConsole_PrintLogFrame(uint32_t now_ms)
                  imu_state.quaternion[1],
                  imu_state.quaternion[2],
                  imu_state.quaternion[3],
-                 (unsigned long)imu_state.quality_flags);
+                 (unsigned long)imu_state.quality_flags,
+                 chassis_state.motor_error_mps[0], chassis_state.motor_error_mps[1],
+                 chassis_state.motor_error_mps[2], chassis_state.motor_error_mps[3],
+                 chassis_state.motor_output_permille[0], chassis_state.motor_output_permille[1],
+                 chassis_state.motor_output_permille[2], chassis_state.motor_output_permille[3],
+                 imu_state.temperature_c, imu_state.gyro_auto_cal_state);
+  if (pos < sizeof(tx))
+  {
+    tx[pos - 2U] = ',';
+    pos--;
+    pos += DebugStraightTelemetry_FormatCsv(tx + pos, sizeof(tx) - pos,
+                                             &chassis_state, &adc_state);
+    (void)snprintf(tx + pos, sizeof(tx) - pos, "\r\n");
+  }
   DebugConsole_Write(tx);
+}
+
+static void DebugConsole_PrintJsonLogFrame(uint32_t now_ms,
+                                           const debug_full_log_snapshot_t *snapshot)
+{
+  char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+  chassis_control_state_t chassis = snapshot->chassis;
+  imu_bmi270_state_t imu = snapshot->imu;
+  adc_monitor_state_t adc = snapshot->adc;
+  size_t pos = (size_t)snprintf(tx, sizeof(tx),
+                 "{\"t_ms\":%lu,\"pid_error_mps\":[%.5f,%.5f,%.5f,%.5f],"
+                 "\"pid_output_permille\":[%d,%d,%d,%d],\"actual_mps\":[%.5f,%.5f,%.5f,%.5f],"
+                 "\"current_a\":[%.4f,%.4f,%.4f,%.4f],"
+                 "\"imu_raw_acc\":[%d,%d,%d],\"imu_raw_gyro\":[%d,%d,%d],"
+                 "\"imu_body_acc_g\":[%.5f,%.5f,%.5f],\"imu_filter_gyro_dps\":[%.5f,%.5f,%.5f],"
+                 "\"euler_deg\":[%.4f,%.4f,%.4f],\"temperature_c\":%.3f,"
+                 "\"imu_cal_state\":%u,\"imu_quality\":%lu",
+                 (unsigned long)now_ms,
+                 chassis.motor_error_mps[0], chassis.motor_error_mps[1],
+                 chassis.motor_error_mps[2], chassis.motor_error_mps[3],
+                 chassis.motor_output_permille[0], chassis.motor_output_permille[1],
+                 chassis.motor_output_permille[2], chassis.motor_output_permille[3],
+                 chassis.motor_actual_mps[0], chassis.motor_actual_mps[1],
+                 chassis.motor_actual_mps[2], chassis.motor_actual_mps[3],
+                 adc.current_a[0], adc.current_a[1], adc.current_a[2], adc.current_a[3],
+                 imu.accel_raw[0], imu.accel_raw[1], imu.accel_raw[2],
+                 imu.gyro_raw[0], imu.gyro_raw[1], imu.gyro_raw[2],
+                 imu.body_accel_g[0], imu.body_accel_g[1], imu.body_accel_g[2],
+                 imu.gyro_filtered_dps[0], imu.gyro_filtered_dps[1], imu.gyro_filtered_dps[2],
+                 imu.roll_deg, imu.pitch_deg, imu.yaw_deg, imu.temperature_c,
+                 imu.gyro_auto_cal_state, (unsigned long)imu.quality_flags);
+  if (pos < sizeof(tx))
+  {
+    pos += DebugStraightTelemetry_FormatJson(tx + pos, sizeof(tx) - pos, &chassis, &adc);
+    (void)snprintf(tx + pos, sizeof(tx) - pos, "}\r\n");
+  }
+  DebugConsole_Write(tx);
+}
+
+static void DebugConsole_PrintLogFrame(uint32_t now_ms)
+{
+  debug_full_log_snapshot_t snapshot;
+
+  DebugConsole_CaptureFullLogSnapshot(now_ms, &snapshot);
+  if (log_policy.format == DEBUG_LOG_FORMAT_JSON)
+  {
+    DebugConsole_PrintJsonLogFrame(now_ms, &snapshot);
+  }
+  else
+  {
+    DebugConsole_PrintCsvLogFrame(now_ms, &snapshot);
+  }
 }
 
 static uint8_t DebugConsole_ParseMotorId(const char *line, motor_id_t *motor)
@@ -1185,6 +1379,14 @@ static void DebugConsole_HandleLine(char *line)
   {
     DebugConsole_PrintStatus();
   }
+  else if (strcmp(line, "version") == 0)
+  {
+    DebugConsole_PrintVersion();
+  }
+  else if (strcmp(line, "config export") == 0)
+  {
+    DebugConsole_PrintConfigExport();
+  }
   else if (strcmp(line, "rtos") == 0)
   {
     DebugConsole_PrintRtosStatus();
@@ -1192,10 +1394,15 @@ static void DebugConsole_HandleLine(char *line)
   else if (sscanf(line, "get %31s", param_name) == 1)
   {
     param_store_t params;
+    int32_t int_value;
     ParamStore_Get(&params);
     if (ParamStore_GetFloat(&params, param_name, &param_value) != 0U)
     {
       LOG_INFO("param %s=%.6f", param_name, param_value);
+    }
+    else if (ParamStore_GetInt(&params, param_name, &int_value) != 0U)
+    {
+      LOG_INFO("param %s=%ld", param_name, (long)int_value);
     }
     else
     {
@@ -1207,7 +1414,6 @@ static void DebugConsole_HandleLine(char *line)
     flash_param_bundle_t bundle;
     param_store_t params;
     adc_monitor_state_t adc_state;
-    imu_bmi270_state_t imu_state;
     flash_param_status_t status;
 
     if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
@@ -1217,7 +1423,6 @@ static void DebugConsole_HandleLine(char *line)
     }
     ParamStore_Get(&params);
     AdcMonitor_GetState(&adc_state);
-    ImuBmi270_GetState(&imu_state);
     if (adc_state.current_zero_valid != 0U)
     {
       for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -1225,14 +1430,6 @@ static void DebugConsole_HandleLine(char *line)
         params.current_zero_raw[i] = adc_state.current_zero_raw[i];
       }
       params.current_zero_valid = 1U;
-    }
-    if (imu_state.gyro_calibrated != 0U)
-    {
-      for (uint8_t i = 0U; i < 3U; ++i)
-      {
-        params.imu_gyro_bias_dps[i] = imu_state.gyro_bias_dps[i];
-      }
-      params.imu_gyro_bias_valid = 1U;
     }
     (void)ParamStore_Set(&params);
     bundle.params = params;
@@ -1275,6 +1472,20 @@ static void DebugConsole_HandleLine(char *line)
     }
     ChassisMaintenance_End();
   }
+  else if (strncmp(line, "set motor_dir ", 14) == 0)
+  {
+    if (DebugConsole_SetDirection(line, 0U) == 0U)
+    {
+      LOG_ERR("usage: set motor_dir m1|m2|m3|m4 -1|1");
+    }
+  }
+  else if (strncmp(line, "set encoder_dir ", 16) == 0)
+  {
+    if (DebugConsole_SetDirection(line, 1U) == 0U)
+    {
+      LOG_ERR("usage: set encoder_dir m1|m2|m3|m4 -1|1");
+    }
+  }
   else if (sscanf(line, "set %31s %f", param_name, &param_value) == 2)
   {
     param_store_t params;
@@ -1289,6 +1500,11 @@ static void DebugConsole_HandleLine(char *line)
         ParamStore_Set(&params) != 0U)
     {
       LOG_INFO("param %s=%.6f", param_name, param_value);
+    }
+    else if (ParamStore_SetInt(&params, param_name, (int32_t)param_value) != 0U &&
+             ParamStore_Set(&params) != 0U)
+    {
+      LOG_INFO("param %s=%ld", param_name, (long)(int32_t)param_value);
     }
     else
     {
@@ -1319,6 +1535,25 @@ static void DebugConsole_HandleLine(char *line)
   {
     DebugConsole_PrintHeader();
   }
+  else if (strncmp(line, "log rate ", 9) == 0)
+  {
+    unsigned long period;
+    if (sscanf(line, "log rate %lu", &period) == 1 && period >= 50UL && period <= 5000UL)
+    {
+      (void)DebugLogPolicy_SetPeriod(&log_policy, (uint32_t)period);
+      LOG_INFO("log rate=%lums", period);
+    }
+    else
+    {
+      LOG_ERR("log rate range is 50..5000ms");
+    }
+  }
+  else if (strcmp(line, "log csv") == 0 || strcmp(line, "log json") == 0)
+  {
+    DebugLogPolicy_SetFormat(&log_policy, (strcmp(line, "log json") == 0) ?
+                                          DEBUG_LOG_FORMAT_JSON : DEBUG_LOG_FORMAT_CSV);
+    LOG_INFO("log format=%s", log_policy.format == DEBUG_LOG_FORMAT_JSON ? "json" : "csv");
+  }
   else if (strncmp(line, "log ", 4) == 0)
   {
     char *token = strtok(line + 4, " \t");
@@ -1347,7 +1582,16 @@ static void DebugConsole_HandleLine(char *line)
           /* log 1（无过滤）：全字段，兼容旧行为 */
           stream_mode = 1U;
           log_filter_count = 0U;
-          DebugConsole_PrintHeader();
+          if (log_policy.format == DEBUG_LOG_FORMAT_CSV)
+          {
+            DebugConsole_PrintHeader();
+          }
+        }
+        else if (log_policy.format == DEBUG_LOG_FORMAT_JSON)
+        {
+          stream_mode = 1U;
+          log_filter_count = 0U;
+          LOG_WARN("JSON uses the stable full schema; field filters apply to CSV only");
         }
         else
         {
@@ -1681,6 +1925,88 @@ static void DebugConsole_HandleLine(char *line)
     LineControl_Enable(0U);
     LOG_INFO("line tracking disabled");
   }
+  else if (strncmp(line, "linecal ", 8U) == 0)
+  {
+    char action[12] = {0};
+    unsigned samples = 0U;
+
+    if (sscanf(line + 8, "%11s %u", action, &samples) >= 1)
+    {
+      if ((strcmp(action, "floor") == 0 || strcmp(action, "line") == 0) &&
+          samples >= 4U && samples <= 2000U)
+      {
+        line_calibration_surface_t surface = (strcmp(action, "floor") == 0) ?
+                                               LINE_CALIBRATION_SURFACE_FLOOR :
+                                               LINE_CALIBRATION_SURFACE_LINE;
+        if (LineControl_CalibrationBegin(surface, (uint16_t)samples) != 0U)
+        {
+          LOG_INFO("linecal %s collecting %u samples", action, samples);
+        }
+      }
+      else if (strcmp(action, "show") == 0)
+      {
+        line_calibration_t calibration;
+        LineControl_CalibrationGet(&calibration);
+        LOG_INFO("linecal ready=0x%02X collecting=%u surface=%u n=%u/%u fail=0x%02X",
+                 calibration.ready_mask, calibration.collecting, calibration.surface,
+                 calibration.count[calibration.surface], calibration.target_samples,
+                 calibration.fail_mask);
+        for (uint8_t channel = 0U; channel < LINE_CALIBRATION_CHANNELS; ++channel)
+        {
+          uint16_t floor_mean = (calibration.count[0] != 0U) ?
+            (uint16_t)(calibration.sum[0][channel] / calibration.count[0]) : 0U;
+          uint16_t line_mean = (calibration.count[1] != 0U) ?
+            (uint16_t)(calibration.sum[1][channel] / calibration.count[1]) : 0U;
+          uint16_t floor_range = (calibration.count[0] != 0U) ?
+            (uint16_t)(calibration.max[0][channel] - calibration.min[0][channel]) : 0U;
+          uint16_t line_range = (calibration.count[1] != 0U) ?
+            (uint16_t)(calibration.max[1][channel] - calibration.min[1][channel]) : 0U;
+          LOG_INFO("linecal ch%u floor mean/range/n=%u/%u/%u line=%u/%u/%u",
+                   channel, floor_mean, floor_range, calibration.count[0],
+                   line_mean, line_range, calibration.count[1]);
+        }
+      }
+      else if (strcmp(action, "apply") == 0)
+      {
+        uint16_t thresholds[LINE_CALIBRATION_CHANNELS];
+        uint8_t active_low;
+        param_store_t params;
+
+        if (LineControl_CalibrationBuild(thresholds, &active_low) == 0U)
+        {
+          LOG_WARN("linecal apply rejected: incomplete or low separation");
+        }
+        else if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+        {
+          LOG_WARN("linecal apply rejected: chassis not stationary");
+        }
+        else
+        {
+          ParamStore_Get(&params);
+          for (uint8_t channel = 0U; channel < LINE_CALIBRATION_CHANNELS; ++channel)
+          {
+            params.line_threshold_raw[channel] = thresholds[channel];
+          }
+          params.line_active_low = active_low;
+          if (ParamStore_Set(&params) != 0U)
+          {
+            LOG_INFO("linecal applied to RAM polarity=%s; run set save to persist",
+                     active_low != 0U ? "active-low" : "active-high");
+          }
+          ChassisMaintenance_End();
+        }
+      }
+      else if (strcmp(action, "cancel") == 0)
+      {
+        LineControl_CalibrationCancel();
+        LOG_INFO("linecal cancelled");
+      }
+      else
+      {
+        LOG_WARN("usage: linecal floor|line <4..2000> | show|apply|cancel");
+      }
+    }
+  }
   else if (strcmp(line, "i2cscan") == 0)
   {
     char tx[DEBUG_CONSOLE_TX_LINE_SIZE];
@@ -1753,6 +2079,7 @@ void Usart1DebugConsole_Init(void)
   debug_velocity_enabled = 0U;
   debug_velocity_generation = ControlManager_GetMotionRevokeGeneration();
   DebugMaintenancePolicy_Init(&maintenance_policy);
+  DebugLogPolicy_Init(&log_policy);
   debug_velocity_cmd = (chassis_cmd_t){0};
   rx_head = 0U;
   rx_tail = 0U;
@@ -1864,7 +2191,7 @@ void Task_Usart1DebugConsole(void *argument)
       }
     }
 
-    if ((stream_mode != 0U) && ((now_ms - last_log_ms) >= DEBUG_CONSOLE_LOG_PERIOD_MS))
+    if ((stream_mode != 0U) && ((now_ms - last_log_ms) >= log_policy.period_ms))
     {
       last_log_ms = now_ms;
       if (stream_mode == 2U)

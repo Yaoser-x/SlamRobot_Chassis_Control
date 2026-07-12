@@ -17,11 +17,33 @@ USART3 和 ESP12F 共用帧格式：`A5 5A LEN CMD PAYLOAD CRC8`。`LEN` 等于
 | 命令 | Payload | 整帧 | 周期 | 说明 |
 |---|---:|---:|---:|---|
 | `0x81 STATUS` | 65 B | 70 B | 50 ms | 控制、安全、电机、编码器和通信健康 |
+| `0x82 DIAGNOSTIC` | 28 B | 33 B | 200 ms | POST、ADC、任务、IMU 和复位诊断 |
 | `0x83 IMU_STATUS` | 99 B | 104 B | 20 ms | IMU 原始工程量、姿态和质量计数 |
 
 USART3 发送由单一四槽异步队列串行化。STATUS 优先于 IMU；队列满时优先
 丢弃 IMU 遥测。周期时间戳只在成功入队后推进，发送完成计数只在 UART TX
 完成回调中更新。
+
+`DIAGNOSTIC` 是向后兼容的新帧，既有 `STATUS` 和 `IMU_STATUS` 的长度、字段和
+命令号不变。其 payload 使用小端整数，布局如下：
+
+| Payload 偏移 | 长度 | 类型 | 字段 |
+|---:|---:|---|---|
+| 0 | 1 | `uint8` | protocol version (`2`) |
+| 1 | 1 | `uint8` | diagnostic schema (`1`) |
+| 2 | 1 | `uint8` | POST done |
+| 3 | 1 | `uint8` | IMU status flags |
+| 4 | 4 | `uint32` | POST error flags |
+| 8 | 4 | `uint32` | ADC invalid reason flags |
+| 12 | 2 | `uint16` | task timeout mask |
+| 14 | 2 | `uint16` | reserved，发送端必须置零 |
+| 16 | 4 | `uint32` | IMU quality flags |
+| 20 | 4 | `uint32` | 启动时捕获的 RCC reset flags |
+| 24 | 4 | `uint32` | uptime，ms |
+
+task timeout mask 的 bit0..bit8 依次对应 safety、motor、RPI、IMU、LINE、ESP、
+PS2、LED、OLED。每个任务仅控制自己的 bit；新 heartbeat 会清除该任务的当前
+timeout 状态，但保留累计 timeout count。
 
 ## IMU payload 尾部
 

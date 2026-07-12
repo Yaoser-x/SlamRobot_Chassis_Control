@@ -299,3 +299,28 @@ uint8_t UpperProtocol_BuildImuStatusPayload(const upper_imu_status_payload_t *im
 
   return UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN;
 }
+
+uint8_t UpperProtocol_BuildDiagnosticPayload(const upper_diagnostic_payload_t *diagnostic,
+                                             uint8_t *out,
+                                             uint8_t out_len)
+{
+  if (diagnostic == 0 || out == 0 || out_len < UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN)
+  {
+    return 0U;
+  }
+
+  out[0] = UPPER_PROTOCOL_VERSION;
+  out[1] = UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION;
+  out[2] = diagnostic->post_done;
+  out[3] = diagnostic->imu_status_flags;
+  UpperProtocol_WriteU32(&out[4], diagnostic->post_error_flags);
+  UpperProtocol_WriteU32(&out[8], diagnostic->adc_invalid_reason_flags);
+  out[12] = (uint8_t)(diagnostic->task_timeout_mask & 0xFFU);
+  out[13] = (uint8_t)((diagnostic->task_timeout_mask >> 8) & 0xFFU);
+  out[14] = 0U;
+  out[15] = 0U;
+  UpperProtocol_WriteU32(&out[16], diagnostic->imu_quality_flags);
+  UpperProtocol_WriteU32(&out[20], diagnostic->reset_reason_flags);
+  UpperProtocol_WriteU32(&out[24], diagnostic->uptime_ms);
+  return UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN;
+}

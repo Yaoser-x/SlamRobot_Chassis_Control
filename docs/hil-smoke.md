@@ -11,13 +11,13 @@ HIL v1 只验证启动和只读诊断链路，不自动驱动电机，不切换�
 ## 命令
 
 ```bash
-python scripts/hil_smoke.py --port COMx
+python scripts/hil_smoke.py --port COMx --json-out hil-smoke.json --transcript-out hil-smoke.txt
 ```
 
 可选参数：
 
 ```bash
-python scripts/hil_smoke.py --port COMx --baud 115200 --timeout 20
+python scripts/hil_smoke.py --port COMx --baud 115200 --timeout 20 --json-out hil-smoke.json
 ```
 
 在底盘完全静止且电机电源安全的条件下，可单独验证 500 样本 IMU 标定期间
@@ -35,6 +35,7 @@ python scripts/hil_imu_calibration.py --port COMx --baud 115200
 脚本会等待启动输出并依次发送：
 
 - `status`
+- `version`
 - `i2cscan`
 - `imutest`
 - `espflash status`
@@ -45,6 +46,18 @@ python scripts/hil_imu_calibration.py --port COMx --baud 115200
 - 启动输出或命令响应中能看到 `POST:`。
 - `status` 有 `POST` 和 `PARAM` 行。
 - 每条命令都有响应，脚本未超时。
+- JSON 中保存 ISO 8601 UTC 时间、设备/端口、固件身份、命令摘要、逐项断言和最终 pass/fail；文本 transcript 保留供人工审计。
+
+原始 CSV 可用 `scripts/analyze_roadmap_data.py` 的 `current|encoder|line|geometry` 子命令分析；IMU 数据使用 `scripts/analyze_imu.py`。分析器不会自动回写阈值，也不会把软件完成标成 HIL 通过。
+
+双向直行使用监督式分析器（脚本不连接车辆）：
+
+```bash
+python scripts/analyze_straight_hil.py straight.jsonl measurements.csv \
+  --baseline-csv baseline.csv --json straight-report.json --markdown straight-report.md
+```
+
+人工 CSV 列固定为 `run_id,direction,speed_mps,caster_transition,distance_m,lateral_error_m,yaw_error_deg,firmware_sha,battery_v`。换向后前 0.30m 必须标记 `caster_transition=1` 并单独保留；随后的 2m 稳态段标记为 0。单个 telemetry 文件对应唯一 run 时，脚本可从人工 CSV 推断 `run_id`；合并多个 run 前必须由采集流程为每行注入 `run_id`。脚本只接受 `forward/reverse` 与 `0.15/0.30m/s`，次数按唯一 `run_id` 统计。它只输出 RAM `set` 建议，不包含 `set save`；四格各 5 次、每行固件 SHA 非空且与 baseline 唯一一致，并同时满足横向、航向和相对基线改善率后才允许人工保存。
 
 ## 边界
 
