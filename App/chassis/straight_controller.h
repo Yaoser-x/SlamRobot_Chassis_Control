@@ -51,6 +51,7 @@ typedef struct
     uint8_t active;
     uint8_t heading_degraded;
     uint8_t derated;
+    uint8_t out_of_range;
     uint8_t in_transition;
     uint8_t correction_clamped;
 } straight_controller_result_t;

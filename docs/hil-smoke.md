@@ -43,8 +43,7 @@ python scripts/hil_imu_calibration.py --port COMx --baud 115200
 通过条件：
 
 - 串口能打开。
-- 启动输出或命令响应中能看到 `POST:`。
-- `status` 有 `POST` 和 `PARAM` 行。
+- `status` 有 `POST done=` 和 `PARAM` 行；连接到已经运行的固件时不要求重新出现启动横幅。
 - 每条命令都有响应，脚本未超时。
 - JSON 中保存 ISO 8601 UTC 时间、设备/端口、固件身份、命令摘要、逐项断言和最终 pass/fail；文本 transcript 保留供人工审计。
 

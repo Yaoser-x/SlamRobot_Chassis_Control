@@ -34,7 +34,8 @@ extern "C"
     void    LineControl_GetState(line_control_state_t *state);
     uint8_t LineControl_CalibrationBegin(line_calibration_surface_t surface, uint16_t samples);
     uint8_t LineControl_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHANNELS], uint8_t *active_low);
-    uint8_t LineControl_CalibrationApplyAndSave(void);
+    uint8_t LineControl_CalibrationApplyToRam(void);
+    uint8_t LineControl_CalibrationCommitToFlash(void);
     void    LineControl_CalibrationGet(line_calibration_t *calibration);
     void    LineControl_CalibrationCancel(void);
 

@@ -58,7 +58,7 @@ static void test_defaults_match_safe_runtime_values(void)
     require_close(params.straight_wheel_coupling_gain, 0.30f, 0.0001f, "straight coupling default 0.30");
     require_close(params.straight_heading_kp, 0.0f, 0.0001f, "straight heading kp defaults safe off");
     require_close(params.straight_heading_ki, 0.0f, 0.0001f, "straight heading ki defaults safe off");
-    require_close(params.straight_max_speed_mps, 0.30f, 0.0001f, "straight maximum speed defaults to HIL ceiling");
+    require_close(params.straight_max_speed_mps, 0.30f, 0.0001f, "straight compensation range defaults to HIL ceiling");
     require_int(params.straight_heading_hold_enabled == 0U, "straight heading hold disabled until HIL");
     require_int(ParamStore_Validate(&params) == 1U, "defaults validate");
 }

@@ -28,7 +28,8 @@ size_t DebugStraightTelemetry_FormatJson(char                          *buffer,
                        "\"straight_heading_error_deg\":%.5f,"
                        "\"straight_heading_integral_deg_s\":%.5f,"
                        "\"straight_heading_correction_mps\":%.5f,"
-                       "\"straight_total_correction_mps\":%.5f,\"straight_derated\":%u",
+                       "\"straight_total_correction_mps\":%.5f,\"straight_derated\":%u,"
+                       "\"straight_out_of_range\":%u",
                        SideAverage(chassis->left_requested_mps, chassis->right_requested_mps),
                        SideAverage(chassis->left_target_mps, chassis->right_target_mps),
                        chassis->left_actual_mps,
@@ -45,7 +46,8 @@ size_t DebugStraightTelemetry_FormatJson(char                          *buffer,
                        chassis->straight_heading_integral_deg_s,
                        chassis->straight_heading_correction_mps,
                        chassis->straight_total_correction_mps,
-                       chassis->straight_derated);
+                       chassis->straight_derated,
+                       chassis->straight_out_of_range);
     return (written > 0) ? (size_t)written : 0U;
 }
 
@@ -64,7 +66,7 @@ size_t DebugStraightTelemetry_FormatCsvHeader(char *buffer, size_t buffer_size)
                        "straight_direction,straight_transition_distance_m,straight_trim_mps,"
                        "straight_wheel_correction_mps,straight_heading_error_deg,"
                        "straight_heading_integral_deg_s,straight_heading_correction_mps,"
-                       "straight_total_correction_mps,straight_derated");
+                       "straight_total_correction_mps,straight_derated,straight_out_of_range");
     return (written > 0) ? (size_t)written : 0U;
 }
 
@@ -81,7 +83,7 @@ size_t DebugStraightTelemetry_FormatCsv(char                          *buffer,
     }
     written = snprintf(buffer,
                        buffer_size,
-                       "%.5f,%.5f,%.5f,%.5f,%u,%u,%u,%.3f,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%u",
+                       "%.5f,%.5f,%.5f,%.5f,%u,%u,%u,%.3f,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%u,%u",
                        SideAverage(chassis->left_requested_mps, chassis->right_requested_mps),
                        SideAverage(chassis->left_target_mps, chassis->right_target_mps),
                        chassis->left_actual_mps,
@@ -98,6 +100,7 @@ size_t DebugStraightTelemetry_FormatCsv(char                          *buffer,
                        chassis->straight_heading_integral_deg_s,
                        chassis->straight_heading_correction_mps,
                        chassis->straight_total_correction_mps,
-                       chassis->straight_derated);
+                       chassis->straight_derated,
+                       chassis->straight_out_of_range);
     return (written > 0) ? (size_t)written : 0U;
 }

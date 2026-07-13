@@ -42,6 +42,7 @@ int main(void)
     chassis.straight_heading_correction_mps = -99.99999f;
     chassis.straight_total_correction_mps   = 0.075f;
     chassis.straight_derated                = 1U;
+    chassis.straight_out_of_range           = 1U;
     adc.battery_voltage                     = 99.999f;
 
     json_len = DebugStraightTelemetry_FormatJson(json, sizeof(json), &chassis, &adc);
@@ -53,6 +54,7 @@ int main(void)
     check(strstr(json, "\"straight_direction\":-1") != NULL, "JSON direction");
     check(strstr(json, "\"battery_v\":99.999") != NULL, "JSON battery");
     check(strstr(json, "\"straight_derated\":1") != NULL, "JSON derating");
+    check(strstr(json, "\"straight_out_of_range\":1") != NULL, "JSON compensation range");
     check(DebugStraightTelemetry_FormatCsvHeader(header, sizeof(header)) < sizeof(header),
           "CSV header fits bounded buffer");
     check(strstr(header,

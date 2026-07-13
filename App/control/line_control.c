@@ -1,8 +1,11 @@
 #include "line_control.h"
 
 #include "chassis_config.h"
+#include "chassis_maintenance.h"
 #include "cmsis_os2.h"
 #include "control_manager.h"
+#include "flash_param.h"
+#include "imu_bmi270.h"
 #include "line_uart.h"
 #include "param_store.h"
 
@@ -196,8 +199,16 @@ void LineControl_Update(void)
 
 uint8_t LineControl_CalibrationBegin(line_calibration_surface_t surface, uint16_t samples)
 {
+    uint8_t started;
+
+    if (LineControl_SafetyActive() != 0U || ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+    {
+        return 0U;
+    }
     g_line_calibration_last_timestamp = 0U;
-    return LineCalibration_Begin(&g_line_calibration, surface, samples);
+    started                           = LineCalibration_Begin(&g_line_calibration, surface, samples);
+    ChassisMaintenance_End();
+    return started;
 }
 
 uint8_t LineControl_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHANNELS], uint8_t *active_low)
@@ -205,7 +216,7 @@ uint8_t LineControl_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHANNE
     return LineCalibration_Apply(&g_line_calibration, thresholds, active_low);
 }
 
-uint8_t LineControl_CalibrationApplyAndSave(void)
+uint8_t LineControl_CalibrationApplyToRam(void)
 {
     uint16_t      thresholds[LINE_CALIBRATION_CHANNELS];
     uint8_t       active_low;
@@ -222,6 +233,22 @@ uint8_t LineControl_CalibrationApplyAndSave(void)
     }
     params.line_active_low = active_low;
     return ParamStore_Set(&params);
+}
+
+uint8_t LineControl_CalibrationCommitToFlash(void)
+{
+    flash_param_bundle_t bundle;
+    flash_param_status_t status;
+
+    if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+    {
+        return 0U;
+    }
+    ParamStore_Get(&bundle.params);
+    ImuBmi270_GetCalibration(&bundle.imu_calibration);
+    status = FlashParam_SaveBundle(&bundle);
+    ChassisMaintenance_End();
+    return (status == FLASH_PARAM_STATUS_OK) ? 1U : 0U;
 }
 
 void LineControl_CalibrationGet(line_calibration_t *calibration)

@@ -122,10 +122,21 @@ straight_controller_result_t StraightController_Step(straight_controller_t      
     controller->generation   = input->generation;
     candidate_integral_deg_s = controller->heading_integral_deg_s;
 
-    speed_mps        = ClampFloat(fabsf(input->requested_linear_mps), 0.0f, params->max_speed_mps);
+    speed_mps        = fabsf(input->requested_linear_mps);
     signed_base_mps  = (float)direction * speed_mps;
     result.active    = 1U;
     result.direction = direction;
+
+    if (speed_mps > params->max_speed_mps)
+    {
+        controller->yaw_delta_deg          = 0.0f;
+        controller->heading_integral_deg_s = 0.0f;
+        controller->imu_ready              = 0U;
+        result.left_target_mps             = input->requested_linear_mps;
+        result.right_target_mps            = input->requested_linear_mps;
+        result.out_of_range                = 1U;
+        return result;
+    }
 
     if (direction > 0)
     {

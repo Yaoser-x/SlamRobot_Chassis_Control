@@ -292,6 +292,8 @@ typedef struct {
 
 **纠偏总限幅**：`min(25% × base_speed, 0.075m/s)`。换向后累计前 0.30m 万向轮翻转路程（`straight_in_transition`），全程持续控制，仅遥测标记。
 
+**补偿适用范围**：`straight_max_speed_mps` 只限制直行补偿，不限制底盘基础速度。超过该范围时左右轮保持原始目标、清空航向积分，并报告 `straight_out_of_range=1`。
+
 **状态输出：** 方向、transition 路程、trim、轮速修正、heading error/积分/修正、总修正、限幅与降速状态均进入 `chassis_control_state_t`，由 CSV/JSON 同源输出。
 
 **可调参数（param_store_t）：**
@@ -299,7 +301,7 @@ typedef struct {
 - `straight_heading_kp` — 航向保持 P 增益
 - 四个 `straight_trim_*` — 前进/后退 0.15/0.30m/s 前馈
 - `straight_heading_ki` / `straight_heading_integral_limit_deg_s` — PI 积分参数
-- `straight_max_speed_mps` — 精度优先的直行速度上限
+- `straight_max_speed_mps` — trim、轮速耦合和航向 PI 的最大适用速度
 - `straight_heading_hold_enabled` — 航向保持总开关
 
 ### 2.6 电机输出逻辑
@@ -338,7 +340,7 @@ IDLE_BRAKE → RAMP_DOWN → REVERSE_BRAKE → PH_SETTLE → RAMP_UP → RUN
 ```
 - RAMP_DOWN：PWM 每周期递减 25 步（快降）
 - REVERSE_BRAKE：低侧制动，保持 ≥2 个周期，等速度 <0.02m/s 或超时
-- PH_SETTLE：相位引脚切换间隙，保持 4 个周期
+- PH_SETTLE：各电机独立切换相位；切换当轮保持 EN=0，下一控制周期再恢复 PWM
 - RAMP_UP：PWM 每周期递增 15 步（慢升）
 
 **关键常量（bsp_config.h）：**
@@ -347,7 +349,6 @@ IDLE_BRAKE → RAMP_DOWN → REVERSE_BRAKE → PH_SETTLE → RAMP_UP → RUN
 | `MOTOR_PWM_RISE_STEP_PER_CYCLE` | 15 | PWM 上升步长 |
 | `MOTOR_PWM_FALL_STEP_PER_CYCLE` | 25 | PWM 下降步长（更快） |
 | `MOTOR_REVERSE_BRAKE_CYCLES` | 2 | 最小反向制动周期 |
-| `MOTOR_PHASE_SWITCH_GAP_CALLS` | 4 | 相位切换间隙周期 |
 | `MOTOR_MAX_PERMILLE` | 900 | 最大输出 permille |
 | `MOTOR_STOP_MODE_LOW_SIDE_BRAKE` | — | 停止模式（低侧制动） |
 | `MOTOR_STOP_MODE_COAST` | — | 停止模式（惯性滑行） |
@@ -413,6 +414,7 @@ typedef struct {
     uint8_t straight_in_transition;
     uint8_t straight_heading_degraded;
     uint8_t straight_derated;
+    uint8_t straight_out_of_range;
     float straight_trim_mps;
     float straight_wheel_correction_mps;
     float straight_heading_error_deg;
@@ -825,9 +827,11 @@ typedef struct {
 **流程：**
 1. `linecal floor <N>` — 在地面采集 N 个样本
 2. `linecal line <N>` — 在线上采集 N 个样本
-3. `linecal apply` — 计算每通道均值中点作为阈值，验证分离度 ≥ 50（`LINE_CALIBRATION_MIN_SEPARATION_RAW`），确定 `active_low`
+3. `linecal apply` — 计算每通道均值中点作为阈值，验证分离度 ≥ 50（`LINE_CALIBRATION_MIN_SEPARATION_RAW`），确定 `active_low` 并仅应用到 RAM
 4. `linecal show` — 查看当前标定结果
 5. `linecal cancel` — 取消标定
+
+PS2 双表面自动标定完成后同样只应用到 RAM；需要掉电保存时显式执行 `set save`。
 
 **数据结构：**
 ```c

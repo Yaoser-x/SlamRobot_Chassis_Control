@@ -54,21 +54,16 @@ def main() -> int:
         if "calibration accepted" not in response:
             raise AssertionError(f"IMU calibration was not accepted:\n{response}")
 
-        deadline = time.monotonic() + args.calibration_timeout
-        status_text = ""
-        saw_running = False
-        while time.monotonic() < deadline:
-            status_text = send_command(port, "status", args.timeout)
-            if re.search(r"acal=2,\d+,\d+", status_text):
-                saw_running = True
-            if saw_running and re.search(r"acal=3,\d+,1", status_text):
-                break
-            time.sleep(0.25)
-        if not saw_running or not re.search(r"acal=3,\d+,1", status_text):
-            raise AssertionError("IMU calibration did not finish before timeout")
-
+        # Keep the measurement window quiet. Repeated full `status` responses
+        # can occupy the debug task long enough to starve low-priority UI tasks
+        # and create the very timeout increments this check is measuring.
+        time.sleep(args.calibration_timeout)
         after_text = send_command(port, "rtos", args.timeout)
         after = timeout_snapshot(after_text)
+
+        status_text = send_command(port, "status", args.timeout)
+        if not re.search(r"acal=3,\d+,1", status_text):
+            raise AssertionError("IMU calibration did not finish before timeout")
 
     regressions = {
         task: (before[task], after[task])

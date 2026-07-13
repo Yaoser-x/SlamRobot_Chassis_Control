@@ -22,6 +22,7 @@ def load(name: str, path: Path):
 roadmap = load("analyze_roadmap_data", ROOT / "scripts" / "analyze_roadmap_data.py")
 imu = load("analyze_imu", ROOT / "scripts" / "analyze_imu.py")
 hil = load("hil_smoke", ROOT / "scripts" / "hil_smoke.py")
+hil_imu = load("hil_imu_calibration", ROOT / "scripts" / "hil_imu_calibration.py")
 straight = load("analyze_straight_hil", ROOT / "scripts" / "analyze_straight_hil.py")
 
 
@@ -140,6 +141,30 @@ class AnalysisTests(unittest.TestCase):
         responses[2]["response"] = ""
         self.assertFalse(hil.build_report("COM1", 115200, "POST: boot", responses,
                                          "2026-01-01T00:00:00+00:00")["passed"])
+
+    def test_hil_report_accepts_connection_after_boot_banner(self):
+        responses = [
+            {"command": "version", "response": "version fw=2.0.0 sha=deadbeef build=Release protocol=2 param=3 diagnostic=1"},
+            {"command": "status", "response": "POST done=1 errors=0\nPARAM vmax=500"},
+            {"command": "i2cscan", "response": "I2C scan done"},
+            {"command": "imutest", "response": "bmi270 chip=0x24"},
+            {"command": "espflash status", "response": "ESPFLASH active=0"},
+        ]
+        report = hil.build_report("COM3", 115200, "", responses,
+                                  "2026-01-01T00:00:00+00:00")
+        self.assertTrue(report["passed"])
+
+    def test_hil_imu_timeout_snapshot_requires_all_monitored_tasks(self):
+        text = "\n".join(
+            f"RTOS {task} stack_free=100 missed=0 timeout={index}"
+            for index, task in enumerate(hil_imu.MONITORED_TASKS)
+        )
+        self.assertEqual(
+            hil_imu.timeout_snapshot(text),
+            {task: index for index, task in enumerate(hil_imu.MONITORED_TASKS)},
+        )
+        with self.assertRaisesRegex(AssertionError, "missing RTOS task lines: oled"):
+            hil_imu.timeout_snapshot(text.rsplit("\n", 1)[0])
 
 
 if __name__ == "__main__":

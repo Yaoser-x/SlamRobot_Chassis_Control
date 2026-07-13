@@ -204,6 +204,8 @@ straight_heading_integral_limit_deg_s
 straight_max_speed_mps
 ```
 
+`straight_max_speed_mps` 是直行补偿的最大适用速度，不会限制底盘基础线速度；超范围状态通过 CSV/JSON 的 `straight_out_of_range` 输出。
+
 Flash 参数镜像带 magic、版本号和 CRC32。启动时若镜像为空、CRC 错误或版本不兼容，则使用编译期默认值；若镜像有效，会恢复 ADC current-zero 和 IMU gyro bias 快照。
 
 ### 5.3 电机调试

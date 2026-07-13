@@ -351,7 +351,7 @@ void Ps2Control_Update(void)
                 if ((cal_state.ready_mask & 0x03U) == 0x03U)
                 {
                     /* 双面采集完成 → 自动 apply */
-                    if (LineControl_CalibrationApplyAndSave() != 0U)
+                    if (LineControl_CalibrationApplyToRam() != 0U)
                     {
                         LedStatus_SetMode(LED_STATUS_CAL_APPLIED);
                     }

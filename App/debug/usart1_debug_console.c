@@ -2162,30 +2162,19 @@ static void DebugConsole_HandleLine(char *line)
             }
             else if (strcmp(action, "apply") == 0)
             {
-                uint16_t      thresholds[LINE_CALIBRATION_CHANNELS];
-                uint8_t       active_low;
-                param_store_t params;
-
-                if (LineControl_CalibrationBuild(thresholds, &active_low) == 0U)
-                {
-                    LOG_WARN("linecal apply rejected: incomplete or low separation");
-                }
-                else if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+                if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
                 {
                     LOG_WARN("linecal apply rejected: chassis not stationary");
                 }
                 else
                 {
-                    ParamStore_Get(&params);
-                    for (uint8_t channel = 0U; channel < LINE_CALIBRATION_CHANNELS; ++channel)
+                    if (LineControl_CalibrationApplyToRam() != 0U)
                     {
-                        params.line_threshold_raw[channel] = thresholds[channel];
+                        LOG_INFO("linecal applied to RAM; run set save to persist");
                     }
-                    params.line_active_low = active_low;
-                    if (ParamStore_Set(&params) != 0U)
+                    else
                     {
-                        LOG_INFO("linecal applied to RAM polarity=%s; run set save to persist",
-                                 active_low != 0U ? "active-low" : "active-high");
+                        LOG_WARN("linecal apply rejected: incomplete or low separation");
                     }
                     ChassisMaintenance_End();
                 }

@@ -79,9 +79,11 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 ### 2.4 当前构建验证
 
 ```
-Debug:  RAM   81.2 KB / 128 KB (61.9%)
-        FLASH 180.7 KB / 512 KB (34.5%)
-        Host 测试 34/34 通过 (CI host-tests)
+Debug:   RAM   86576 B / 128 KB (66.05%)
+         FLASH 229180 B / 256 KB (87.43%)
+Release: RAM   86520 B / 128 KB (66.01%)
+         FLASH 147868 B / 256 KB (56.41%)
+Host 测试 34/34 通过（本地 Ninja/CTest）
 ```
 
 ---
@@ -101,20 +103,20 @@ Debug:  RAM   81.2 KB / 128 KB (61.9%)
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
 | Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（34 个 target），通过后输出测试摘要 |
-| 格式检查 | `clang-format --dry-run --Werror` 检查本次变更涉及的 App/BSP/tests C/H 文件 |
-| 静态分析 | `cppcheck --enable=warning,style --error-exitcode=1` 检查本次变更涉及的 App/BSP/tests C/H 文件 |
+| 格式检查 | `clang-format --dry-run --Werror` 检查 Git 跟踪的全部 App/BSP/tests C/H 文件 |
+| 静态分析 | `cppcheck --enable=warning --error-exitcode=1` 检查 Git 跟踪的全部 App/BSP/tests C/H 文件 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
 
 ## 4. 时钟配置
 
-当前使用 **HSI (16 MHz)** 内部时钟（HSE 晶振待修复）。
+当前使用 **HSE (8 MHz)** 外部晶振作为 PLL 时钟源。
 
 | 时钟域 | 频率 |
 | --- | --- |
-| HSI | 16 MHz |
-| PLLM / PLLN / PLLP / PLLQ | 16 / 336 / 2 / 7 |
+| HSE | 8 MHz |
+| PLLM / PLLN / PLLP / PLLQ | 8 / 336 / 2 / 7 |
 | SYSCLK | 168 MHz |
 | HCLK / Cortex FCLK | 168 MHz |
 | APB1 (PCLK1) | 42 MHz |
@@ -123,7 +125,7 @@ Debug:  RAM   81.2 KB / 128 KB (61.9%)
 | APB2 Timer Clock | 168 MHz (×2) |
 | HAL Timebase | TIM6 / `TIM6_DAC_IRQn` |
 
-> **禁止提交推送与 HSI 相关的临时 `SystemClock_Config` 改动到 `main`。**
+> 时钟真值以生成的 `Core/Src/main.c` 为准；修改时需同时核对 CubeMX 配置，避免生成代码漂移。
 
 ---
 

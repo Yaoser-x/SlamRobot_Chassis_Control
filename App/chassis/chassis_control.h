@@ -51,6 +51,7 @@ extern "C"
         uint8_t straight_active;
         uint8_t straight_heading_degraded;
         uint8_t straight_derated;
+        uint8_t straight_out_of_range;
         uint8_t straight_in_transition;
         uint8_t pwm_saturated;
         uint8_t control_source;

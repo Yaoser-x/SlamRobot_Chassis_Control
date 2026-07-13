@@ -135,6 +135,8 @@ target_include_directories(test_line_control PRIVATE
     ../../App/control
     ../../App/param
     ../../BSP
+    ../../BSP/flash
+    ../../BSP/imu
     ../../BSP/line
     ../../BSP/motor
 )

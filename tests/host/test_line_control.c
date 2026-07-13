@@ -1,22 +1,31 @@
 #include "line_control.h"
 
 #include "control_manager.h"
+#include "chassis_maintenance.h"
+#include "flash_param.h"
+#include "imu_bmi270.h"
 #include "line_uart.h"
 #include "param_store.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-static uint32_t           fake_revoke_generation;
-static uint32_t           fake_tick;
-static uint32_t           submitted_count;
-static uint32_t           clear_count;
-static uint8_t            fake_estop;
-static uint8_t            fake_fault_stop;
-static uint8_t            fake_maintenance;
-static chassis_cmd_t      last_command;
-static line_sensor_data_t fake_sensor;
-static param_store_t      fake_params;
+static uint32_t                     fake_revoke_generation;
+static uint32_t                     fake_tick;
+static uint32_t                     submitted_count;
+static uint32_t                     clear_count;
+static uint8_t                      fake_estop;
+static uint8_t                      fake_fault_stop;
+static uint8_t                      fake_maintenance;
+static chassis_cmd_t                last_command;
+static line_sensor_data_t           fake_sensor;
+static param_store_t                fake_params;
+static chassis_maintenance_result_t fake_maintenance_result;
+static flash_param_status_t         fake_flash_status;
+static uint32_t                     maintenance_end_count;
+static uint32_t                     flash_save_count;
+
+static void require_int(int condition, const char *message);
 
 uint32_t ParamStore_GetSnapshot(param_store_t *params)
 {
@@ -31,6 +40,25 @@ uint8_t ParamStore_Set(const param_store_t *params)
 {
     fake_params = *params;
     return 1U;
+}
+
+chassis_maintenance_result_t ChassisMaintenance_Begin(void)
+{
+    return fake_maintenance_result;
+}
+void ChassisMaintenance_End(void)
+{
+    maintenance_end_count++;
+}
+void ImuBmi270_GetCalibration(imu_bmi270_calibration_t *calibration)
+{
+    *calibration = (imu_bmi270_calibration_t){0};
+}
+flash_param_status_t FlashParam_SaveBundle(const flash_param_bundle_t *bundle)
+{
+    require_int(bundle != NULL, "flash commit provides a bundle");
+    flash_save_count++;
+    return fake_flash_status;
 }
 
 static void require_int(int condition, const char *message)
@@ -117,8 +145,83 @@ static void reset_fake(void)
     fake_params.line_slowdown_gain          = 0.5f;
     fake_params.line_detect_debounce_frames = 2U;
     fake_params.line_lost_debounce_frames   = 2U;
+    fake_maintenance_result                 = CHASSIS_MAINTENANCE_OK;
+    fake_flash_status                       = FLASH_PARAM_STATUS_OK;
+    maintenance_end_count                   = 0U;
+    flash_save_count                        = 0U;
     LineControl_Init();
     LineControl_Enable(1U);
+}
+
+static void collect_calibration_surface(line_calibration_surface_t surface, uint16_t base)
+{
+    require_int(LineControl_CalibrationBegin(surface, 4U) != 0U, "line calibration collection starts");
+    for (uint8_t sample = 0U; sample < 4U; ++sample)
+    {
+        for (uint8_t channel = 0U; channel < LINE_SENSOR_CHANNELS; ++channel)
+        {
+            fake_sensor.analog[channel] = (uint16_t)(base + channel + sample);
+        }
+        fake_sensor.timestamp_ms++;
+        fake_tick++;
+        LineControl_Update();
+    }
+}
+
+static void test_calibration_apply_and_commit_are_explicit(void)
+{
+    uint16_t old_threshold;
+
+    reset_fake();
+    old_threshold = fake_params.line_threshold_raw[0];
+    collect_calibration_surface(LINE_CALIBRATION_SURFACE_FLOOR, 900U);
+    require_int(LineControl_CalibrationApplyToRam() == 0U, "single surface cannot overwrite RAM parameters");
+    require_int(fake_params.line_threshold_raw[0] == old_threshold, "rejected apply preserves prior parameters");
+    collect_calibration_surface(LINE_CALIBRATION_SURFACE_LINE, 200U);
+    require_int(LineControl_CalibrationApplyToRam() != 0U, "two separated surfaces apply to RAM");
+    require_int(fake_params.line_threshold_raw[0] == 551U && fake_params.line_active_low != 0U,
+                "RAM apply updates thresholds and polarity");
+    require_int(flash_save_count == 0U, "RAM apply does not write flash");
+    maintenance_end_count = 0U;
+
+    require_int(LineControl_CalibrationCommitToFlash() != 0U, "explicit flash commit succeeds");
+    require_int(flash_save_count == 1U && maintenance_end_count == 1U,
+                "flash commit saves once and releases maintenance");
+
+    fake_maintenance_result = CHASSIS_MAINTENANCE_NOT_STATIONARY;
+    require_int(LineControl_CalibrationCommitToFlash() == 0U, "moving chassis rejects flash commit");
+    require_int(flash_save_count == 1U && maintenance_end_count == 1U,
+                "rejected commit neither saves nor releases an unowned lock");
+
+    fake_maintenance_result = CHASSIS_MAINTENANCE_OK;
+    fake_flash_status       = FLASH_PARAM_STATUS_WRITE_ERROR;
+    require_int(LineControl_CalibrationCommitToFlash() == 0U, "flash write failure is reported");
+    require_int(flash_save_count == 2U && maintenance_end_count == 2U, "failed flash write still releases maintenance");
+}
+
+static void test_calibration_begin_requires_stationary_safe_chassis(void)
+{
+    line_calibration_t calibration;
+
+    reset_fake();
+    fake_maintenance_result = CHASSIS_MAINTENANCE_NOT_STATIONARY;
+    require_int(LineControl_CalibrationBegin(LINE_CALIBRATION_SURFACE_FLOOR, 4U) == 0U,
+                "moving chassis rejects calibration collection");
+    LineControl_CalibrationGet(&calibration);
+    require_int(calibration.collecting == 0U, "rejected moving collection leaves calibration idle");
+
+    fake_maintenance_result = CHASSIS_MAINTENANCE_OK;
+    fake_estop              = 1U;
+    require_int(LineControl_CalibrationBegin(LINE_CALIBRATION_SURFACE_FLOOR, 4U) == 0U,
+                "estop rejects calibration collection");
+    fake_estop      = 0U;
+    fake_fault_stop = 1U;
+    require_int(LineControl_CalibrationBegin(LINE_CALIBRATION_SURFACE_FLOOR, 4U) == 0U,
+                "fault stop rejects calibration collection");
+    fake_fault_stop  = 0U;
+    fake_maintenance = 1U;
+    require_int(LineControl_CalibrationBegin(LINE_CALIBRATION_SURFACE_FLOOR, 4U) == 0U,
+                "existing maintenance lock rejects calibration collection");
 }
 
 static void test_safety_state_rejects_line_rearm(void)
@@ -248,6 +351,8 @@ int main(void)
     test_pd_slowdown_and_lost_debounce();
     test_debounce_counts_unique_sensor_frames();
     test_stale_sensor_clears_tracking_view_state();
+    test_calibration_apply_and_commit_are_explicit();
+    test_calibration_begin_requires_stationary_safe_chassis();
     (void)printf("PASS: line control safety generation tests\n");
     return 0;
 }

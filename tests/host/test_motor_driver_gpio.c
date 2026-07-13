@@ -314,7 +314,7 @@ static void test_motor_driver_reverses_only_after_brake_and_phase_settle(void)
     require_int(HostTimGetCompare(&htim1, TIM_CHANNEL_3) == 126U, "M3 reverse ramp writes first EN step");
 }
 
-static void test_motor_driver_serializes_phase_switches(void)
+static void test_motor_driver_switches_phases_in_same_control_round(void)
 {
     motor_driver_state_t state;
 
@@ -329,22 +329,41 @@ static void test_motor_driver_serializes_phase_switches(void)
     require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_RESET, "M2 positive command maps to low PH by layout");
     require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 positive command maps to high PH by layout");
 
-    for (uint8_t i = 0U; i < 14U; ++i)
+    for (uint8_t i = 0U; i < 20U; ++i)
+    {
+        MotorDriver_GetState(&state);
+        if (state.phase[MOTOR_ID_M2] != MOTOR_DRIVER_PHASE_PH_SETTLE)
+        {
+            MotorDriver_SetPermille(MOTOR_ID_M2, -300);
+        }
+        if (state.phase[MOTOR_ID_M3] != MOTOR_DRIVER_PHASE_PH_SETTLE)
+        {
+            MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+        }
+    }
+    MotorDriver_GetState(&state);
+    require_int(state.phase[MOTOR_ID_M2] == MOTOR_DRIVER_PHASE_PH_SETTLE
+                    && state.phase[MOTOR_ID_M3] == MOTOR_DRIVER_PHASE_PH_SETTLE,
+                "M2 and M3 are both ready to switch PH");
+    MotorDriver_SetPermille(MOTOR_ID_M2, -300);
+    MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+    MotorDriver_GetState(&state);
+    require_int(state.applied_pwm[MOTOR_ID_M2] == 0 && state.applied_pwm[MOTOR_ID_M3] == 0,
+                "M2 and M3 keep EN low while switching PH");
+    require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 switches PH in the control round");
+    require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_RESET, "M3 switches PH in the same control round");
+
+    for (uint8_t i = 1U; i <= 4U; ++i)
     {
         MotorDriver_SetPermille(MOTOR_ID_M2, -300);
         MotorDriver_SetPermille(MOTOR_ID_M3, -300);
+        MotorDriver_GetState(&state);
+        require_int(state.applied_pwm[MOTOR_ID_M2] == -state.applied_pwm[MOTOR_ID_M3],
+                    "M2 and M3 ramp with equal PWM magnitude");
+        require_int(state.applied_pwm[MOTOR_ID_M2] == (int16_t)(i * 15U)
+                        || state.applied_pwm[MOTOR_ID_M2] == -(int16_t)(i * 15U),
+                    "M2 and M3 ramp by one equal rise step per round");
     }
-    MotorDriver_SetPermille(MOTOR_ID_M2, -300);
-    MotorDriver_GetState(&state);
-    require_int(state.applied_pwm[MOTOR_ID_M3] == 0, "M3 is ready to switch PH");
-    require_int(gpio_c_state(M2_IN2_Pin) == GPIO_PIN_SET, "M2 switches PH first");
-    require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_SET, "M3 PH has not switched in same control round");
-
-    for (uint8_t i = 0U; i < 4U; ++i)
-    {
-        MotorDriver_SetPermille(MOTOR_ID_M3, -300);
-    }
-    require_int(gpio_c_state(M3_IN2_Pin) == GPIO_PIN_RESET, "M3 switches PH after serialized gap");
 }
 
 static void test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely(void)
@@ -516,7 +535,7 @@ int main(void)
     test_motor_driver_uses_gpio_for_phase();
     test_motor_driver_ramps_up_and_down_without_changing_phase();
     test_motor_driver_reverses_only_after_brake_and_phase_settle();
-    test_motor_driver_serializes_phase_switches();
+    test_motor_driver_switches_phases_in_same_control_round();
     test_motor_driver_emergency_stop_preserves_phase_and_restarts_safely();
     test_motor_driver_effective_pwm_and_fault_edges();
     test_tim8_break_is_timestamped_redundant_diagnostic_only();

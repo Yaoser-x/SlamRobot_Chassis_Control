@@ -147,9 +147,13 @@ void LineControl_CalibrationCancel(void)
 {
     fake_cal = (line_calibration_t){0};
 }
-uint8_t LineControl_CalibrationApplyAndSave(void)
+uint8_t LineControl_CalibrationApplyToRam(void)
 {
     return fake_cal_build_result;
+}
+uint8_t LineControl_CalibrationCommitToFlash(void)
+{
+    return 1U;
 }
 void LedStatus_SetMode(led_status_mode_t mode)
 {

@@ -253,6 +253,48 @@ static void TestReverseFeedbackAndPiReset(void)
     check_near(result.heading_integral_deg_s, 0.0f, 0.0001f, "direction change clears existing PI integral");
 }
 
+static void TestCompensationRangeDoesNotLimitBaseSpeed(void)
+{
+    straight_controller_t        controller;
+    straight_controller_params_t params = DefaultParams();
+    straight_controller_input_t  input  = DefaultInput();
+    straight_controller_result_t result;
+
+    StraightController_Init(&controller);
+    (void)StraightController_Step(&controller, &params, &input);
+    input.now_ms += 100U;
+    input.gyro_z_dps = 10.0f;
+    result           = StraightController_Step(&controller, &params, &input);
+    check(result.heading_integral_deg_s < 0.0f, "in-range heading PI accumulates before range exit");
+
+    input.now_ms += 20U;
+    input.requested_linear_mps = 0.31f;
+    result                     = StraightController_Step(&controller, &params, &input);
+    check(result.out_of_range != 0U, "0.31 m/s reports compensation out of range");
+    check_near(result.left_target_mps, 0.31f, 0.0001f, "0.31 m/s forward target is not clamped");
+    check_near(result.right_target_mps, 0.31f, 0.0001f, "0.31 m/s forward target stays symmetric");
+    check_near(result.heading_integral_deg_s, 0.0f, 0.0001f, "range exit clears heading integral");
+
+    input.now_ms += 20U;
+    input.requested_linear_mps = 0.50f;
+    result                     = StraightController_Step(&controller, &params, &input);
+    check_near(result.left_target_mps, 0.50f, 0.0001f, "0.50 m/s forward target is not clamped");
+    check_near(result.right_target_mps, 0.50f, 0.0001f, "0.50 m/s forward target stays symmetric");
+
+    input.now_ms += 20U;
+    input.requested_linear_mps = -0.50f;
+    result                     = StraightController_Step(&controller, &params, &input);
+    check_near(result.left_target_mps, -0.50f, 0.0001f, "-0.50 m/s reverse target is not clamped");
+    check_near(result.right_target_mps, -0.50f, 0.0001f, "-0.50 m/s reverse target stays symmetric");
+
+    input.now_ms += 20U;
+    input.requested_linear_mps = 0.30f;
+    input.gyro_z_dps           = 20.0f;
+    result                     = StraightController_Step(&controller, &params, &input);
+    check(result.out_of_range == 0U, "0.30 m/s remains inside compensation range");
+    check_near(result.heading_correction_mps, 0.0f, 0.0001f, "range recovery establishes a fresh heading reference");
+}
+
 int main(void)
 {
     TestDirectionalTrim();
@@ -261,6 +303,7 @@ int main(void)
     TestClampAntiWindupAndSaturationAllocation();
     TestCasterTransitionDistance();
     TestReverseFeedbackAndPiReset();
+    TestCompensationRangeDoesNotLimitBaseSpeed();
     puts("PASS: straight controller");
     return 0;
 }

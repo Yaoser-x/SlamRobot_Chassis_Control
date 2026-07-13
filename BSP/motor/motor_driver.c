@@ -32,7 +32,6 @@ typedef struct
 #define MOTOR_PWM_RISE_STEP_PER_CYCLE 15
 #define MOTOR_PWM_FALL_STEP_PER_CYCLE 25
 #define MOTOR_REVERSE_BRAKE_CYCLES    2U
-#define MOTOR_PHASE_SWITCH_GAP_CALLS  MOTOR_ID_COUNT
 
 static motor_speed_getter_t g_speed_getter;
 
@@ -51,7 +50,6 @@ static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
 
 static motor_runtime_t      motor_runtime[MOTOR_ID_COUNT];
 static motor_driver_state_t motor_state;
-static uint8_t              phase_switch_gap_calls;
 
 static void MotorDriver_UpdateEffectivePwmAll(void);
 
@@ -335,16 +333,6 @@ static void MotorDriver_DisableRuntimeOutput(motor_id_t motor)
     MotorDriver_RecordRuntime(motor);
 }
 
-static uint8_t MotorDriver_CanSwitchPhase(void)
-{
-    if (phase_switch_gap_calls != 0U)
-    {
-        phase_switch_gap_calls--;
-        return 0U;
-    }
-    return 1U;
-}
-
 static void MotorDriver_SwitchPhase(motor_id_t motor, int8_t target_dir)
 {
     motor_runtime_t *runtime = &motor_runtime[(uint32_t)motor];
@@ -355,7 +343,6 @@ static void MotorDriver_SwitchPhase(motor_id_t motor, int8_t target_dir)
     runtime->pending_dir       = 0;
     runtime->phase             = MOTOR_DRIVER_PHASE_RAMP_UP;
     runtime->phase_initialized = 1U;
-    phase_switch_gap_calls     = MOTOR_PHASE_SWITCH_GAP_CALLS;
     MotorDriver_RecordRuntime(motor);
 }
 
@@ -378,7 +365,6 @@ void MotorDriver_Init(void)
     HAL_GPIO_WritePin(DRV_SLEEP_ALL_GPIO_Port, DRV_SLEEP_ALL_Pin, GPIO_PIN_SET);
     HAL_Delay(DRV8874_WAKE_DELAY_MS);
     motor_state               = (motor_driver_state_t){0};
-    phase_switch_gap_calls    = 0U;
     motor_state.sleep_enabled = 1U;
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -532,11 +518,6 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
         if (runtime->phase_initialized != 0U)
         {
             runtime->phase = MOTOR_DRIVER_PHASE_PH_SETTLE;
-            if (MotorDriver_CanSwitchPhase() == 0U)
-            {
-                MotorDriver_ApplyRuntimeOutput(motor);
-                return;
-            }
             MotorDriver_SwitchPhase(motor, target_dir);
             return;
         }
@@ -550,15 +531,11 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 
     if (runtime->phase == MOTOR_DRIVER_PHASE_PH_SETTLE)
     {
-        if (MotorDriver_CanSwitchPhase() == 0U)
-        {
-            MotorDriver_ApplyRuntimeOutput(motor);
-            return;
-        }
         MotorDriver_SwitchPhase(motor, target_dir);
         return;
     }
 
+    runtime->phase_initialized = 1U;
     next_mag             = MotorDriver_RampMagnitude((uint16_t)MotorDriver_AbsSigned(runtime->applied_pwm), target_mag);
     runtime->applied_pwm = (int16_t)(next_mag * target_dir);
     runtime->pending_dir = 0;
@@ -607,7 +584,6 @@ void MotorDriver_StopSide(motor_side_t side, motor_stop_mode_t mode)
 
 void MotorDriver_StopAll(motor_stop_mode_t mode)
 {
-    phase_switch_gap_calls = 0U;
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         MotorDriver_Stop((motor_id_t)i, mode);

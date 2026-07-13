@@ -2,7 +2,7 @@
 
 基于 STM32F407VET6 的四轮左右差速底盘控制固件。构建系统采用 STM32CubeMX + FreeRTOS + CMake + Ninja + GNU Arm Embedded Toolchain。
 
-> **当前状态**：V2.0 已接入完整底盘控制链，默认两驱启用 M2（左侧）和 M3（右侧），可通过布局配置切换为四驱或自定义组合。电机驱动为 DRV8874 H-bridge，IMU 为 Bosch BMI270，无线模块为板载 ESP12F，巡线使用 HiWonder 八路传感器。
+> **当前状态**：V1.0 Beta2 代码收口。默认两驱启用 M2（左侧）和 M3（右侧），可通过布局配置切换为四驱或自定义组合。电机驱动为 DRV8874 H-bridge，IMU 为 Bosch BMI270，无线模块为板载 ESP12F，巡线使用 HiWonder 八路传感器；正式发布仍需完成板级安全、参数定型和上位机联调验收。
 
 ## 快速开始
 

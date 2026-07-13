@@ -804,6 +804,7 @@ static void ChassisControl_StepImpl(uint32_t now_ms)
             chassis_state.straight_total_correction_mps   = straight_result.total_correction_mps;
             chassis_state.straight_heading_degraded       = straight_result.heading_degraded;
             chassis_state.straight_derated                = straight_result.derated;
+            chassis_state.straight_out_of_range           = straight_result.out_of_range;
         }
         else
         {
@@ -820,6 +821,7 @@ static void ChassisControl_StepImpl(uint32_t now_ms)
             chassis_state.straight_total_correction_mps   = 0.0f;
             chassis_state.straight_heading_degraded       = 0U;
             chassis_state.straight_derated                = 0U;
+            chassis_state.straight_out_of_range           = 0U;
         }
         chassis_state.control_source = cmd.source;
         chassis_state.pwm_saturated =

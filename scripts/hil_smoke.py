@@ -58,7 +58,7 @@ def build_report(port: str, baud: int, boot_log: str,
         commands.append({"command": item["command"], "response_summary": response[-500:],
                          "assertions": assertions,
                          "passed": all(assertion["passed"] for assertion in assertions)})
-    required = ("POST:", "POST done=", "PARAM ", "version fw=")
+    required = ("POST done=", "PARAM ", "version fw=")
     assertions = [{"name": f"contains:{needle}", "passed": needle in text} for needle in required]
     assertions.append({"name": "imu_probe", "passed": "bmi270 probe failed" not in text})
     identity_match = re.search(
