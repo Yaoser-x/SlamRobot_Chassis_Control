@@ -12,16 +12,16 @@
 #include "main.h"
 #include "cmsis_os2.h"
 #include "chassis_config.h"
-#include "system_monitor.h"
-#include "control_manager.h"
-#include "ps2_control.h"
+#include "safety_service.h"
+#include "control_service.h"
+#include "ps2_control_service.h"
 #include "imu_bmi270.h"
 #include "encoder_driver.h"
 #include "motor_driver.h"
 #include "line_uart.h"
-#include "esp12f_comm.h"
+#include "esp12f_service.h"
 #include "adc_monitor.h"
-#include "upper_uart.h"
+#include "upper_uart_service.h"
 #include "oled_selfcheck.h"
 #include "oled_calibration_view.h"
 
@@ -188,8 +188,8 @@ static uint8_t OLED_UI_RunSelfCheck(selfcheck_item_t item)
 
         case SC_ADC:
         {
-            system_monitor_state_t mon;
-            SystemMonitor_GetState(&mon);
+            safety_service_snapshot_t mon;
+            SafetyService_GetState(&mon);
             return (mon.battery_voltage > 6.0f) ? 1U : 2U;
         }
 
@@ -217,7 +217,7 @@ static uint8_t OLED_UI_RunSelfCheck(selfcheck_item_t item)
         case SC_UART3_RPI:
         {
             uint32_t now = osKernelGetTickCount();
-            return (uint8_t)OLED_SelfCheckRpi(now, UpperUart_GetLastRxTimestamp(), OLED_MODULE_TIMEOUT_RPI_MS);
+            return (uint8_t)OLED_SelfCheckRpi(now, UpperUartService_GetLastRxTimestamp(), OLED_MODULE_TIMEOUT_RPI_MS);
         }
 
         case SC_UART4_LINE:
@@ -230,9 +230,9 @@ static uint8_t OLED_UI_RunSelfCheck(selfcheck_item_t item)
 
         case SC_ESP12F:
         {
-            uint32_t            now = osKernelGetTickCount();
-            esp12f_comm_state_t esp_state;
-            Esp12fComm_GetState(&esp_state);
+            uint32_t               now = osKernelGetTickCount();
+            esp12f_service_state_t esp_state;
+            Esp12fService_GetState(&esp_state);
             return (uint8_t)OLED_SelfCheckEsp12f(now,
                                                  esp_state.last_rx_timestamp_ms,
                                                  CONTROL_TIMEOUT_ESP12F_MS,
@@ -251,13 +251,13 @@ static void OLED_UI_UpdateModuleStatus(void)
 {
     uint32_t now = osKernelGetTickCount();
 
-    /* RPI: UpperUart last RX timestamp */
-    mod_rpi_online = ((now - UpperUart_GetLastRxTimestamp()) < OLED_MODULE_TIMEOUT_RPI_MS) ? 1U : 0U;
+    /* RPI: UpperUartService last RX timestamp */
+    mod_rpi_online = ((now - UpperUartService_GetLastRxTimestamp()) < OLED_MODULE_TIMEOUT_RPI_MS) ? 1U : 0U;
 
     /* PS2: controller online flag */
     {
-        ps2_control_state_t ps2_state;
-        Ps2Control_GetState(&ps2_state);
+        ps2_control_service_state_t ps2_state;
+        Ps2ControlService_GetState(&ps2_state);
         mod_ps2_online = ps2_state.online;
     }
 
@@ -286,8 +286,8 @@ static void OLED_UI_UpdateModuleStatus(void)
 
     /* ESP: communication active */
     {
-        esp12f_comm_state_t esp_state;
-        Esp12fComm_GetState(&esp_state);
+        esp12f_service_state_t esp_state;
+        Esp12fService_GetState(&esp_state);
         mod_esp_online = (OLED_SelfCheckEsp12f(now,
                                                esp_state.last_rx_timestamp_ms,
                                                CONTROL_TIMEOUT_ESP12F_MS,
@@ -299,8 +299,8 @@ static void OLED_UI_UpdateModuleStatus(void)
 
     /* Motor: nFAULT all normal */
     {
-        system_monitor_state_t mon;
-        SystemMonitor_GetState(&mon);
+        safety_service_snapshot_t mon;
+        SafetyService_GetState(&mon);
         mod_motr_online = ((mon.error_flags & SYSTEM_ERROR_DRV_FAULT) == 0U) ? 1U : 0U;
     }
 
@@ -399,11 +399,11 @@ static void OLED_UI_DrawSelfCheck(void)
  * ================================================================ */
 static void OLED_UI_DrawNormal(void)
 {
-    uint32_t                now = osKernelGetTickCount();
-    system_monitor_state_t  mon;
-    imu_bmi270_state_t      imu;
-    oled_calibration_view_t calibration_view;
-    SystemMonitor_GetState(&mon);
+    uint32_t                  now = osKernelGetTickCount();
+    safety_service_snapshot_t mon;
+    imu_bmi270_state_t        imu;
+    oled_calibration_view_t   calibration_view;
+    SafetyService_GetState(&mon);
     ImuBmi270_GetState(&imu);
 
     if (imu.gyro_auto_cal_state != last_calibration_state)
@@ -504,7 +504,7 @@ static void OLED_UI_DrawNormal(void)
         }
 
         /* Control source: "M:SRC " at x=56 (6 chars × 8px = 48px → ends at 104) */
-        uint8_t            src         = ControlManager_GetActiveSource();
+        uint8_t            src         = ControlService_GetActiveSource();
         static const char *src_names[] = {"NONE", "RPI ", "PS2 ", "ESP ", "DBG ", "LINE"};
         const char        *name        = (src <= 5) ? src_names[src] : "????";
 

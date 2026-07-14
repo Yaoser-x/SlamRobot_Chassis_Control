@@ -66,21 +66,20 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# Add user-maintained sources to executable
-set(F407_APP_BSP_SOURCES
-    App/chassis/chassis_control.c
-    App/chassis/chassis_maintenance.c
-    App/chassis/chassis_math.c
-    App/chassis/straight_controller.c
-    App/chassis/chassis_task_timing.c
-    App/chassis/chassis_tasks.c
-    App/control/control_manager.c
-    App/control/line_control.c
-    App/control/line_calibration.c
-    App/control/ps2_control.c
-    App/control/relative_yaw_control.c
-    App/current/current_guard.c
-    App/debug/reset_trace.c
+# Five-layer user-maintained sources
+set(F407_APP_SOURCES
+    App/app_init.c
+    App/app_isr.c
+    App/tasks/task_debug.c
+    App/tasks/task_esp12f.c
+    App/tasks/task_imu.c
+    App/tasks/task_led.c
+    App/tasks/task_line.c
+    App/tasks/task_motor.c
+    App/tasks/task_oled.c
+    App/tasks/task_ps2.c
+    App/tasks/task_safety.c
+    App/tasks/task_upper_comm.c
     App/debug/debug_maintenance_policy.c
     App/debug/debug_log_policy.c
     App/debug/debug_straight_telemetry.c
@@ -88,43 +87,80 @@ set(F407_APP_BSP_SOURCES
     App/display/oled_ui.c
     App/display/oled_selfcheck.c
     App/display/oled_calibration_view.c
-    App/imu/imu_calibration_gate.c
-    App/monitor/system_monitor.c
-    App/monitor/power_on_self_test.c
-    App/monitor/reset_reason.c
-    App/param/param_store.c
-    App/protocol/esp12f_comm.c
-    App/protocol/upper_protocol.c
-    App/protocol/upper_uart.c
     App/protocol/uart_callbacks.c
+    App/protocol/esp12f_flash_bridge.c
+)
+
+set(F407_PLATFORM_SOURCES
+    Platform/platform_critical.c
+    Platform/platform_reset.c
+    Platform/platform_reset_trace.c
+    Platform/platform_task_event.c
+    Platform/platform_time.c
+    Platform/platform_watchdog.c
+)
+
+set(F407_SERVICE_SOURCES
+    Service/chassis/chassis_service.c
+    Service/chassis/chassis_maintenance_service.c
+    Service/diagnostics/task_health_service.c
+    Service/control/control_service.c
+    Service/control/line_control_service.c
+    Service/control/ps2_control_service.c
+    Service/safety/current_guard.c
+    Service/safety/safety_service.c
+    Service/safety/post_service.c
+    Service/diagnostics/reset_reason_service.c
+    Service/param/param_service.c
+    Service/param/param_persistence.c
+    Service/param/flash_param.c
+    Service/imu/imu_service.c
+    Service/imu/imu_calibration_service.c
+    Service/sensing/current_sensor_service.c
+    Service/sensing/encoder_service.c
+    Service/communication/esp12f_service.c
+    Service/communication/upper_uart_service.c
+)
+
+set(F407_DOMAIN_SOURCES
+    Domain/chassis/chassis_kinematics.c
+    Domain/chassis/chassis_layout.c
+    Domain/control/pid_controller.c
+    Domain/control/relative_yaw_controller.c
+    Domain/control/straight_controller.c
+    Domain/encoder/encoder_math.c
+    Domain/imu/imu_calibration.c
+    Domain/imu/imu_calibration_gate.c
+    Domain/imu/imu_timestamp.c
+    Domain/line/line_calibration.c
+    Domain/motor/motor_output_logic.c
+    Domain/protocol/upper_protocol.c
+)
+
+set(F407_BSP_SOURCES
     BSP/adc/adc_monitor.c
-    BSP/chassis_layout.c
     BSP/encoder/encoder_driver.c
-    BSP/encoder/encoder_math.c
-    BSP/esp12f/esp12f_flash_bridge.c
-    BSP/flash/flash_param.c
+    BSP/flash/flash_storage.c
     BSP/imu/imu_bmi270.c
-    BSP/imu/imu_bmi270_calibration.c
     BSP/imu/imu_bmi270_config.c
     BSP/imu/imu_bmi270_fifo.c
     BSP/imu/imu_bmi270_math.c
     BSP/imu/imu_bmi270_profile.c
-    BSP/imu/imu_bmi270_time.c
     BSP/led/led_status.c
     BSP/line/line_uart.c
     BSP/motor/motor_driver.c
-    BSP/motor/motor_output_logic.c
-    BSP/pid/pid_controller.c
     BSP/ps2/ps2_hw.c
+    BSP/transport/debug_uart_transport.c
+    BSP/transport/esp12f_transport.c
+    BSP/transport/upper_uart_transport.c
     BSP/oled/ssd1306.c
     BSP/oled/oled_font_data.c
 )
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${F407_APP_BSP_SOURCES})
-
-# Add include paths
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+set(F407_LAYER_INCLUDE_DIRS
     ${CMAKE_CURRENT_BINARY_DIR}/generated
+    App
+    App/tasks
     App/chassis
     App/control
     App/current
@@ -134,6 +170,25 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/monitor
     App/param
     App/protocol
+    Platform
+    Service/chassis
+    Service/communication
+    Service/control
+    Service/diagnostics
+    Service/imu
+    Service/param
+    Service/safety
+    Service/sensing
+    Domain/chassis
+    Domain/config
+    Domain/control
+    Domain/encoder
+    Domain/imu
+    Domain/line
+    Domain/model
+    Domain/motor
+    Domain/protocol
+    Domain/safety
     BSP
     BSP/adc
     BSP/encoder
@@ -143,10 +198,27 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/led
     BSP/line
     BSP/motor
-    BSP/pid
     BSP/ps2
+    BSP/transport
     BSP/oled
 )
+
+add_library(f407_domain STATIC ${F407_DOMAIN_SOURCES})
+add_library(f407_platform STATIC ${F407_PLATFORM_SOURCES})
+add_library(f407_bsp STATIC ${F407_BSP_SOURCES})
+add_library(f407_service STATIC ${F407_SERVICE_SOURCES})
+add_library(f407_app STATIC ${F407_APP_SOURCES})
+
+foreach(layer_target f407_domain f407_platform f407_bsp f407_service f407_app)
+    target_include_directories(${layer_target} PRIVATE ${F407_LAYER_INCLUDE_DIRS})
+endforeach()
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${F407_LAYER_INCLUDE_DIRS})
+
+target_link_libraries(f407_domain PUBLIC m)
+target_link_libraries(f407_platform PRIVATE stm32cubemx)
+target_link_libraries(f407_bsp PRIVATE f407_domain f407_platform stm32cubemx)
+target_link_libraries(f407_service PRIVATE f407_domain f407_bsp f407_platform)
+target_link_libraries(f407_app PRIVATE f407_service f407_bsp f407_platform stm32cubemx)
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
@@ -154,12 +226,9 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    set_property(SOURCE ${F407_APP_BSP_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Werror
-    )
+    foreach(layer_target f407_domain f407_platform f407_bsp f407_service f407_app)
+        target_compile_options(${layer_target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endforeach()
 endif()
 
 # Remove wrong libob.a library dependency when using cpp files
@@ -168,8 +237,12 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
-
-    # Add user defined libraries
+    f407_app
+    f407_service
+    f407_domain
+    f407_bsp
+    f407_platform
+    f407_domain
 )
 
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD

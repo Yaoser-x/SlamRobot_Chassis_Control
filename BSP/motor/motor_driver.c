@@ -4,7 +4,6 @@
 #include "chassis_layout.h"
 #include "cmsis_os2.h"
 #include "main.h"
-#include "param_store.h"
 #include "direction_apply.h"
 #include "tim.h"
 
@@ -34,10 +33,28 @@ typedef struct
 #define MOTOR_REVERSE_BRAKE_CYCLES    2U
 
 static motor_speed_getter_t g_speed_getter;
+static int8_t               motor_direction[MOTOR_ID_COUNT] = {
+    CHASSIS_M1_MOTOR_DIR,
+    CHASSIS_M2_MOTOR_DIR,
+    CHASSIS_M3_MOTOR_DIR,
+    CHASSIS_M4_MOTOR_DIR,
+};
 
 void MotorDriver_SetSpeedGetter(motor_speed_getter_t getter)
 {
     g_speed_getter = getter;
+}
+
+void MotorDriver_SetDirectionConfig(const int8_t direction[MOTOR_ID_COUNT])
+{
+    if (direction == 0)
+    {
+        return;
+    }
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+        motor_direction[i] = (direction[i] < 0) ? -1 : 1;
+    }
 }
 
 /* CubeMX labels keep legacy M2/M3 names; logical M2/M3 nFAULT pins are crossed here. */
@@ -353,10 +370,15 @@ static void MotorDriver_StartPwm(const motor_hw_t *motor)
 
 void MotorDriver_Init(void)
 {
-    uint8_t  pre_wake_bif;
-    uint8_t  startup_qualified = 1U;
-    uint8_t  nfault_high_mask  = 0U;
-    uint32_t stable_high_ms    = 0U;
+    uint8_t pre_wake_bif;
+    uint8_t startup_qualified = 1U;
+
+    motor_direction[MOTOR_ID_M1] = CHASSIS_M1_MOTOR_DIR;
+    motor_direction[MOTOR_ID_M2] = CHASSIS_M2_MOTOR_DIR;
+    motor_direction[MOTOR_ID_M3] = CHASSIS_M3_MOTOR_DIR;
+    motor_direction[MOTOR_ID_M4] = CHASSIS_M4_MOTOR_DIR;
+    uint8_t  nfault_high_mask    = 0U;
+    uint32_t stable_high_ms      = 0U;
 
     htim1.Instance->DIER &= ~TIM_IT_BREAK;
     htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
@@ -421,7 +443,6 @@ void MotorDriver_Init(void)
 
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 {
-    param_store_t    params;
     motor_runtime_t *runtime;
     int16_t          corrected;
     int8_t           target_dir;
@@ -447,9 +468,8 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
         return;
     }
 
-    (void)ParamStore_GetSnapshot(&params);
     corrected =
-        MotorDriver_ClampSignedPermille(DirectionApply_Signed((int32_t)permille, params.motor_dir[(uint32_t)motor]));
+        MotorDriver_ClampSignedPermille(DirectionApply_Signed((int32_t)permille, motor_direction[(uint32_t)motor]));
     runtime->requested_pwm = corrected;
     target_dir             = MotorDriver_Sign(corrected);
     target_mag             = (uint16_t)MotorDriver_AbsSigned(corrected);

@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 #include "motor_driver.h"
-#include "param_store.h"
+#include "param_service.h"
 #include "bsp_config.h"
 #include "tim.h"
 
@@ -218,17 +218,18 @@ static void test_motor_driver_uses_gpio_for_phase(void)
 static void test_motor_driver_uses_runtime_direction(void)
 {
     motor_driver_state_t state;
-    param_store_t        params;
+    param_model_t        params;
 
     reset_fake_hw();
-    ParamStore_Defaults(&params);
+    ParamService_Defaults(&params);
     params.motor_dir[MOTOR_ID_M3] = -1;
-    require_int(ParamStore_Set(&params) != 0U, "runtime motor direction accepted");
+    require_int(ParamService_Set(&params) != 0U, "runtime motor direction accepted");
     MotorDriver_Init();
+    MotorDriver_SetDirectionConfig(params.motor_dir);
     MotorDriver_SetPermille(MOTOR_ID_M3, 300);
     MotorDriver_GetState(&state);
     require_int(state.requested_pwm[MOTOR_ID_M3] == -300, "runtime motor direction reverses requested output");
-    ParamStore_SetDefaults();
+    ParamService_SetDefaults();
 }
 
 static void test_motor_driver_ramps_up_and_down_without_changing_phase(void)

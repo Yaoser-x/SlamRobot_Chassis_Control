@@ -1,7 +1,7 @@
 #include "encoder_driver.h"
 
 #include "chassis_layout.h"
-#include "param_store.h"
+#include "param_service.h"
 #include "tim.h"
 
 #include <math.h>
@@ -20,6 +20,14 @@ TIM_HandleTypeDef htim5 = {.Instance = &tim5_instance};
 
 static uint32_t fake_primask;
 static uint32_t layout_calls_while_masked;
+
+static void EncoderDriverTest_Update(uint32_t now_ms)
+{
+    param_model_t params;
+
+    (void)ParamService_GetSnapshot(&params);
+    EncoderDriver_Update(now_ms, &params);
+}
 
 static void require_int(int condition, const char *message)
 {
@@ -101,13 +109,13 @@ static void test_update_publishes_after_unmasked_calculation(void)
 {
     encoder_state_t state;
 
-    ParamStore_SetDefaults();
+    ParamService_SetDefaults();
     EncoderDriver_Init();
     set_all_counters(10U);
-    EncoderDriver_Update(10U);
+    EncoderDriverTest_Update(10U);
     layout_calls_while_masked = 0U;
     set_all_counters(20U);
-    EncoderDriver_Update(20U);
+    EncoderDriverTest_Update(20U);
     EncoderDriver_GetState(&state);
 
     require_int(state.speed_valid_all != 0U, "encoder state becomes valid");
@@ -119,40 +127,40 @@ static void test_update_publishes_after_unmasked_calculation(void)
 static void test_runtime_encoder_direction_reverses_delta(void)
 {
     encoder_state_t state;
-    param_store_t   params;
+    param_model_t   params;
 
-    ParamStore_Defaults(&params);
+    ParamService_Defaults(&params);
     params.encoder_dir[MOTOR_ID_M2] = -1;
-    require_int(ParamStore_Set(&params) != 0U, "runtime encoder direction accepted");
+    require_int(ParamService_Set(&params) != 0U, "runtime encoder direction accepted");
     EncoderDriver_Init();
     set_all_counters(100U);
-    EncoderDriver_Update(10U);
+    EncoderDriverTest_Update(10U);
     tim4_instance.CNT = 110U;
-    EncoderDriver_Update(20U);
+    EncoderDriverTest_Update(20U);
     EncoderDriver_GetState(&state);
     require_int(state.delta[MOTOR_ID_M2] == -10, "runtime encoder direction reverses delta");
-    ParamStore_SetDefaults();
+    ParamService_SetDefaults();
 }
 
 static void test_runtime_wheel_radius_changes_speed_generation(void)
 {
     encoder_state_t before;
     encoder_state_t after;
-    param_store_t   params;
+    param_model_t   params;
 
-    ParamStore_SetDefaults();
+    ParamService_SetDefaults();
     EncoderDriver_Init();
     set_all_counters(10U);
-    EncoderDriver_Update(10U);
+    EncoderDriverTest_Update(10U);
     set_all_counters(20U);
-    EncoderDriver_Update(20U);
+    EncoderDriverTest_Update(20U);
     EncoderDriver_GetState(&before);
 
-    (void)ParamStore_GetSnapshot(&params);
+    (void)ParamService_GetSnapshot(&params);
     params.wheel_radius_m = 0.070f;
-    require_int(ParamStore_Set(&params) != 0U, "runtime wheel radius accepted");
+    require_int(ParamService_Set(&params) != 0U, "runtime wheel radius accepted");
     set_all_counters(30U);
-    EncoderDriver_Update(30U);
+    EncoderDriverTest_Update(30U);
     EncoderDriver_GetState(&after);
 
     require_int(before.speed_mps[MOTOR_ID_M1] > 0.0f, "baseline speed is positive");

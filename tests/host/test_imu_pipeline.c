@@ -1,9 +1,9 @@
-#include "imu_bmi270_calibration.h"
+#include "imu_calibration.h"
 #include "imu_bmi270_fifo.h"
 #include "imu_bmi270.h"
 #include "imu_bmi270_math.h"
 #include "imu_bmi270_profile.h"
-#include "imu_bmi270_time.h"
+#include "imu_timestamp.h"
 #include "imu_calibration_gate.h"
 
 #include <math.h>

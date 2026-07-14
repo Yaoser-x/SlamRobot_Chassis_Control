@@ -253,4 +253,4 @@ plt.savefig('lab06_line_tracking.png', dpi=150)
 | 丢线过于频繁 | 阈值不当或黑线反光不足 | 微调 `LINE_ANALOG_THRESHOLD`；增加黑线宽度 |
 # 自动标定与控制质量
 
-依次执行 `linecal floor N` 与 `linecal line N`，`linecal show` 检查样本，`linecal apply` 只更新 RAM；确认后才执行 `set save`。任一通道均值分离度小于门限时拒绝应用。运行时 PD、检测/丢线去抖和误差降速均来自 ParamStore，赛道指标必须用原始数据验收。
+依次执行 `linecal floor N` 与 `linecal line N`，`linecal show` 检查样本，`linecal apply` 只更新 RAM；确认后才执行 `set save`。任一通道均值分离度小于门限时拒绝应用。运行时 PD、检测/丢线去抖和误差降速均来自 ParamService，赛道指标必须用原始数据验收。

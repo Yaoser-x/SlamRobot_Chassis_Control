@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "motor_driver.h"
-#include "reset_trace.h"
+#include "platform_reset_trace.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -69,7 +69,7 @@ static void Fault_DisableMotorDriver(void)
 
 static void HardFault_HandlerC(uint32_t *stack, uint32_t exc_return)
 {
-  ResetTrace_CaptureFaultStack(RESET_TRACE_KIND_HARDFAULT, stack, exc_return);
+  PlatformResetTrace_CaptureFaultStack(RESET_TRACE_KIND_HARDFAULT, stack, exc_return);
   Fault_DisableMotorDriver();
   while (1)
   {
@@ -78,7 +78,7 @@ static void HardFault_HandlerC(uint32_t *stack, uint32_t exc_return)
 
 static void Fault_HandlerC(uint32_t *stack, uint32_t exc_return, reset_trace_kind_t kind)
 {
-  ResetTrace_CaptureFaultStack(kind, stack, exc_return);
+  PlatformResetTrace_CaptureFaultStack(kind, stack, exc_return);
   Fault_DisableMotorDriver();
   while (1)
   {
@@ -110,7 +110,7 @@ static uint32_t AdcDmaGuardReason(void)
 
 static void AdcDmaGuardStop(uint32_t reason)
 {
-  ResetTrace_CaptureWithDetails(RESET_TRACE_KIND_DMA_GUARD,
+  PlatformResetTrace_CaptureWithDetails(RESET_TRACE_KIND_DMA_GUARD,
                                 reason,
                                 __LINE__,
                                 RESET_TRACE_TASK_NONE,
@@ -147,7 +147,7 @@ extern TIM_HandleTypeDef htim6;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-  ResetTrace_Capture(RESET_TRACE_KIND_NMI, 0U, 0U);
+  PlatformResetTrace_Capture(RESET_TRACE_KIND_NMI, 0U, 0U);
   Fault_DisableMotorDriver();
 
   /* USER CODE END NonMaskableInt_IRQn 0 */

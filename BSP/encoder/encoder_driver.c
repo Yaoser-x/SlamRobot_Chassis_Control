@@ -3,7 +3,6 @@
 #include "bsp_config.h"
 #include "chassis_layout.h"
 #include "encoder_math.h"
-#include "param_store.h"
 #include "direction_apply.h"
 #include "tim.h"
 
@@ -62,10 +61,9 @@ void EncoderDriver_Init(void)
     has_last_update         = 0U;
 }
 
-void EncoderDriver_Update(uint32_t now_ms)
+void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
 {
     encoder_state_t encoder_state;
-    param_store_t   params;
     uint32_t        now_count[MOTOR_ID_COUNT];
     int32_t         delta[MOTOR_ID_COUNT];
     uint32_t        dt_ms          = now_ms - last_update_ms;
@@ -82,8 +80,11 @@ void EncoderDriver_Update(uint32_t now_ms)
     float           left_speed_sum  = 0.0f;
     float           right_speed_sum = 0.0f;
 
-    (void)ParamStore_GetSnapshot(&params);
-    meters_per_rev = TWO_PI_F * params.wheel_radius_m;
+    if (params == 0)
+    {
+        return;
+    }
+    meters_per_rev = TWO_PI_F * params->wheel_radius_m;
 
     primask = __get_PRIMASK();
     __disable_irq();
@@ -97,7 +98,7 @@ void EncoderDriver_Update(uint32_t now_ms)
         if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
         {
             delta[i] = DirectionApply_Signed(EncoderDriver_DiffCount(now_count[i], last_count[i], period),
-                                             params.encoder_dir[i]);
+                                             params->encoder_dir[i]);
         }
         else
         {
@@ -137,7 +138,7 @@ void EncoderDriver_Update(uint32_t now_ms)
                                                  delta[i],
                                                  dt_ms,
                                                  counts_per_rev,
-                                                 params.wheel_radius_m,
+                                                 params->wheel_radius_m,
                                                  CHASSIS_ENCODER_MAX_ABS_MPS,
                                                  CHASSIS_ENCODER_SPIKE_REJECT_MPS,
                                                  CHASSIS_ENCODER_FILTER_MIN_SAMPLES,
@@ -160,7 +161,7 @@ void EncoderDriver_Update(uint32_t now_ms)
             encoder_state.speed_mps[i] = EncoderMath_CountDeltaSpeedMps(speed_window[i].delta_sum,
                                                                         speed_window[i].dt_sum_ms,
                                                                         counts_per_rev,
-                                                                        params.wheel_radius_m);
+                                                                        params->wheel_radius_m);
             if (encoder_state.consecutive_anomalies[i] >= CHASSIS_ENCODER_MAX_CONSECUTIVE_ANOMALIES)
             {
                 encoder_state.speed_valid[i] = 0U;

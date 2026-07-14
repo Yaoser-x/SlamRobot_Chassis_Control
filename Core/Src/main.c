@@ -29,7 +29,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "reset_trace.h"
+#include "platform_reset_trace.h"
 
 /* USER CODE END Includes */
 
@@ -217,7 +217,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  ResetTrace_Capture(RESET_TRACE_KIND_ERROR_HANDLER, 0U, 0U);
+  PlatformResetTrace_Capture(RESET_TRACE_KIND_ERROR_HANDLER, 0U, 0U);
   Error_DisableMotorDriver();
   __disable_irq();
   while (1)

@@ -2,32 +2,32 @@
 
 #include "adc_monitor.h"
 #include "chassis_config.h"
-#include "chassis_control.h"
-#include "chassis_maintenance.h"
+#include "chassis_service.h"
+#include "chassis_maintenance_service.h"
 #include "chassis_layout.h"
-#include "chassis_task_timing.h"
+#include "task_health_service.h"
 #include "cmsis_os2.h"
-#include "control_manager.h"
+#include "control_service.h"
 #include "debug_maintenance_policy.h"
 #include "debug_log_policy.h"
 #include "debug_straight_telemetry.h"
 #include "encoder_driver.h"
 #include "encoder_math.h"
-#include "esp12f_comm.h"
+#include "esp12f_service.h"
 #include "esp12f_flash_bridge.h"
 #include "flash_param.h"
 #include "imu_bmi270.h"
 #include "i2c.h"
-#include "line_control.h"
+#include "line_control_service.h"
 #include "line_uart.h"
 #include "motor_driver.h"
-#include "param_store.h"
-#include "power_on_self_test.h"
-#include "ps2_control.h"
-#include "reset_trace.h"
-#include "system_monitor.h"
+#include "param_service.h"
+#include "post_service.h"
+#include "ps2_control_service.h"
+#include "platform_reset_trace.h"
+#include "safety_service.h"
 #include "tim.h"
-#include "upper_uart.h"
+#include "upper_uart_service.h"
 #include "upper_protocol.h"
 #include "usart.h"
 #include "build_identity.h"
@@ -96,7 +96,6 @@ static uint32_t                   motor_log_last_ms;
 static uint8_t                    motor_log_baseline_valid;
 static debug_maintenance_policy_t maintenance_policy;
 
-extern osThreadId_t defaultTaskHandle;
 extern osThreadId_t safetyTaskHandle;
 extern osThreadId_t motorTaskHandle;
 extern osThreadId_t rpiCommTaskHandle;
@@ -189,11 +188,11 @@ static void DebugConsole_PrintResetFlags(void)
     DebugConsole_Write(tx);
 }
 
-static void DebugConsole_PrintResetTrace(void)
+static void DebugConsole_PrintResetTraceService(void)
 {
     char                 tx[DEBUG_CONSOLE_TX_LINE_SIZE];
     reset_trace_record_t trace;
-    uint8_t              valid = ResetTrace_GetBootRecord(&trace);
+    uint8_t              valid = PlatformResetTrace_GetBootRecord(&trace);
 
     (void)snprintf(tx,
                    sizeof(tx),
@@ -243,7 +242,7 @@ static void DebugConsole_PrintResetTrace(void)
 
 static uint8_t DebugConsole_MotorTestAllowed(void)
 {
-    if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
+    if (ControlService_IsEmergencyStop() != 0U || ControlService_IsFaultStop() != 0U)
     {
         Usart1DebugConsole_RevokeMaintenanceAuthorization();
         return 0U;
@@ -297,9 +296,9 @@ DebugConsole_GetMotorLogSpeed(uint32_t now_ms, const encoder_state_t *state, flo
 {
     uint32_t      dt_ms          = now_ms - motor_log_last_ms;
     float         counts_per_rev = EncoderDriver_GetCountsPerRev();
-    param_store_t params;
+    param_model_t params;
 
-    (void)ParamStore_GetSnapshot(&params);
+    (void)ParamService_GetSnapshot(&params);
 
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -338,23 +337,23 @@ static void DebugConsole_PrintFilteredHeader(void)
 
 static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t field, uint32_t now_ms)
 {
-    adc_monitor_state_t     adc;
-    encoder_state_t         enc;
-    chassis_control_state_t cs;
-    motor_driver_state_t    motor_state;
-    system_monitor_state_t  mon;
-    imu_bmi270_state_t      imu;
-    ps2_control_state_t     ps2;
-    line_uart_state_t       line;
-    esp12f_comm_state_t     esp;
-    float                   motor_log_speed_mps[MOTOR_ID_COUNT];
+    adc_monitor_state_t         adc;
+    encoder_state_t             enc;
+    chassis_service_snapshot_t  cs;
+    motor_driver_state_t        motor_state;
+    safety_service_snapshot_t   mon;
+    imu_bmi270_state_t          imu;
+    ps2_control_service_state_t ps2;
+    line_uart_state_t           line;
+    esp12f_service_state_t      esp;
+    float                       motor_log_speed_mps[MOTOR_ID_COUNT];
 
     /* 惰性获取：仅需要的字段才获取状态快照 */
     switch (field)
     {
         case LOG_FLD_MOTOR:
             EncoderDriver_GetState(&enc);
-            ChassisControl_GetState(&cs);
+            ChassisService_GetState(&cs);
             MotorDriver_GetState(&motor_state);
             DebugConsole_GetMotorLogSpeed(now_ms, &enc, motor_log_speed_mps);
             pos += (size_t)snprintf(tx + pos,
@@ -434,17 +433,17 @@ static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t f
             break;
 
         case LOG_FLD_ERRORS:
-            SystemMonitor_GetState(&mon);
+            SafetyService_GetState(&mon);
             pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos, "%lu", (unsigned long)mon.error_flags);
             break;
 
         case LOG_FLD_SOURCE:
-            SystemMonitor_GetState(&mon);
+            SafetyService_GetState(&mon);
             pos += (size_t)snprintf(tx + pos, DEBUG_CONSOLE_TX_LINE_SIZE - pos, "%u", mon.control_mode);
             break;
 
         case LOG_FLD_PS2:
-            Ps2Control_GetState(&ps2);
+            Ps2ControlService_GetState(&ps2);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_CONSOLE_TX_LINE_SIZE - pos,
                                     "%lu,%lu",
@@ -462,7 +461,7 @@ static size_t DebugConsole_WriteFieldData(char *tx, size_t pos, log_field_id_t f
             break;
 
         case LOG_FLD_ESP:
-            Esp12fComm_GetState(&esp);
+            Esp12fService_GetState(&esp);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_CONSOLE_TX_LINE_SIZE - pos,
                                     "%lu,%lu",
@@ -494,13 +493,13 @@ static void DebugConsole_PrintFilteredLogFrame(uint32_t now_ms)
 
 static void DebugConsole_PrintLineStatus(void)
 {
-    static char          tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    line_sensor_data_t   sensor;
-    line_control_state_t lc_state;
-    line_uart_state_t    line_state;
+    static char                  tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    line_sensor_data_t           sensor;
+    line_control_service_state_t lc_state;
+    line_uart_state_t            line_state;
 
     LineUart_GetSensorData(&sensor);
-    LineControl_GetState(&lc_state);
+    LineControlService_GetState(&lc_state);
     LineUart_GetState(&line_state);
 
     (void)snprintf(
@@ -638,12 +637,12 @@ static uint8_t DebugConsole_AllEnabledMotorsStopped(void)
 
 static void DebugConsole_PrintAdcCalShow(void)
 {
-    char                   tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    adc_monitor_state_t    adc_state;
-    system_monitor_state_t monitor_state;
+    char                      tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    adc_monitor_state_t       adc_state;
+    safety_service_snapshot_t monitor_state;
 
     AdcMonitor_GetState(&adc_state);
-    SystemMonitor_GetState(&monitor_state);
+    SafetyService_GetState(&monitor_state);
     (void)snprintf(tx,
                    sizeof(tx),
                    "ADCCAL cal=%u/%u valid=%u cvalid=%u cmask=0x%02X invalid=0x%08lX raw_n=%u rate_mHz=%lu "
@@ -761,7 +760,7 @@ static void DebugConsole_HandleAdcCal(char *args)
 }
 
 static void
-DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t missed, chassis_task_timing_id_t task)
+DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t missed, task_health_service_id_t task)
 {
     char                  tx[DEBUG_CONSOLE_TX_LINE_SIZE];
     chassis_task_health_t health         = {0};
@@ -769,9 +768,9 @@ DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t mis
     uint32_t              timeout_count  = 0U;
     uint8_t               timed_out      = 0U;
 
-    if ((uint32_t)task < (uint32_t)CHASSIS_TASK_TIMING_COUNT)
+    if ((uint32_t)task < (uint32_t)TASK_HEALTH_SERVICE_COUNT)
     {
-        ChassisTaskTiming_GetHealth(&health);
+        TaskHealthService_GetHealth(&health);
         last_heartbeat = health.last_heartbeat_ms[task];
         timeout_count  = health.timeout_count[task];
         timed_out      = health.timed_out[task];
@@ -799,14 +798,14 @@ DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t mis
 
 static void DebugConsole_PrintRtosStatus(void)
 {
-    char                tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    upper_uart_state_t  upper_state;
-    esp12f_comm_state_t esp_state;
-    uint32_t            heap_free = (uint32_t)xPortGetFreeHeapSize();
-    uint32_t            heap_min  = (uint32_t)xPortGetMinimumEverFreeHeapSize();
+    char                       tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    upper_uart_service_state_t upper_state;
+    esp12f_service_state_t     esp_state;
+    uint32_t                   heap_free = (uint32_t)xPortGetFreeHeapSize();
+    uint32_t                   heap_min  = (uint32_t)xPortGetMinimumEverFreeHeapSize();
 
-    UpperUart_GetState(&upper_state);
-    Esp12fComm_GetState(&esp_state);
+    UpperUartService_GetState(&upper_state);
+    Esp12fService_GetState(&esp_state);
 
     (void)snprintf(tx,
                    sizeof(tx),
@@ -817,44 +816,43 @@ static void DebugConsole_PrintRtosStatus(void)
                    (unsigned long)osKernelGetTickCount());
     DebugConsole_Write(tx);
 
-    DebugConsole_PrintTaskStatus("default", defaultTaskHandle, 0U, CHASSIS_TASK_TIMING_COUNT);
     DebugConsole_PrintTaskStatus("safety",
                                  safetyTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_SAFETY),
-                                 CHASSIS_TASK_TIMING_SAFETY);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_SAFETY),
+                                 TASK_HEALTH_SERVICE_SAFETY);
     DebugConsole_PrintTaskStatus("motor",
                                  motorTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_MOTOR),
-                                 CHASSIS_TASK_TIMING_MOTOR);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_MOTOR),
+                                 TASK_HEALTH_SERVICE_MOTOR);
     DebugConsole_PrintTaskStatus("rpi",
                                  rpiCommTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_RPI),
-                                 CHASSIS_TASK_TIMING_RPI);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_RPI),
+                                 TASK_HEALTH_SERVICE_RPI);
     DebugConsole_PrintTaskStatus("imu",
                                  imuTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_IMU),
-                                 CHASSIS_TASK_TIMING_IMU);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_IMU),
+                                 TASK_HEALTH_SERVICE_IMU);
     DebugConsole_PrintTaskStatus("line",
                                  lineTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LINE),
-                                 CHASSIS_TASK_TIMING_LINE);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_LINE),
+                                 TASK_HEALTH_SERVICE_LINE);
     DebugConsole_PrintTaskStatus("esp",
                                  espTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_ESP),
-                                 CHASSIS_TASK_TIMING_ESP);
-    DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U, CHASSIS_TASK_TIMING_COUNT);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_ESP),
+                                 TASK_HEALTH_SERVICE_ESP);
+    DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U, TASK_HEALTH_SERVICE_COUNT);
     DebugConsole_PrintTaskStatus("ps2",
                                  ps2TaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_PS2),
-                                 CHASSIS_TASK_TIMING_PS2);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_PS2),
+                                 TASK_HEALTH_SERVICE_PS2);
     DebugConsole_PrintTaskStatus("led",
                                  ledTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_LED),
-                                 CHASSIS_TASK_TIMING_LED);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_LED),
+                                 TASK_HEALTH_SERVICE_LED);
     DebugConsole_PrintTaskStatus("oled",
                                  oledTaskHandle,
-                                 ChassisTaskTiming_GetMissedCount(CHASSIS_TASK_TIMING_OLED),
-                                 CHASSIS_TASK_TIMING_OLED);
+                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_OLED),
+                                 TASK_HEALTH_SERVICE_OLED);
 
     (void)snprintf(tx,
                    sizeof(tx),
@@ -922,16 +920,16 @@ static void DebugConsole_PrintVersion(void)
              F407_BUILD_DIRTY ? "-dirty" : "",
              F407_BUILD_TYPE,
              UPPER_PROTOCOL_VERSION,
-             (unsigned long)PARAM_STORE_VERSION,
+             (unsigned long)PARAM_SERVICE_VERSION,
              UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION);
 }
 
 static void DebugConsole_PrintConfigExport(void)
 {
     char          tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    param_store_t params;
+    param_model_t params;
 
-    ParamStore_Get(&params);
+    ParamService_Get(&params);
     (void)snprintf(tx,
                    sizeof(tx),
                    "{\"param_version\":%lu,\"wheel_radius_m\":%.6f,\"track_width_m\":%.6f,"
@@ -1001,19 +999,19 @@ static uint8_t DebugConsole_SetDirection(const char *line, uint8_t encoder)
     char          motor_name[4];
     int           direction;
     motor_id_t    motor;
-    param_store_t params;
+    param_model_t params;
 
     if (sscanf(line, encoder ? "set encoder_dir %3s %d" : "set motor_dir %3s %d", motor_name, &direction) != 2
         || DebugConsole_ParseMotorToken(motor_name, &motor) == 0U || (direction != -1 && direction != 1))
     {
         return 0U;
     }
-    if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+    if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
     {
         LOG_WARN("direction change rejected: chassis not stationary");
         return 1U;
     }
-    ParamStore_Get(&params);
+    ParamService_Get(&params);
     if (encoder != 0U)
     {
         params.encoder_dir[motor] = (int8_t)direction;
@@ -1022,41 +1020,41 @@ static uint8_t DebugConsole_SetDirection(const char *line, uint8_t encoder)
     {
         params.motor_dir[motor] = (int8_t)direction;
     }
-    if (ParamStore_Set(&params) != 0U)
+    if (ParamService_Set(&params) != 0U)
     {
         LOG_INFO("%s_dir %s=%d applied in RAM", encoder ? "encoder" : "motor", motor_name, direction);
     }
-    ChassisMaintenance_End();
+    ChassisMaintenanceService_End();
     return 1U;
 }
 
 static void DebugConsole_PrintStatus(void)
 {
-    char                    tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    adc_monitor_state_t     adc_state;
-    encoder_state_t         encoder_state;
-    chassis_control_state_t chassis_state;
-    system_monitor_state_t  monitor_state;
-    imu_bmi270_state_t      imu_state;
-    ps2_control_state_t     ps2_state;
-    line_uart_state_t       line_state;
-    esp12f_comm_state_t     esp_state;
-    motor_driver_state_t    motor_state;
-    post_result_t           post_result;
-    param_store_t           params;
-    uint32_t                encoder_hw_count[MOTOR_ID_COUNT];
+    char                        tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    adc_monitor_state_t         adc_state;
+    encoder_state_t             encoder_state;
+    chassis_service_snapshot_t  chassis_state;
+    safety_service_snapshot_t   monitor_state;
+    imu_bmi270_state_t          imu_state;
+    ps2_control_service_state_t ps2_state;
+    line_uart_state_t           line_state;
+    esp12f_service_state_t      esp_state;
+    motor_driver_state_t        motor_state;
+    post_result_t               post_result;
+    param_model_t               params;
+    uint32_t                    encoder_hw_count[MOTOR_ID_COUNT];
 
     AdcMonitor_GetState(&adc_state);
     EncoderDriver_GetState(&encoder_state);
-    ChassisControl_GetState(&chassis_state);
-    SystemMonitor_GetState(&monitor_state);
+    ChassisService_GetState(&chassis_state);
+    SafetyService_GetState(&monitor_state);
     ImuBmi270_GetState(&imu_state);
-    Ps2Control_GetState(&ps2_state);
+    Ps2ControlService_GetState(&ps2_state);
     LineUart_GetState(&line_state);
-    Esp12fComm_GetState(&esp_state);
+    Esp12fService_GetState(&esp_state);
     MotorDriver_GetState(&motor_state);
     POST_GetResult(&post_result);
-    ParamStore_Get(&params);
+    ParamService_Get(&params);
     encoder_hw_count[MOTOR_ID_M1] = __HAL_TIM_GET_COUNTER(&htim2);
     encoder_hw_count[MOTOR_ID_M2] = __HAL_TIM_GET_COUNTER(&htim4);
     encoder_hw_count[MOTOR_ID_M3] = __HAL_TIM_GET_COUNTER(&htim3);
@@ -1129,8 +1127,8 @@ static void DebugConsole_PrintStatus(void)
         motor_state.effective_pwm[MOTOR_ID_M3],
         motor_state.effective_pwm[MOTOR_ID_M4],
         chassis_state.output_enabled,
-        ControlManager_IsEmergencyStop(),
-        ControlManager_IsFaultStop());
+        ControlService_IsEmergencyStop(),
+        ControlService_IsFaultStop());
     DebugConsole_Write(tx);
 
     (void)snprintf(tx,
@@ -1312,21 +1310,21 @@ static void DebugConsole_PrintStatus(void)
                    (unsigned long)ps2_state.imu_age_ms,
                    (unsigned long)ps2_state.heading_gate_flags);
     DebugConsole_Write(tx);
-    DebugConsole_PrintResetTrace();
+    DebugConsole_PrintResetTraceService();
 }
 
 typedef struct
 {
-    adc_monitor_state_t     adc;
-    encoder_state_t         encoder;
-    chassis_control_state_t chassis;
-    system_monitor_state_t  monitor;
-    motor_driver_state_t    motor;
-    imu_bmi270_state_t      imu;
-    ps2_control_state_t     ps2;
-    line_uart_state_t       line;
-    esp12f_comm_state_t     esp;
-    float                   motor_log_speed_mps[MOTOR_ID_COUNT];
+    adc_monitor_state_t         adc;
+    encoder_state_t             encoder;
+    chassis_service_snapshot_t  chassis;
+    safety_service_snapshot_t   monitor;
+    motor_driver_state_t        motor;
+    imu_bmi270_state_t          imu;
+    ps2_control_service_state_t ps2;
+    line_uart_state_t           line;
+    esp12f_service_state_t      esp;
+    float                       motor_log_speed_mps[MOTOR_ID_COUNT];
 } debug_full_log_snapshot_t;
 
 static void DebugConsole_CaptureFullLogSnapshot(uint32_t now_ms, debug_full_log_snapshot_t *snapshot)
@@ -1334,27 +1332,27 @@ static void DebugConsole_CaptureFullLogSnapshot(uint32_t now_ms, debug_full_log_
     AdcMonitor_GetState(&snapshot->adc);
     EncoderDriver_GetState(&snapshot->encoder);
     DebugConsole_GetMotorLogSpeed(now_ms, &snapshot->encoder, snapshot->motor_log_speed_mps);
-    ChassisControl_GetState(&snapshot->chassis);
+    ChassisService_GetState(&snapshot->chassis);
     MotorDriver_GetState(&snapshot->motor);
-    SystemMonitor_GetState(&snapshot->monitor);
+    SafetyService_GetState(&snapshot->monitor);
     ImuBmi270_GetState(&snapshot->imu);
-    Ps2Control_GetState(&snapshot->ps2);
+    Ps2ControlService_GetState(&snapshot->ps2);
     LineUart_GetState(&snapshot->line);
-    Esp12fComm_GetState(&snapshot->esp);
+    Esp12fService_GetState(&snapshot->esp);
 }
 
 static void DebugConsole_PrintCsvLogFrame(uint32_t now_ms, const debug_full_log_snapshot_t *snapshot)
 {
-    char                    tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    adc_monitor_state_t     adc_state     = snapshot->adc;
-    chassis_control_state_t chassis_state = snapshot->chassis;
-    system_monitor_state_t  monitor_state = snapshot->monitor;
-    motor_driver_state_t    motor_state   = snapshot->motor;
-    imu_bmi270_state_t      imu_state     = snapshot->imu;
-    ps2_control_state_t     ps2_state     = snapshot->ps2;
-    line_uart_state_t       line_state    = snapshot->line;
-    esp12f_comm_state_t     esp_state     = snapshot->esp;
-    float                   motor_log_speed_mps[MOTOR_ID_COUNT];
+    char                        tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    adc_monitor_state_t         adc_state     = snapshot->adc;
+    chassis_service_snapshot_t  chassis_state = snapshot->chassis;
+    safety_service_snapshot_t   monitor_state = snapshot->monitor;
+    motor_driver_state_t        motor_state   = snapshot->motor;
+    imu_bmi270_state_t          imu_state     = snapshot->imu;
+    ps2_control_service_state_t ps2_state     = snapshot->ps2;
+    line_uart_state_t           line_state    = snapshot->line;
+    esp12f_service_state_t      esp_state     = snapshot->esp;
+    float                       motor_log_speed_mps[MOTOR_ID_COUNT];
 
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -1430,19 +1428,19 @@ static void DebugConsole_PrintCsvLogFrame(uint32_t now_ms, const debug_full_log_
 
 static void DebugConsole_PrintJsonLogFrame(uint32_t now_ms, const debug_full_log_snapshot_t *snapshot)
 {
-    char                    tx[DEBUG_CONSOLE_TX_LINE_SIZE];
-    chassis_control_state_t chassis = snapshot->chassis;
-    imu_bmi270_state_t      imu     = snapshot->imu;
-    adc_monitor_state_t     adc     = snapshot->adc;
-    size_t                  pos     = (size_t)snprintf(tx,
+    char                       tx[DEBUG_CONSOLE_TX_LINE_SIZE];
+    chassis_service_snapshot_t chassis = snapshot->chassis;
+    imu_bmi270_state_t         imu     = snapshot->imu;
+    adc_monitor_state_t        adc     = snapshot->adc;
+    size_t                     pos     = (size_t)snprintf(tx,
                                   sizeof(tx),
                                   "{\"t_ms\":%lu,\"pid_error_mps\":[%.5f,%.5f,%.5f,%.5f],"
-                                                       "\"pid_output_permille\":[%d,%d,%d,%d],\"actual_mps\":[%.5f,%.5f,%.5f,%.5f],"
-                                                       "\"current_a\":[%.4f,%.4f,%.4f,%.4f],"
-                                                       "\"imu_raw_acc\":[%d,%d,%d],\"imu_raw_gyro\":[%d,%d,%d],"
-                                                       "\"imu_body_acc_g\":[%.5f,%.5f,%.5f],\"imu_filter_gyro_dps\":[%.5f,%.5f,%.5f],"
-                                                       "\"euler_deg\":[%.4f,%.4f,%.4f],\"temperature_c\":%.3f,"
-                                                       "\"imu_cal_state\":%u,\"imu_quality\":%lu",
+                                                          "\"pid_output_permille\":[%d,%d,%d,%d],\"actual_mps\":[%.5f,%.5f,%.5f,%.5f],"
+                                                          "\"current_a\":[%.4f,%.4f,%.4f,%.4f],"
+                                                          "\"imu_raw_acc\":[%d,%d,%d],\"imu_raw_gyro\":[%d,%d,%d],"
+                                                          "\"imu_body_acc_g\":[%.5f,%.5f,%.5f],\"imu_filter_gyro_dps\":[%.5f,%.5f,%.5f],"
+                                                          "\"euler_deg\":[%.4f,%.4f,%.4f],\"temperature_c\":%.3f,"
+                                                          "\"imu_cal_state\":%u,\"imu_quality\":%lu",
                                   (unsigned long)now_ms,
                                   chassis.motor_error_mps[0],
                                   chassis.motor_error_mps[1],
@@ -1563,14 +1561,14 @@ static void DebugConsole_HandleLine(char *line)
     }
     else if (sscanf(line, "get %31s", param_name) == 1)
     {
-        param_store_t params;
+        param_model_t params;
         int32_t       int_value;
-        ParamStore_Get(&params);
-        if (ParamStore_GetFloat(&params, param_name, &param_value) != 0U)
+        ParamService_Get(&params);
+        if (ParamService_GetFloat(&params, param_name, &param_value) != 0U)
         {
             LOG_INFO("param %s=%.6f", param_name, param_value);
         }
-        else if (ParamStore_GetInt(&params, param_name, &int_value) != 0U)
+        else if (ParamService_GetInt(&params, param_name, &int_value) != 0U)
         {
             LOG_INFO("param %s=%ld", param_name, (long)int_value);
         }
@@ -1582,16 +1580,16 @@ static void DebugConsole_HandleLine(char *line)
     else if (strcmp(line, "set save") == 0)
     {
         flash_param_bundle_t bundle;
-        param_store_t        params;
+        param_model_t        params;
         adc_monitor_state_t  adc_state;
         flash_param_status_t status;
 
-        if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+        if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
         {
             LOG_WARN("param save rejected: chassis not stationary");
             return;
         }
-        ParamStore_Get(&params);
+        ParamService_Get(&params);
         AdcMonitor_GetState(&adc_state);
         if (adc_state.current_zero_valid != 0U)
         {
@@ -1601,7 +1599,7 @@ static void DebugConsole_HandleLine(char *line)
             }
             params.current_zero_valid = 1U;
         }
-        (void)ParamStore_Set(&params);
+        (void)ParamService_Set(&params);
         bundle.params = params;
         ImuBmi270_GetCalibration(&bundle.imu_calibration);
         status = FlashParam_SaveBundle(&bundle);
@@ -1613,24 +1611,24 @@ static void DebugConsole_HandleLine(char *line)
         {
             LOG_ERR("param save failed: %s", FlashParam_StatusString(status));
         }
-        ChassisMaintenance_End();
+        ChassisMaintenanceService_End();
     }
     else if (strcmp(line, "set reset") == 0)
     {
         flash_param_bundle_t bundle;
         flash_param_status_t status;
 
-        if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+        if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
         {
             LOG_WARN("param reset rejected: chassis not stationary");
             return;
         }
-        ParamStore_Defaults(&bundle.params);
+        ParamService_Defaults(&bundle.params);
         ImuBmi270Calibration_Default(&bundle.imu_calibration);
         status = FlashParam_SaveBundle(&bundle);
         if (status == FLASH_PARAM_STATUS_OK)
         {
-            ParamStore_SetDefaults();
+            ParamService_SetDefaults();
             (void)ImuBmi270_ApplyCalibration(&bundle.imu_calibration);
             ImuBmi270_ClearCalibration();
             AdcMonitor_RequestCurrentZeroCalibration();
@@ -1640,7 +1638,7 @@ static void DebugConsole_HandleLine(char *line)
         {
             LOG_ERR("param reset failed: %s", FlashParam_StatusString(status));
         }
-        ChassisMaintenance_End();
+        ChassisMaintenanceService_End();
     }
     else if (strncmp(line, "set motor_dir ", 14) == 0)
     {
@@ -1658,19 +1656,20 @@ static void DebugConsole_HandleLine(char *line)
     }
     else if (sscanf(line, "set %31s %f", param_name, &param_value) == 2)
     {
-        param_store_t params;
+        param_model_t params;
 
-        if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+        if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
         {
             LOG_WARN("param set rejected: chassis not stationary");
             return;
         }
-        ParamStore_Get(&params);
-        if (ParamStore_SetFloat(&params, param_name, param_value) != 0U && ParamStore_Set(&params) != 0U)
+        ParamService_Get(&params);
+        if (ParamService_SetFloat(&params, param_name, param_value) != 0U && ParamService_Set(&params) != 0U)
         {
             LOG_INFO("param %s=%.6f", param_name, param_value);
         }
-        else if (ParamStore_SetInt(&params, param_name, (int32_t)param_value) != 0U && ParamStore_Set(&params) != 0U)
+        else if (ParamService_SetInt(&params, param_name, (int32_t)param_value) != 0U
+                 && ParamService_Set(&params) != 0U)
         {
             LOG_INFO("param %s=%ld", param_name, (long)(int32_t)param_value);
         }
@@ -1678,7 +1677,7 @@ static void DebugConsole_HandleLine(char *line)
         {
             LOG_ERR("param set rejected");
         }
-        ChassisMaintenance_End();
+        ChassisMaintenanceService_End();
     }
     else if (strcmp(line, "maint arm") == 0)
     {
@@ -1815,8 +1814,8 @@ static void DebugConsole_HandleLine(char *line)
             return;
         }
         debug_velocity_enabled = 0U;
-        ControlManager_ClearCommand();
-        ChassisControl_OpenLoopTest(DebugConsole_ClampPermille(left), DebugConsole_ClampPermille(right));
+        ControlService_ClearCommand();
+        ChassisService_OpenLoopTest(DebugConsole_ClampPermille(left), DebugConsole_ClampPermille(right));
         LOG_INFO("side motor test updated");
     }
     else if (sscanf(line, "left %d", &value) == 1)
@@ -1827,8 +1826,8 @@ static void DebugConsole_HandleLine(char *line)
             return;
         }
         debug_velocity_enabled = 0U;
-        ControlManager_ClearCommand();
-        ChassisControl_OpenLoopTest(DebugConsole_ClampPermille(value), 0);
+        ControlService_ClearCommand();
+        ChassisService_OpenLoopTest(DebugConsole_ClampPermille(value), 0);
         LOG_INFO("left side test updated");
     }
     else if (sscanf(line, "right %d", &value) == 1)
@@ -1839,8 +1838,8 @@ static void DebugConsole_HandleLine(char *line)
             return;
         }
         debug_velocity_enabled = 0U;
-        ControlManager_ClearCommand();
-        ChassisControl_OpenLoopTest(0, DebugConsole_ClampPermille(value));
+        ControlService_ClearCommand();
+        ChassisService_OpenLoopTest(0, DebugConsole_ClampPermille(value));
         LOG_INFO("right side test updated");
     }
     else if (DebugConsole_ParseMotorId(line, &motor) != 0U && sscanf(&line[3], "%d %d", &lf, &lr) == 2)
@@ -1851,8 +1850,8 @@ static void DebugConsole_HandleLine(char *line)
             return;
         }
         debug_velocity_enabled = 0U;
-        ControlManager_ClearCommand();
-        ChassisControl_RawMotorInputTest(motor, DebugConsole_ClampPermille(lf), DebugConsole_ClampPermille(lr));
+        ControlService_ClearCommand();
+        ChassisService_RawMotorInputTest(motor, DebugConsole_ClampPermille(lf), DebugConsole_ClampPermille(lr));
         LOG_INFO("single motor raw test updated");
     }
     else if (sscanf(line, "raw %d %d %d %d", &lf, &lr, &rf, &rr) == 4)
@@ -1863,8 +1862,8 @@ static void DebugConsole_HandleLine(char *line)
             return;
         }
         debug_velocity_enabled = 0U;
-        ControlManager_ClearCommand();
-        ChassisControl_RawInputTest(DebugConsole_ClampPermille(lf),
+        ControlService_ClearCommand();
+        ChassisService_RawInputTest(DebugConsole_ClampPermille(lf),
                                     DebugConsole_ClampPermille(lr),
                                     DebugConsole_ClampPermille(rf),
                                     DebugConsole_ClampPermille(rr));
@@ -1872,7 +1871,7 @@ static void DebugConsole_HandleLine(char *line)
     }
     else if (sscanf(line, "vel %d %d", &linear_mm_s, &angular_mrad_s) == 2 || sscanf(line, "vel %d", &linear_mm_s) == 1)
     {
-        uint32_t generation_before = ControlManager_GetMotionRevokeGeneration();
+        uint32_t generation_before = ControlService_GetMotionRevokeGeneration();
 
         debug_velocity_cmd = (chassis_cmd_t){
             .linear_x     = (float)linear_mm_s / 1000.0f,
@@ -1881,13 +1880,13 @@ static void DebugConsole_HandleLine(char *line)
             .source       = CONTROL_SOURCE_DEBUG,
             .timestamp_ms = osKernelGetTickCount(),
         };
-        ChassisControl_OpenLoopTest(0, 0);
-        if (ControlManager_SetCommandForGeneration(&debug_velocity_cmd, generation_before) == CONTROL_COMMAND_ACCEPTED)
+        ChassisService_OpenLoopTest(0, 0);
+        if (ControlService_SetCommandForGeneration(&debug_velocity_cmd, generation_before) == CONTROL_COMMAND_ACCEPTED)
         {
-            uint32_t generation_after = ControlManager_GetMotionRevokeGeneration();
+            uint32_t generation_after = ControlService_GetMotionRevokeGeneration();
 
-            if (generation_before == generation_after && ControlManager_IsEmergencyStop() == 0U
-                && ControlManager_IsFaultStop() == 0U && ControlManager_IsMaintenanceLocked() == 0U)
+            if (generation_before == generation_after && ControlService_IsEmergencyStop() == 0U
+                && ControlService_IsFaultStop() == 0U && ControlService_IsMaintenanceLocked() == 0U)
             {
                 debug_velocity_generation = generation_after;
                 debug_velocity_enabled    = 1U;
@@ -1896,7 +1895,7 @@ static void DebugConsole_HandleLine(char *line)
             else
             {
                 debug_velocity_enabled = 0U;
-                ControlManager_ClearSource(CONTROL_SOURCE_DEBUG);
+                ControlService_ClearSource(CONTROL_SOURCE_DEBUG);
                 LOG_WARN("velocity command crossed a safety transition");
             }
         }
@@ -1908,9 +1907,9 @@ static void DebugConsole_HandleLine(char *line)
     else if (strcmp(line, "stop") == 0)
     {
         debug_velocity_enabled = 0U;
-        ChassisControl_OpenLoopTest(0, 0);
-        ChassisControl_RawInputTest(0, 0, 0, 0);
-        ControlManager_ClearCommand();
+        ChassisService_OpenLoopTest(0, 0);
+        ChassisService_RawInputTest(0, 0, 0, 0);
+        ControlService_ClearCommand();
         LOG_INFO("chassis stopped");
     }
     else if (sscanf(line, "estop %d", &value) == 1)
@@ -1919,12 +1918,12 @@ static void DebugConsole_HandleLine(char *line)
         {
             Usart1DebugConsole_RevokeMaintenanceAuthorization();
         }
-        ControlManager_SetEmergencyStop((value != 0) ? 1U : 0U);
+        ControlService_SetEmergencyStop((value != 0) ? 1U : 0U);
         LOG_INFO("estop %s", (value != 0) ? "set" : "cleared");
     }
     else if (strcmp(line, "clearfault") == 0)
     {
-        SystemMonitor_ClearLatchedFaults(0xFFFFFFFFUL);
+        SafetyService_ClearLatchedFaults(0xFFFFFFFFUL);
         LOG_INFO("fault clear requested");
     }
     else if (strcmp(line, "imutest") == 0)
@@ -2041,17 +2040,17 @@ static void DebugConsole_HandleLine(char *line)
     }
     else if (strcmp(line, "espreset") == 0)
     {
-        Esp12fComm_ResetModule();
+        Esp12fService_ResetModule();
         LOG_INFO("esp12f reset");
     }
     else if (strcmp(line, "espisolate") == 0)
     {
-        Esp12fComm_Isolate();
+        Esp12fService_Isolate();
         LOG_INFO("esp12f isolated until board reset");
     }
     else if (sscanf(line, "espboot %d", &value) == 1)
     {
-        Esp12fComm_SetDownloadMode((value != 0) ? 1U : 0U);
+        Esp12fService_SetDownloadMode((value != 0) ? 1U : 0U);
         LOG_INFO("esp12f %s", (value != 0) ? "download mode" : "normal boot mode");
     }
     else if (strcmp(line, "espflash on") == 0)
@@ -2101,12 +2100,12 @@ static void DebugConsole_HandleLine(char *line)
     }
     else if (strcmp(line, "line on") == 0)
     {
-        LineControl_Enable(1U);
+        LineControlService_Enable(1U);
         LOG_INFO("line tracking enabled");
     }
     else if (strcmp(line, "line off") == 0)
     {
-        LineControl_Enable(0U);
+        LineControlService_Enable(0U);
         LOG_INFO("line tracking disabled");
     }
     else if (strncmp(line, "linecal ", 8U) == 0)
@@ -2120,7 +2119,7 @@ static void DebugConsole_HandleLine(char *line)
             {
                 line_calibration_surface_t surface =
                     (strcmp(action, "floor") == 0) ? LINE_CALIBRATION_SURFACE_FLOOR : LINE_CALIBRATION_SURFACE_LINE;
-                if (LineControl_CalibrationBegin(surface, (uint16_t)samples) != 0U)
+                if (LineControlService_CalibrationBegin(surface, (uint16_t)samples) != 0U)
                 {
                     LOG_INFO("linecal %s collecting %u samples", action, samples);
                 }
@@ -2128,7 +2127,7 @@ static void DebugConsole_HandleLine(char *line)
             else if (strcmp(action, "show") == 0)
             {
                 line_calibration_t calibration;
-                LineControl_CalibrationGet(&calibration);
+                LineControlService_CalibrationGet(&calibration);
                 LOG_INFO("linecal ready=0x%02X collecting=%u surface=%u n=%u/%u fail=0x%02X",
                          calibration.ready_mask,
                          calibration.collecting,
@@ -2162,13 +2161,13 @@ static void DebugConsole_HandleLine(char *line)
             }
             else if (strcmp(action, "apply") == 0)
             {
-                if (ChassisMaintenance_Begin() != CHASSIS_MAINTENANCE_OK)
+                if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
                 {
                     LOG_WARN("linecal apply rejected: chassis not stationary");
                 }
                 else
                 {
-                    if (LineControl_CalibrationApplyToRam() != 0U)
+                    if (LineControlService_CalibrationApplyToRam() != 0U)
                     {
                         LOG_INFO("linecal applied to RAM; run set save to persist");
                     }
@@ -2176,12 +2175,12 @@ static void DebugConsole_HandleLine(char *line)
                     {
                         LOG_WARN("linecal apply rejected: incomplete or low separation");
                     }
-                    ChassisMaintenance_End();
+                    ChassisMaintenanceService_End();
                 }
             }
             else if (strcmp(action, "cancel") == 0)
             {
-                LineControl_CalibrationCancel();
+                LineControlService_CalibrationCancel();
                 LOG_INFO("linecal cancelled");
             }
             else
@@ -2258,7 +2257,7 @@ void Usart1DebugConsole_Init(void)
     rx_len                    = 0U;
     stream_mode               = 0U;
     debug_velocity_enabled    = 0U;
-    debug_velocity_generation = ControlManager_GetMotionRevokeGeneration();
+    debug_velocity_generation = ControlService_GetMotionRevokeGeneration();
     DebugMaintenancePolicy_Init(&maintenance_policy);
     DebugLogPolicy_Init(&log_policy);
     debug_velocity_cmd = (chassis_cmd_t){0};
@@ -2271,7 +2270,7 @@ void Usart1DebugConsole_Init(void)
     Usart1DebugConsole_RestartRx();
     DebugConsole_Write("\r\nF407 V2 chassis firmware\r\n");
     DebugConsole_PrintResetFlags();
-    DebugConsole_PrintResetTrace();
+    DebugConsole_PrintResetTraceService();
     DebugConsole_Write("USART1 debug console ready, type help\r\n");
 }
 
@@ -2319,11 +2318,11 @@ void Usart1DebugConsole_RevokeMaintenanceAuthorization(void)
 {
     DebugMaintenancePolicy_Revoke(&maintenance_policy);
     debug_velocity_enabled = 0U;
-    ChassisControl_CancelTestMode();
-    ControlManager_ClearSource(CONTROL_SOURCE_DEBUG);
+    ChassisService_CancelTestMode();
+    ControlService_ClearSource(CONTROL_SOURCE_DEBUG);
 }
 
-void Task_Usart1DebugConsole(void *argument)
+void DebugConsole_RunTask(void *argument)
 {
     uint32_t last_log_ms = 0U;
 
@@ -2332,8 +2331,8 @@ void Task_Usart1DebugConsole(void *argument)
     {
         uint32_t now_ms = osKernelGetTickCount();
 
-        ResetTrace_TaskHeartbeat(RESET_TRACE_TASK_DEBUG, now_ms);
-        if (ControlManager_IsEmergencyStop() != 0U || ControlManager_IsFaultStop() != 0U)
+        PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_DEBUG, now_ms);
+        if (ControlService_IsEmergencyStop() != 0U || ControlService_IsFaultStop() != 0U)
         {
             Usart1DebugConsole_RevokeMaintenanceAuthorization();
         }
@@ -2341,7 +2340,7 @@ void Task_Usart1DebugConsole(void *argument)
         {
             if (DEBUG_CONSOLE_RELEASE_REQUIRES_ARM != 0U)
             {
-                ChassisControl_CancelTestMode();
+                ChassisService_CancelTestMode();
             }
         }
         if (Esp12fFlashBridge_IsActive() != 0U)
@@ -2352,7 +2351,7 @@ void Task_Usart1DebugConsole(void *argument)
 
         DebugConsole_PollRx();
 
-        if (debug_velocity_enabled != 0U && debug_velocity_generation != ControlManager_GetMotionRevokeGeneration())
+        if (debug_velocity_enabled != 0U && debug_velocity_generation != ControlService_GetMotionRevokeGeneration())
         {
             Usart1DebugConsole_RevokeMaintenanceAuthorization();
             LOG_WARN("velocity command requires a new local command");
@@ -2360,7 +2359,7 @@ void Task_Usart1DebugConsole(void *argument)
         else if (debug_velocity_enabled != 0U)
         {
             debug_velocity_cmd.timestamp_ms = now_ms;
-            if (ControlManager_SetCommandForGeneration(&debug_velocity_cmd, debug_velocity_generation)
+            if (ControlService_SetCommandForGeneration(&debug_velocity_cmd, debug_velocity_generation)
                 != CONTROL_COMMAND_ACCEPTED)
             {
                 debug_velocity_enabled = 0U;

@@ -1,7 +1,7 @@
-#include "esp12f_comm.h"
+#include "esp12f_service.h"
 #include "esp12f_flash_bridge.h"
 #include "line_uart.h"
-#include "upper_uart.h"
+#include "upper_uart_service.h"
 #include "usart1_debug_console.h"
 #include "usart.h"
 
@@ -13,7 +13,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart3)
     {
-        UpperUart_OnDmaFull();
+        UpperUartService_OnDmaFull();
     }
     else if (huart == &huart1)
     {
@@ -21,7 +21,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart2)
     {
-        Esp12fComm_OnRxCplt();
+        Esp12fService_OnRxCplt();
     }
 }
 
@@ -29,7 +29,7 @@ void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart3)
     {
-        UpperUart_OnDmaHalf();
+        UpperUartService_OnDmaHalf();
     }
 }
 
@@ -45,7 +45,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart3)
     {
-        UpperUart_OnTxComplete();
+        UpperUartService_OnTxComplete();
     }
 }
 
@@ -61,11 +61,11 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart2)
     {
-        Esp12fComm_OnUartError();
+        Esp12fService_OnUartError();
     }
     else if (huart == &huart3)
     {
-        UpperUart_OnUartError();
+        UpperUartService_OnUartError();
     }
     else if (huart == &huart4)
     {

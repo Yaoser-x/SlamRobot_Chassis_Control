@@ -79,11 +79,10 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 ### 2.4 当前构建验证
 
 ```
-Debug:   RAM   86576 B / 128 KB (66.05%)
-         FLASH 229180 B / 256 KB (87.43%)
-Release: RAM   86520 B / 128 KB (66.01%)
-         FLASH 147868 B / 256 KB (56.41%)
+Debug:   text 226052 B, data 560 B, bss 86032 B
+Release: text 145996 B, data 528 B, bss 86000 B
 Host 测试 34/34 通过（本地 Ninja/CTest）
+五层架构依赖检查通过
 ```
 
 ---
@@ -103,8 +102,9 @@ Host 测试 34/34 通过（本地 Ninja/CTest）
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
 | Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（34 个 target），通过后输出测试摘要 |
-| 格式检查 | `clang-format --dry-run --Werror` 检查 Git 跟踪的全部 App/BSP/tests C/H 文件 |
-| 静态分析 | `cppcheck --enable=warning --error-exitcode=1` 检查 Git 跟踪的全部 App/BSP/tests C/H 文件 |
+| 架构检查 | `python scripts/check_architecture_dependencies.py` 检查五层 include 方向及 Domain/Service 禁用 API |
+| 格式检查 | `clang-format --dry-run --Werror` 检查五层与 tests 的 C/H 文件 |
+| 静态分析 | `cppcheck --enable=warning --error-exitcode=1` 检查五层与 tests 的 C/H 文件 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
@@ -195,8 +195,8 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 
 - **不修改硬件引脚定义**：业务代码只消费 `Core/Inc/main.h` 和 `.ioc` 中已有标签
 - **不手动修改第三方库**：`Drivers/`（CMSIS + HAL/LL）、`Middlewares/`（FreeRTOS）保持原样
-- **配置集中管理**：所有配置常量放入 `App/chassis/chassis_config.h`，修改参数优先动此文件
-- **业务代码优先放入 `App/` 和 `BSP/`**：不在 CubeMX 生成区外手动修改 `Core/` 文件
+- **配置按职责管理**：控制策略默认值在 `Domain/config/control_config.h`，板级常量在 `BSP/bsp_config.h`，运行时值由 `ParamService` 独占
+- **业务代码按五层放置**：App/Service/Domain/BSP/Platform 单向依赖；生成区 `Core/` 只保留入口与包装
 
 ### 6.2 CubeMX 生成区规则
 
@@ -206,7 +206,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 
 | 文件 | 关注点 |
 | --- | --- |
-| `CMakeLists.txt` | `App/`、`BSP/` 源文件和 include path 是否仍包含 |
+| `CMakeLists.txt` | 五个静态目标的源文件、include 与链接方向是否仍完整 |
 | `Core/Src/freertos.c` | 任务创建代码是否在 USER CODE 区域 |
 | `Core/Inc/main.h` | 引脚宏定义是否变化 |
 | `Core/Src/gpio.c` | GPIO 初始化是否变化 |
@@ -230,7 +230,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | ESP12F 协议 | ✅ 完成 | upper_protocol 帧协议通信 + 烧录透传桥 |
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
-| POST/参数持久化 | ✅ 基础完成 | 上电 POST、ParamStore、Flash 镜像、`get/set/set save/set reset` |
+| POST/参数持久化 | ✅ 基础完成 | 上电 POST、ParamService、Flash 镜像、`get/set/set save/set reset` |
 | ESP12F 网页固件 | 🟡 代码完成 / HIL 待验 | 首配 EEPROM+CRC、owner/heartbeat 租约、只读遥测广播、远程 ESTOP set-only；待 Arduino IDE 编译与多客户板测 |
 | OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 真实链路自检/模块在线状态 |
 | HIL 冒烟 | ✅ 基础完成 | USART1 只读 smoke 脚本，不自动驱动电机 |

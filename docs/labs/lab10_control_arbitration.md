@@ -19,7 +19,7 @@ UPPER (USART3/RPI)  >  PS2 手柄  >  ESP12F (WiFi)  >  LINE (巡线)  >  DEBUG 
 
 ### 2. 仲裁算法
 
-`ControlManager_GetCommand()` 按优先级数组顺序遍历各源命令槽：
+`ControlService_GetCommand()` 按优先级数组顺序遍历各源命令槽：
 
 ```
 for each source in [UPPER, PS2, ESP12F, LINE, DEBUG]:
@@ -43,7 +43,7 @@ return empty_cmd                                   ← 全部未命中 → 停�
 
 ### 4. reject-and-stop 语义
 
-`ControlManager_SetCommand()` 在以下情况拒绝命令：
+`ControlService_SetCommand()` 在以下情况拒绝命令：
 
 | 条件 | 返回值 | 行为 |
 |------|--------|------|
@@ -56,7 +56,7 @@ return empty_cmd                                   ← 全部未命中 → 停�
 
 ### 5. 普通命令的持续刷新
 
-`vel` 命令（DEBUG 源）不会自动持续——`debugTask` 每 10ms 周期调用 `ControlManager_SetCommand()` 重新刷新 timestamp。这就是为什么输入一次 `vel 100` 后底盘持续运动：debugTask 在不断续期。
+`vel` 命令（DEBUG 源）不会自动持续——`debugTask` 每 10ms 周期调用 `ControlService_SetCommand()` 重新刷新 timestamp。这就是为什么输入一次 `vel 100` 后底盘持续运动：debugTask 在不断续期。
 
 ## 实验设备
 

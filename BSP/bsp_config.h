@@ -1,6 +1,8 @@
 #ifndef BSP_CONFIG_H
 #define BSP_CONFIG_H
 
+#include "chassis_layout_config.h"
+
 /**
  * @file bsp_config.h
  * @brief BSP 层硬件配置常量。
@@ -14,7 +16,7 @@ extern "C"
 {
 #endif
 
-#define CHASSIS_MOTOR_COUNT 4U
+#define CHASSIS_MOTOR_COUNT                       4U
 
 /* 电机布局编译期配置。
  *
@@ -34,32 +36,6 @@ extern "C"
  * 安全规则:
  *   左右两侧必须各至少启用一路电机；否则拒绝运动输出。
  */
-#ifndef CHASSIS_M1_ENABLED
-#define CHASSIS_M1_ENABLED 0U
-#endif
-#ifndef CHASSIS_M2_ENABLED
-#define CHASSIS_M2_ENABLED 1U
-#endif
-#ifndef CHASSIS_M3_ENABLED
-#define CHASSIS_M3_ENABLED 1U
-#endif
-#ifndef CHASSIS_M4_ENABLED
-#define CHASSIS_M4_ENABLED 0U
-#endif
-
-#ifndef CHASSIS_M1_SIDE
-#define CHASSIS_M1_SIDE MOTOR_SIDE_LEFT
-#endif
-#ifndef CHASSIS_M2_SIDE
-#define CHASSIS_M2_SIDE MOTOR_SIDE_LEFT
-#endif
-#ifndef CHASSIS_M3_SIDE
-#define CHASSIS_M3_SIDE MOTOR_SIDE_RIGHT
-#endif
-#ifndef CHASSIS_M4_SIDE
-#define CHASSIS_M4_SIDE MOTOR_SIDE_RIGHT
-#endif
-
 /* 方向符号配置。
  *
  * CHASSIS_Mx_MOTOR_DIR:
@@ -68,14 +44,6 @@ extern "C"
  * CHASSIS_Mx_ENCODER_DIR:
  *   1 / -1。编码器速度方向修正。车辆前进时 status 中 mm/s 应为正。
  */
-#define CHASSIS_M1_MOTOR_DIR                      -1
-#define CHASSIS_M2_MOTOR_DIR                      -1
-#define CHASSIS_M3_MOTOR_DIR                      1
-#define CHASSIS_M4_MOTOR_DIR                      1
-#define CHASSIS_M1_ENCODER_DIR                    1
-#define CHASSIS_M2_ENCODER_DIR                    1
-#define CHASSIS_M3_ENCODER_DIR                    -1
-#define CHASSIS_M4_ENCODER_DIR                    -1
 
 /* PWM 输出限制 */
 #define CHASSIS_PWM_MAX_PERMILLE                  900
@@ -100,7 +68,6 @@ extern "C"
 /* 编码器采样时序 */
 #define CHASSIS_MIN_ENCODER_DT_MS                 1U
 #define CHASSIS_MAX_ENCODER_DT_MS                 100U
-#define CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES      5U
 #define CHASSIS_ENCODER_MAX_ABS_MPS               2.5f
 #define CHASSIS_ENCODER_SPIKE_REJECT_MPS          0.45f
 #define CHASSIS_ENCODER_FILTER_MIN_SAMPLES        3U

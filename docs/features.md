@@ -1,10 +1,10 @@
 # F407 V2.0 完整功能清单
 
-> **固件版本：** 1.0.0  
-> **目标平台：** STM32F407VET6 (ARM Cortex-M4F, 168MHz)  
-> **RTOS：** FreeRTOS Kernel V10.3.1 + CMSIS-RTOS2  
-> **构建系统：** CMake 3.22+ / Ninja + GNU Arm Embedded Toolchain  
-> **生成日期：** 2026-07-12  
+> **固件版本：** 1.0.0
+> **目标平台：** STM32F407VET6 (ARM Cortex-M4F, 168MHz)
+> **RTOS：** FreeRTOS Kernel V10.3.1 + CMSIS-RTOS2
+> **构建系统：** CMake 3.22+ / Ninja + GNU Arm Embedded Toolchain
+> **生成日期：** 2026-07-12
 
 ---
 
@@ -80,21 +80,20 @@ firmware/esp12f/        ESP12F Arduino 固件源码
 
 ### 1.3 FreeRTOS 任务模型
 
-共 **11 个任务**，通过 `Core/Src/freertos.c` 的 `MX_FREERTOS_Init()` 创建：
+共 **10 个业务任务**，通过 `Core/Src/freertos.c` 的 `MX_FREERTOS_Init()` 创建：
 
 | # | 任务名 | 入口函数 | 栈大小 | 优先级 | 周期 | 调度方式 | 核心职责 |
 |---|--------|----------|--------|--------|------|----------|----------|
 | 1 | `safetyTask` | `Task_Safety` | 4096B | High (osPriorityHigh) | 20ms | osDelayUntil | 状态聚合、命令超时检测、fault-stop 触发、IWDG 条件喂狗、POST 运行时检查 |
-| 2 | `motorTask` | `Task_MotorControl` | 2048B | AboveNormal (osPriorityAboveNormal) | 10ms | osDelayUntil | 编码器更新、ChassisControl_Step（差速+PID+PWM）、ADC 静止门控 |
+| 2 | `motorTask` | `Task_MotorControl` | 2048B | AboveNormal (osPriorityAboveNormal) | 10ms | osDelayUntil | 编码器更新、ChassisService_Step（差速+PID+PWM）、ADC 静止门控 |
 | 3 | `rpiCommTask` | `Task_RpiComm` | 2048B | Normal (osPriorityNormal) | 5ms | osDelayUntil | USART3 DMA 上位机协议收发（200Hz） |
 | 4 | `imuTask` | `Task_Imu` | 2048B | Normal (osPriorityNormal) | 事件驱动 | osThreadFlagsWait (EXTI0) | BMI270 FIFO/直接采样、Mahony 融合、校准门控、自动校准状态机 |
 | 5 | `ps2Task` | `Task_Ps2` | 2048B | Normal (osPriorityNormal) | 20ms | osDelayUntil | PS2 手柄读取、摇杆归一化、定角宏控制、巡线启停 |
 | 6 | `lineTask` | `Task_Line` | 4096B | BelowNormal (osPriorityBelowNormal) | 5ms | osDelayUntil | UART4 巡线帧解析、PD 控制指令提交（200Hz） |
 | 7 | `espTask` | `Task_Esp12f` | 2048B | BelowNormal (osPriorityBelowNormal) | 5ms | osDelayUntil | ESP12F 协议处理、状态/诊断帧发送、flash bridge 服务（200Hz） |
-| 8 | `debugTask` | `Task_Usart1DebugConsole` | 8192B | BelowNormal (osPriorityBelowNormal) | 10ms | osDelay | USART1 调试命令台、CSV/JSON 日志流（100Hz） |
+| 8 | `debugTask` | `Task_Debug` | 8192B | BelowNormal (osPriorityBelowNormal) | 10ms | osDelay | USART1 调试命令台、CSV/JSON 日志流（100Hz） |
 | 9 | `ledTask` | `Task_Led` | 512B | Low (osPriorityLow) | 50ms | osDelayUntil | 状态 LED 闪烁模式 |
 | 10 | `oledTask` | `Task_Oled` | 1024B | Low (osPriorityLow) | 100ms | osDelayUntil | OLED 三阶段 UI 刷新 |
-| 11 | `defaultTask` | `StartDefaultTask` | 512B | Low (osPriorityLow) | 1ms | osDelay | 空闲保活 |
 
 **FreeRTOS 配置（FreeRTOSConfig.h）：**
 - Tick Rate: 1000Hz
@@ -113,8 +112,8 @@ firmware/esp12f/        ESP12F Arduino 固件源码
 ### 1.4 数据流与控制链
 
 ```
-控制源提交命令 → ControlManager（优先级仲裁 + 独立超时 + reject-and-stop）
-    → ChassisControl_Step（每 10ms，motorTask 驱动）
+控制源提交命令 → ControlService（优先级仲裁 + 独立超时 + reject-and-stop）
+    → ChassisService_Step（每 10ms，motorTask 驱动）
         → ChassisLayout 查表（电机启用/侧别/方向）
         → ChassisMath_ResolveDifferentialTargets（linear_x/angular_z → 左右轮目标速度）
         → 速度斜坡（加速/减速限制 + 方向反转状态机）
@@ -136,9 +135,9 @@ firmware/esp12f/        ESP12F Arduino 固件源码
 | Debug | `-O0 -g3` | STM32F407XX_FLASH.ld | .elf / .hex / .bin / .map |
 | Release | `-Os -g0` | STM32F407XX_FLASH.ld | .elf / .hex / .bin / .map |
 
-**编译器：** `arm-none-eabi-gcc`（newlib-nano, `-u,_printf_float`）  
-**编译标准：** C11 with GNU extensions  
-**告警级别：** `-Wall -Wextra -Wpedantic -Werror`（App/BSP 源码）  
+**编译器：** `arm-none-eabi-gcc`（newlib-nano, `-u,_printf_float`）
+**编译标准：** C11 with GNU extensions
+**告警级别：** `-Wall -Wextra -Wpedantic -Werror`（App/BSP 源码）
 **替代工具链：** 支持 ST ARM Clang（`cmake/starm-clang.cmake`，三种配置：STARM_HYBRID / STARM_NEWLIB / STARM_PICOLIBC）
 
 **编译宏：**
@@ -158,7 +157,7 @@ cmake --preset Release && cmake --build --preset Release
 
 ### 2.1 差速运动学模型
 
-**模块：** `App/chassis/chassis_math.c`  
+**模块：** `App/chassis/chassis_math.c`
 **头文件：** `App/chassis/chassis_math.h`
 
 **核心公式（标准两轮差速）：**
@@ -176,8 +175,8 @@ v_right = linear_x + (angular_z × track_width / 2)
 
 ### 2.2 电机布局系统
 
-**模块：** `BSP/chassis_layout.c`  
-**头文件：** `BSP/chassis_layout.h`  
+**模块：** `BSP/chassis_layout.c`
+**头文件：** `BSP/chassis_layout.h`
 **配置：** `App/chassis/chassis_config.h`
 
 **编译期配置常量（chassis_config.h）：**
@@ -220,7 +219,7 @@ v_right = linear_x + (angular_z × track_width / 2)
 
 ### 2.3 PID 速度闭环
 
-**模块：** `BSP/pid/pid_controller.c`  
+**模块：** `BSP/pid/pid_controller.c`
 **头文件：** `BSP/pid/pid_controller.h`
 
 **四路独立 PID 控制器**（M1-M4），M1-M3 运行完整 PID（Kp/Ki/Kd 非零），M4 默认纯 P。
@@ -265,12 +264,12 @@ typedef struct {
 
 ### 2.4 速度斜坡
 
-**配置（chassis_config.h / param_store_t）：**
+**配置（chassis_config.h / param_model_t）：**
 - `CHASSIS_SPEED_RAMP_MPS2` — 线速度斜坡，默认 0.5 m/s²
 - `CHASSIS_ANGULAR_RAMP_RPS2` — 角速度斜坡，默认 2.0 rad/s²
 - `CHASSIS_OPENLOOP_FULL_MPS` — 开环全速映射，默认 0.5 m/s
 
-**实现（ChassisControl_Step 内部）：**
+**实现（ChassisService_Step 内部）：**
 - 左/右目标速度分别应用对称斜坡（加速/减速同斜率）
 - 斜坡通过当前速度向目标速度渐进逼近，每个控制周期增量 = `ramp_rate × dt_s`
 - 方向反转时：先降到零 → 反转制动 → 相位切换 → 反向加速
@@ -296,7 +295,7 @@ typedef struct {
 
 **状态输出：** 方向、transition 路程、trim、轮速修正、heading error/积分/修正、总修正、限幅与降速状态均进入 `chassis_control_state_t`，由 CSV/JSON 同源输出。
 
-**可调参数（param_store_t）：**
+**可调参数（param_model_t）：**
 - `straight_wheel_coupling_gain` — 轮速耦合增益
 - `straight_heading_kp` — 航向保持 P 增益
 - 四个 `straight_trim_*` — 前进/后退 0.15/0.30m/s 前馈
@@ -306,7 +305,7 @@ typedef struct {
 
 ### 2.6 电机输出逻辑
 
-**模块：** `BSP/motor/motor_output_logic.c`  
+**模块：** `BSP/motor/motor_output_logic.c`
 **头文件：** `BSP/motor/motor_output_logic.h`
 
 **功能：** 将有符号 permille（-900~+900）分解为（绝对值 permille + 方向位）
@@ -324,7 +323,7 @@ MotorOutputLogic_ResolvePhaseEnable(signed_permille)
 
 ### 2.7 电机驱动（DRV8874）
 
-**模块：** `BSP/motor/motor_driver.c`  
+**模块：** `BSP/motor/motor_driver.c`
 **头文件：** `BSP/motor/motor_driver.h`
 
 **硬件接口：**
@@ -384,10 +383,10 @@ IDLE_BRAKE → RAMP_DOWN → REVERSE_BRAKE → PH_SETTLE → RAMP_UP → RUN
 - `break_origin` — Break 来源（BKIN / 软件 / 未知）
 - `fault_edge_count[4]` / `fault_last_change_ms[4]` — nFAULT 边沿计数与时间戳
 
-### 2.8 ChassisControl 主控制循环
+### 2.8 ChassisService 主控制循环
 
-**模块：** `App/chassis/chassis_control.c`（~1043 行）  
-**头文件：** `App/chassis/chassis_control.h`
+**模块：** `Service/chassis/chassis_service.c`（~1043 行）
+**头文件：** `Service/chassis/chassis_service.h`
 
 **数据结构：**
 ```c
@@ -430,17 +429,17 @@ typedef struct {
 } chassis_control_state_t;
 ```
 
-**ChassisControl_Step(now_ms) 每 10ms 执行流程：**
+**ChassisService_Step(now_ms) 每 10ms 执行流程：**
 
 1. **重入防护：** 设置 `control_step_active` 标记，防止维护锁期间重入
-2. **刷新参数：** 检测 `ParamStore` generation 变化，热重载 PID 参数
+2. **刷新参数：** 检测 `ParamService` generation 变化，热重载 PID 参数
 3. **故障更新：** 读取 `MotorDriver_UpdateFaults()` 检查 nFAULT / Break
 4. **编码器更新：** 读取 `EncoderDriver_Update()` 获取各轮速度
 5. **安全检查：**
    - 维护锁激活 → 清除输出，等待解锁
    - ESTOP/Fault-Stop → 紧急停止
 6. **测试模式：** 处理开环/raw 指令（需维护锁授权，400ms 租约）
-7. **获取命令：** `ControlManager_GetCommand()` → 最高优先级活跃命令
+7. **获取命令：** `ControlService_GetCommand()` → 最高优先级活跃命令
 8. **差速分解：** `ChassisMath_ResolveDifferentialTargets()` → 左右目标速度
 9. **速度斜坡：** 带方向感知的增量斜坡（加速/减速同斜率）
 10. **直行补偿：** `StraightController_Step()` 注入方向 trim、轮速与 gyro PI 修正
@@ -460,23 +459,23 @@ typedef struct {
 | `CHASSIS_FEEDBACK_LOSS_DEBOUNCE_CYCLES` | 50 | 反馈丢失去抖周期数 |
 
 **函数：**
-- `ChassisControl_Init()` — 初始化全部子模块
-- `ChassisControl_Step(now_ms)` — 主控制循环
-- `ChassisControl_EmergencyStop()` — 紧急停止（复位 PID、取消测试模式、低侧制动）
-- `ChassisControl_OpenLoopTest(left_permille, right_permille)` — 侧开环测试（400ms 租约）
-- `ChassisControl_RawInputTest(lf, lr, rf, rr)` — 侧 raw 信号测试
-- `ChassisControl_RawMotorInputTest(motor, fwd, rev)` — 单电机 raw 测试
-- `ChassisControl_CancelTestMode()` — ISR 安全取消测试
-- `ChassisControl_ResolveSideTargets(linear_x, angular_z, *left, *right)` — 公开的差速分解
-- `ChassisControl_GetState(*state)` — 线程安全状态快照
-- `ChassisControl_IsStepActive()` — 重入检查（供维护锁使用）
+- `ChassisService_Init()` — 初始化全部子模块
+- `ChassisService_Step(now_ms)` — 主控制循环
+- `ChassisService_EmergencyStop()` — 紧急停止（复位 PID、取消测试模式、低侧制动）
+- `ChassisService_OpenLoopTest(left_permille, right_permille)` — 侧开环测试（400ms 租约）
+- `ChassisService_RawInputTest(lf, lr, rf, rr)` — 侧 raw 信号测试
+- `ChassisService_RawMotorInputTest(motor, fwd, rev)` — 单电机 raw 测试
+- `ChassisService_CancelTestMode()` — ISR 安全取消测试
+- `ChassisService_ResolveSideTargets(linear_x, angular_z, *left, *right)` — 公开的差速分解
+- `ChassisService_GetState(*state)` — 线程安全状态快照
+- `ChassisService_IsStepActive()` — 重入检查（供维护锁使用）
 
 ### 2.9 任务入口与初始化
 
-**模块：** `App/chassis/chassis_tasks.c`  
-**头文件：** `App/chassis/chassis_tasks.h`
+**模块：** `App/tasks/`
+**头文件：** `App/tasks/app_tasks.h`
 
-**ChassisTasks_InitHardware() 初始化序列（37 步）：**
+**App_InitHardware() 初始化序列（37 步）：**
 1. 捕获复位原因（ResetReason）
 2. 复位任务计时系统
 3. 从 Flash 加载持久化参数
@@ -487,8 +486,8 @@ typedef struct {
 8. 初始化 IMU 校准门控
 9. 应用已保存的 IMU 校准数据
 10. 初始化 LED
-11. 初始化 SystemMonitor
-12. 初始化 ChassisControl（含 PID、ControlManager、CurrentGuard）
+11. 初始化 SafetyService
+12. 初始化 ChassisService（含 PID、ControlService、CurrentGuard）
 13. 初始化 UpperUart（USART3 DMA RX）
 14. 初始化 LineUart（USART4 DMA RX）
 15. 初始化 LineControl
@@ -502,7 +501,7 @@ typedef struct {
 
 ### 2.10 任务计时与心跳
 
-**模块：** `App/chassis/chassis_task_timing.c`  
+**模块：** `App/chassis/chassis_task_timing.c`
 **头文件：** `App/chassis/chassis_task_timing.h`
 
 **每个任务的心跳与超时追踪：**
@@ -538,20 +537,20 @@ typedef enum {
 
 ### 2.11 维护锁
 
-**模块：** `App/chassis/chassis_maintenance.c`  
+**模块：** `App/chassis/chassis_maintenance.c`
 **头文件：** `App/chassis/chassis_maintenance.h`
 
 **目的：** 确保在参数修改/保存/校准操作前底盘完全静止，操作期间禁止任何运动命令。
 
 **函数：**
 - `ChassisMaintenance_Begin()` — 获取维护锁：
-  1. 调用 `ControlManager_BeginMaintenance()`（禁止所有新命令，释放旧命令）
-  2. 检查 `ChassisControl_IsStepActive()` 为假（不在控制步中间）
+  1. 调用 `ControlService_BeginMaintenance()`（禁止所有新命令，释放旧命令）
+  2. 检查 `ChassisService_IsStepActive()` 为假（不在控制步中间）
   3. 取消测试模式
   4. 执行紧急停止
   5. 验证所有电机 PWM=0 且速度 < 阈值
   6. 返回 `OK` / `BUSY` / `NOT_STATIONARY`
-- `ChassisMaintenance_End()` — 释放维护锁（`ControlManager_EndMaintenance()`），恢复命令接收
+- `ChassisMaintenance_End()` — 释放维护锁（`ControlService_EndMaintenance()`），恢复命令接收
 
 **使用场景：**
 - `set save` / `set reset` 参数持久化
@@ -565,8 +564,8 @@ typedef enum {
 
 ### 3.1 五级优先级仲裁
 
-**模块：** `App/control/control_manager.c`  
-**头文件：** `App/control/control_manager.h`
+**模块：** `Service/control/control_service.c`
+**头文件：** `Service/control/control_service.h`
 
 **命令结构：**
 ```c
@@ -624,38 +623,38 @@ typedef enum {
 - 运动学参数无效（`wheel_radius_m ≤ 0` 或 `track_width_m ≤ 0`）
 
 **命令提交 API：**
-- `ControlManager_SetCommand(*cmd)` → `ACCEPTED / REJECTED / REJECTED_AND_STOPPED`
-- `ControlManager_SetCommandForGeneration(*cmd, gen)` — 带 generation 校验的命令提交（防止竞态）
-- `ControlManager_GetCommand(*cmd, now_ms)` — 获取当前最高优先级活跃命令
-- `ControlManager_ClearCommand()` — 清除所有命令
-- `ControlManager_ClearSource(source)` — 清除特定源
+- `ControlService_SetCommand(*cmd)` → `ACCEPTED / REJECTED / REJECTED_AND_STOPPED`
+- `ControlService_SetCommandForGeneration(*cmd, gen)` — 带 generation 校验的命令提交（防止竞态）
+- `ControlService_GetCommand(*cmd, now_ms)` — 获取当前最高优先级活跃命令
+- `ControlService_ClearCommand()` — 清除所有命令
+- `ControlService_ClearSource(source)` — 清除特定源
 
 **安全状态 API：**
-- `ControlManager_SetEmergencyStop(enabled)` — 设置/清除 ESTOP（清除所有命令）
-- `ControlManager_SetFaultStop(enabled)` — 设置/清除 Fault-Stop（清除所有命令）
-- `ControlManager_BeginMaintenance()` — 进入维护模式（清除命令 + 递增 revoke generation）
-- `ControlManager_EndMaintenance()` — 退出维护模式
-- `ControlManager_IsEmergencyStop()` / `ControlManager_IsFaultStop()` / `ControlManager_IsMaintenanceLocked()`
-- `ControlManager_GetMotionRevokeGeneration()` — 获取当前 generation（用于命令合法性校验）
-- `ControlManager_GetActiveSource()` — 返回当前活跃的控制源
+- `ControlService_SetEmergencyStop(enabled)` — 设置/清除 ESTOP（清除所有命令）
+- `ControlService_SetFaultStop(enabled)` — 设置/清除 Fault-Stop（清除所有命令）
+- `ControlService_BeginMaintenance()` — 进入维护模式（清除命令 + 递增 revoke generation）
+- `ControlService_EndMaintenance()` — 退出维护模式
+- `ControlService_IsEmergencyStop()` / `ControlService_IsFaultStop()` / `ControlService_IsMaintenanceLocked()`
+- `ControlService_GetMotionRevokeGeneration()` — 获取当前 generation（用于命令合法性校验）
+- `ControlService_GetActiveSource()` — 返回当前活跃的控制源
 
 ### 3.3 紧急停止与故障停止
 
 **ESTOP：**
 - 由 `estop 1` 调试命令、上位机 ESTOP 帧、ESP12F 远程 ESTOP 触发
 - 只能软件置位（`estop 1`），不可由 ESP 远程清除
-- 触发后：所有命令被清除、ChassisControl 执行紧急停止
+- 触发后：所有命令被清除、ChassisService 执行紧急停止
 - 清除：`estop 0` 调试命令
 
 **Fault-Stop：**
-- 由 SystemMonitor 自动触发（过流、DRV_FAULT、TIM_BREAK、编码器反馈丢失、电池临界）
+- 由 SafetyService 自动触发（过流、DRV_FAULT、TIM_BREAK、编码器反馈丢失、电池临界）
 - 与 ESTOP 独立，但效果相同（清除所有命令、紧急停止）
 - 需 `clearfault` 命令手动清除（需故障源已消失）
 
 ### 3.4 PS2 手柄控制
 
-**模块：** `App/control/ps2_control.c`（~447 行）  
-**头文件：** `App/control/ps2_control.h`  
+**模块：** `Service/control/ps2_control_service.c`（~447 行）
+**头文件：** `Service/control/ps2_control_service.h`
 **硬件驱动：** `BSP/ps2/ps2_hw.c`
 
 **数据结构：**
@@ -731,7 +730,7 @@ typedef struct {
 
 ### 3.5 相对航向控制（陀螺积分闭环）
 
-**模块：** `App/control/relative_yaw_control.c`  
+**模块：** `App/control/relative_yaw_control.c`
 **头文件：** `App/control/relative_yaw_control.h`
 
 **核心思路：** 不用 Mahony yaw（因 360° 测试中丢失约 40%），改用陀螺 Z 轴角速度直接积分，误差 <1%。
@@ -776,8 +775,8 @@ typedef struct {
 
 ### 3.6 巡线控制（PD）
 
-**模块：** `App/control/line_control.c`（~275 行）  
-**头文件：** `App/control/line_control.h`
+**模块：** `Service/control/line_control_service.c`（~275 行）
+**头文件：** `Service/control/line_control_service.h`
 
 **算法：**
 1. 读取 8 路传感器模拟量（通过 `line_threshold_raw[]` 和 `line_active_low` 做阈值判定）
@@ -794,11 +793,11 @@ typedef struct {
   1. 检查安全条件/revoke generation（维护锁后旧 LINE enable 不恢复）
   2. 验证传感器数据新鲜度（50ms 超时）
   3. 执行加权平均 + PD + 去抖 + 自适应降速
-  4. 通过 `ControlManager_SetCommandForGeneration` 提交
+  4. 通过 `ControlService_SetCommandForGeneration` 提交
 - `LineControl_Enable(enable)` — 启用/停用（带 generation 捕获）
 - `LineControl_IsEnabled()` / `LineControl_GetState(*state)` — 状态查询
 
-**可调参数（param_store_t）：**
+**可调参数（param_model_t）：**
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -821,7 +820,7 @@ typedef struct {
 
 ### 3.7 巡线双表面自动标定
 
-**模块：** `App/control/line_calibration.c`  
+**模块：** `App/control/line_calibration.c`
 **头文件：** `App/control/line_calibration.h`
 
 **流程：**
@@ -855,7 +854,7 @@ typedef struct {
 
 ### 4.1 编码器系统
 
-**模块：** `BSP/encoder/encoder_driver.c` + `BSP/encoder/encoder_math.c`  
+**模块：** `BSP/encoder/encoder_driver.c` + `BSP/encoder/encoder_math.c`
 **头文件：** `BSP/encoder/encoder_driver.h` + `BSP/encoder/encoder_math.h`
 
 **硬件配置：**
@@ -926,7 +925,7 @@ typedef struct {
 
 ### 4.2 ADC 电流与电压采样
 
-**模块：** `BSP/adc/adc_monitor.c`  
+**模块：** `BSP/adc/adc_monitor.c`
 **头文件：** `BSP/adc/adc_monitor.h`
 
 **硬件配置：**
@@ -1129,7 +1128,7 @@ typedef struct {
 
 ### 4.4 IMU 自动校准门控
 
-**模块：** `App/imu/imu_calibration_gate.c`  
+**模块：** `App/imu/imu_calibration_gate.c`
 **头文件：** `App/imu/imu_calibration_gate.h`
 
 **目的：** 自动检测底盘静止状态，触发后台陀螺零偏校准。
@@ -1160,7 +1159,7 @@ typedef struct {
 
 ### 4.5 巡线传感器
 
-**模块：** `BSP/line/line_uart.c`  
+**模块：** `BSP/line/line_uart.c`
 **头文件：** `BSP/line/line_uart.h`
 
 **硬件：** HiWonder 八通道红外巡线模块，USART4 + DMA 循环缓冲（128 字节）
@@ -1212,14 +1211,14 @@ typedef struct {
 
 ### 4.6 电池电压监测
 
-**模块：** 集成在 `BSP/adc/adc_monitor.c` 和 `App/monitor/system_monitor.c` 中
+**模块：** 集成在 `BSP/adc/adc_monitor.c` 和 `Service/safety/safety_service.c` 中
 
 **采样：**
 - ADC1 通道（VBAT_SENSE, PC4）
 - 电阻分压比配置在 `bsp_config.h`
 - EMA 低通滤波
 
-**3S 锂电池欠压状态机（system_monitor.c）：**
+**3S 锂电池欠压状态机（safety_service.c）：**
 
 | 阈值 | 值 | 行为 |
 |------|-----|------|
@@ -1236,7 +1235,7 @@ typedef struct {
 
 ### 5.1 Upper Protocol V2
 
-**模块：** `App/protocol/upper_protocol.c`  
+**模块：** `App/protocol/upper_protocol.c`
 **头文件：** `App/protocol/upper_protocol.h`
 
 **帧格式：**
@@ -1294,8 +1293,8 @@ typedef struct {
 
 ### 5.2 USART3 上位机链路
 
-**模块：** `App/protocol/upper_uart.c`  
-**头文件：** `App/protocol/upper_uart.h`
+**模块：** `Service/communication/upper_uart_service.c`
+**头文件：** `Service/communication/upper_uart_service.h`
 
 **硬件：** USART3 (PD8/PD9)，DMA 循环接收（128 字节环缓冲）
 
@@ -1325,15 +1324,15 @@ WAIT_HEAD0 → WAIT_HEAD1 → WAIT_LEN → WAIT_BODY → 帧完成 → CRC 校�
 - `last_valid_frame_ms` — 最近有效帧时间（供 OLED 在线检测）
 
 **关键函数：**
-- `UpperUart_Init()` — 配置 DMA RX，重置解析状态
-- `UpperUart_Update()` — 主循环（200Hz）：轮询 DMA 环缓冲、驱动 RX 状态机、发送周期帧
-- `UpperUart_HandleFrame(cmd, *payload, len)` — 帧分发：SET_VELOCITY→ControlManager, ESTOP, LINE_CTRL, CLEAR_FAULT
-- `UpperUart_OnDmaHalf()` / `_OnDmaFull()` / `_OnTxComplete()` / `_OnUartError()` — HAL 回调
+- `UpperUartService_Init()` — 配置 DMA RX，重置解析状态
+- `UpperUartService_Update()` — 主循环（200Hz）：轮询 DMA 环缓冲、驱动 RX 状态机、发送周期帧
+- `UpperUartService_HandleFrame(cmd, *payload, len)` — 帧分发：SET_VELOCITY→ControlService, ESTOP, LINE_CTRL, CLEAR_FAULT
+- `UpperUartService_OnDmaHalf()` / `_OnDmaFull()` / `_OnTxComplete()` / `_OnUartError()` — HAL 回调
 
 ### 5.3 ESP12F WiFi 通信
 
-**模块：** `App/protocol/esp12f_comm.c`  
-**头文件：** `App/protocol/esp12f_comm.h`
+**模块：** `Service/communication/esp12f_service.c`
+**头文件：** `Service/communication/esp12f_service.h`
 
 **硬件：** USART2 (PD5/PD6)，中断驱动环缓冲接收
 
@@ -1353,18 +1352,18 @@ typedef struct {
 ```
 
 **关键函数：**
-- `Esp12fComm_Init()` — 初始化环缓冲，启动 RX
-- `Esp12fComm_Update()` — 200Hz 主循环：跳过隔离/flash bridge 状态，帧间超时检测（100ms），轮询 RX 环，发送周期状态（100ms）和诊断（200ms）
-- `Esp12fComm_HandleFrame(cmd, *payload, len)` — 同 Upper 分发：SET_VELOCITY(source=ESP12F), ESTOP, LINE_CTRL, CLEAR_FAULT
-- `Esp12fComm_OnRxCplt()` — ISR 环缓冲入队
-- `Esp12fComm_ResetModule()` — GPIO 复位 ESP（5ms RST 脉冲）
-- `Esp12fComm_Isolate()` — 全隔离：禁用 USART2 IRQ/DMA，中止 UART，保持 ESP 复位
-- `Esp12fComm_SetDownloadMode(enabled)` — 控制 ESP IO0（烧录模式）
-- `Esp12fComm_GetState(*state)` — 诊断快照
+- `Esp12fService_Init()` — 初始化环缓冲，启动 RX
+- `Esp12fService_Update()` — 200Hz 主循环：跳过隔离/flash bridge 状态，帧间超时检测（100ms），轮询 RX 环，发送周期状态（100ms）和诊断（200ms）
+- `Esp12fService_HandleFrame(cmd, *payload, len)` — 同 Upper 分发：SET_VELOCITY(source=ESP12F), ESTOP, LINE_CTRL, CLEAR_FAULT
+- `Esp12fService_OnRxCplt()` — ISR 环缓冲入队
+- `Esp12fService_ResetModule()` — GPIO 复位 ESP（5ms RST 脉冲）
+- `Esp12fService_Isolate()` — 全隔离：禁用 USART2 IRQ/DMA，中止 UART，保持 ESP 复位
+- `Esp12fService_SetDownloadMode(enabled)` — 控制 ESP IO0（烧录模式）
+- `Esp12fService_GetState(*state)` — 诊断快照
 
 ### 5.4 ESP12F 通信透传桥
 
-**模块：** `BSP/esp12f/esp12f_flash_bridge.c`  
+**模块：** `BSP/esp12f/esp12f_flash_bridge.c`
 **头文件：** `BSP/esp12f/esp12f_flash_bridge.h`
 
 **功能：** PC ↔ ESP8266 双向 UART 透传，用于固件烧录。
@@ -1374,8 +1373,8 @@ typedef struct {
 PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 ```
 
-**双缓冲：** `pc_to_esp_ring[4096]` + `esp_to_pc_ring[4096]`  
-**TX 分块：** 128 字节/次  
+**双缓冲：** `pc_to_esp_ring[4096]` + `esp_to_pc_ring[4096]`
+**TX 分块：** 128 字节/次
 **空闲自动退出：** 30 秒无活动自动退出 bridge 模式
 
 **ESP 启动模式控制：**
@@ -1482,8 +1481,8 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 6.1 系统错误体系
 
-**模块：** `App/monitor/system_monitor.c`  
-**头文件：** `App/monitor/system_monitor.h`
+**模块：** `Service/safety/safety_service.c`
+**头文件：** `Service/safety/safety_service.h`
 
 **19 个错误位定义：**
 
@@ -1512,11 +1511,11 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 - `clearfault` 条件清除：过流需电流 < 故障阈值、DRV_FAULT 需 nFAULT 已释放、TIM_BREAK 需 break latch 已清除、编码器反馈丢失需所有启用的编码器有效
 - `BATTERY_CRITICAL` 不可手动清除（仅电压恢复后自动清除）
 
-### 6.2 SystemMonitor 健康聚合
+### 6.2 SafetyService 健康聚合
 
-**模块：** `App/monitor/system_monitor.c`（~537 行）
+**模块：** `Service/safety/safety_service.c`（~537 行）
 
-**SystemMonitor_Update() 每 20ms（safetyTask）执行流程：**
+**SafetyService_Update() 每 20ms（safetyTask）执行流程：**
 
 1. **任务超时更新：** 调用 ChassisTaskTiming_UpdateTimeouts，获取 task_timeout_mask
 2. **ADC 更新：** AdcMonitor_Update() → 电流/电压/有效性标志
@@ -1531,14 +1530,14 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
    - > 9.6V 连续 2s → 自动清除临界故障（不清除其他锁存）
 6. **编码器有效性：** 检查 speed_valid_all
 7. **TIM Break 锁存：** 检测 MotorDriver 的 break_latched 标志
-8. **错误锁存与 Fault-Stop 触发：** 新故障出现时锁存并调用 ControlManager_SetFaultStop
+8. **错误锁存与 Fault-Stop 触发：** 新故障出现时锁存并调用 ControlService_SetFaultStop
 
 ### 6.3 CurrentGuard 三层电流保护
 
-**模块：** `App/current/current_guard.c`  
+**模块：** `App/current/current_guard.c`
 **头文件：** `App/current/current_guard.h`
 
-独立于 SystemMonitor 的实时电流保护层（在 ChassisControl_Step 的 PID 输出后、PWM 输出前执行）。
+独立于 SafetyService 的实时电流保护层（在 ChassisService_Step 的 PID 输出后、PWM 输出前执行）。
 
 **三层架构：**
 
@@ -1546,7 +1545,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 |------|---------|------|
 | **Observe** | `current_observe_a[]` | 仅记录超限计数，不影响输出 |
 | **Soft-Limit** | `current_soft_limit_a[]` | PWM 等比缩放：`output × (soft_limit / measured)` |
-| **Fault-Latch** | `current_fault_a[]` + `current_fault_debounce_ms` | 去抖后锁存故障（由 SystemMonitor 触发 Fault-Stop） |
+| **Fault-Latch** | `current_fault_a[]` + `current_fault_debounce_ms` | 去抖后锁存故障（由 SafetyService 触发 Fault-Stop） |
 
 **编译开关：**
 - `MOTOR_CURRENT_GUARD_OBSERVE_ONLY` — 设为 1 时仅观察不保护（dry-run 模式）
@@ -1601,7 +1600,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 6.7 Reset Trace v4 崩溃追踪
 
-**模块：** `App/debug/reset_trace.c`  
+**模块：** `Platform/platform_reset_trace.c`
 **存储：** `.noinit.reset_trace` 段（44 字结构体，不随复位清零），checksum 保护
 
 **追踪类型：** NONE / NMI / HARDFAULT / MEMMANAGE / BUSFAULT / USAGEFAULT / ERROR_HANDLER / FREERTOS / DMA_GUARD
@@ -1619,7 +1618,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 6.8 调试命令台
 
-**模块：** `App/debug/usart1_debug_console.c`（~2171 行，最大单文件）  
+**模块：** `App/debug/usart1_debug_console.c`（~2171 行，最大单文件）
 **硬件：** USART1 (PB6/PB7)，中断驱动环缓冲
 
 **50+ 命令完整清单：**
@@ -1684,7 +1683,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 7.1 SSD1306 OLED 驱动
 
-**模块：** `BSP/oled/ssd1306.c`  
+**模块：** `BSP/oled/ssd1306.c`
 **硬件：** I2C1，地址 0x3C，128×64 单色
 
 **帧缓冲：** 8 页 × 128 字节 = 1024 字节，脏页追踪（只刷新变更页）
@@ -1702,7 +1701,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 7.2 OLED 三阶段 UI
 
-**模块：** `App/display/oled_ui.c`（~648 行）  
+**模块：** `App/display/oled_ui.c`（~648 行）
 **状态机：** `WELCOME(5s) → SELFCHECK(8项×600ms) → NORMAL`
 
 **自检项（8 项）：**
@@ -1737,7 +1736,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 7.4 LED 状态指示
 
-**模块：** `BSP/led/led_status.c`  
+**模块：** `BSP/led/led_status.c`
 **硬件：** TEST_LED (PE6)
 
 **5 种闪烁模式：**
@@ -1754,9 +1753,9 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ## 八、参数与持久化
 
-### 8.1 运行时参数存储（ParamStore）
+### 8.1 运行时参数存储（ParamService）
 
-**模块：** `App/param/param_store.c`（~313 行）
+**模块：** `Service/param/param_service.c`（~313 行）
 
 **核心数据结构（50+ 字段）：**
 
@@ -1792,13 +1791,13 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | IMU | `imu_gyro_bias_dps[3]` | 0.0 |
 | ADC | `current_zero_raw[4]` | 运行时 |
 
-**Generation 追踪：** 32 位单调递增计数器，每次 Set/SetDefaults 递增。ChassisControl 通过 GetSnapshot 检测变化后热重载 PID 参数。
+**Generation 追踪：** 32 位单调递增计数器，每次 Set/SetDefaults 递增。ChassisService 通过 GetSnapshot 检测变化后热重载 PID 参数。
 
 **可绑定命名参数（get/set 命令用）：** 原有参数外，新增四个 `straight_trim_*`、`straight_heading_ki`、`straight_heading_integral_limit_deg_s` 与 `straight_max_speed_mps`。
 
 ### 8.2 Flash 参数持久化
 
-**模块：** `BSP/flash/flash_param.c`  
+**模块：** `BSP/flash/flash_param.c`
 **硬件：** STM32F407 内部 Flash，Sector 6 (0x08040000) + Sector 7 (0x08060000)，各 128KB
 
 **A/B 双区交替写入：** 每次保存写到与当前有效区不同的区。加载时选 sequence 号更大且 CRC32 校验通过的区。双区均损坏时退化为默认值。
@@ -1806,7 +1805,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 **镜像格式（Schema V4）：**
 ```
 [MAGIC: 0x464B3037 (4B)] [SCHEMA_VERSION: 4 (4B)] [SEQUENCE (4B)]
-[PAYLOAD_SIZE (4B)] [param_store_t + imu_bmi270_calibration_t]
+[PAYLOAD_SIZE (4B)] [param_model_t + imu_bmi270_calibration_t]
 [CRC32 (4B)] [COMMIT_MARKER: 0xC01117ED (4B)]
 ```
 
@@ -1837,8 +1836,8 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | 11 | `line_calibration` | 双表面标定：采集、均值、分离度、active_low |
 | 12 | `upper_uart` | USART3 协议解析、超时重置、CRC 错误 |
 | 13 | `motor_driver_gpio` | 电机驱动 GPIO 输出逻辑 |
-| 14 | `system_monitor` | 电池/电流/DRV/任务超时聚合、去抖、fault-stop |
-| 15 | `system_monitor_fault_enabled` | 过流 fault 全链路（fault 使能编译开关） |
+| 14 | `safety_service` | 电池/电流/DRV/任务超时聚合、去抖、fault-stop |
+| 15 | `safety_service_fault_enabled` | 过流 fault 全链路（fault 使能编译开关） |
 | 16 | `current_guard` | CurrentGuard observe 模式 |
 | 17 | `current_guard_soft_limit` | CurrentGuard soft-limit 等比缩放 |
 | 18 | `chassis_control_current_limit` | 电流限制与底盘控制集成 |
@@ -1850,7 +1849,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | 24 | `ps2_control` | PS2 中位让权、定角宏、IMU 门控、手动打断 |
 | 25 | `oled_ssd1306` | SSD1306 OLED 驱动 |
 | 26 | `imu_pipeline` | IMU 校准门控、FIFO 解析、Mahony 融合、坐标映射 |
-| 27 | `param_store` | ParamStore 读写、校验、默认值、generation |
+| 27 | `param_service` | ParamService 读写、校验、默认值、generation |
 | 28 | `encoder_driver` | Encoder 短临界区发布、运行时轮径 |
 | 29 | `flash_param` | Flash A/B 双区、CRC、schema 迁移、legacy 兼容 |
 | 30 | `power_on_self_test` | POST 快照评估、运行时就绪、超时 |
@@ -1900,10 +1899,10 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 10.2 构建目标总览
 
-**预设：** Debug (`-O0 -g3`) / Release (`-Os -g0`)  
-**编译器：** `arm-none-eabi-gcc` (newlib-nano, `-u,_printf_float`)  
-**编译标准：** C11 with GNU extensions  
-**告警：** `-Wall -Wextra -Wpedantic -Werror`  
+**预设：** Debug (`-O0 -g3`) / Release (`-Os -g0`)
+**编译器：** `arm-none-eabi-gcc` (newlib-nano, `-u,_printf_float`)
+**编译标准：** C11 with GNU extensions
+**告警：** `-Wall -Wextra -Wpedantic -Werror`
 **替代工具链：** ST ARM Clang（cmake/starm-clang.cmake, 三种配置）
 
 **子库：** stm32cubemx (INTERFACE) / STM32_Drivers (OBJECT) / FreeRTOS (OBJECT)
@@ -1912,9 +1911,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 10.3 源码清单
 
-**App/ 层（28 个 .c）：** chassis_control(1043行), chassis_tasks(350行), control_manager(327行), system_monitor(537行), usart1_debug_console(2171行), oled_ui(648行), upper_uart(684行), upper_protocol(327行), esp12f_comm(414行), ps2_control(447行), reset_trace(322行), param_store(313行), 等
-
-**BSP/ 层（19 个 .c）：** motor_driver, encoder_driver, encoder_math, adc_monitor, imu_bmi270（+6 子模块）, line_uart, ssd1306, flash_param, pid_controller, ps2_hw, esp12f_flash_bridge, chassis_layout, led_status, motor_output_logic
+**五层源码：** App 仅保留初始化、十任务、ISR、UI/调试适配；Service 持有 chassis/control/safety/param/communication；Domain 持有纯算法和值类型；BSP 持有设备与 transport；Platform 持有 RTOS/Cortex-M 系统能力。详见 `docs/architecture.md`。
 
 **固件：** firmware/esp12f/F407_ESP12F.ino（~620 行 Web 控制页面）
 
@@ -1923,11 +1920,11 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 ## 附录 A：底盘控制全流程详解
 
 ```
-1. motorTask 每 10ms 调用 ChassisControl_Step(now_ms)
+1. motorTask 每 10ms 调用 ChassisService_Step(now_ms)
 
 2. 重入防护：设置 control_step_active=true，防止维护锁期间重入
 
-3. ParamStore 热重载：检测 generation 变化，更新 PID 参数
+3. ParamService 热重载：检测 generation 变化，更新 PID 参数
 
 4. 故障检查：MotorDriver_UpdateFaults() → nFAULT / Break 状态
 
@@ -1935,10 +1932,10 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 6. 安全检查：
    ├── 维护锁激活 → 清零输出，跳过控制
-   ├── ESTOP/Fault-Stop → ChassisControl_EmergencyStop()
+   ├── ESTOP/Fault-Stop → ChassisService_EmergencyStop()
    └── 测试模式：检查维护授权 + 400ms 租约
 
-7. 获取命令：ControlManager_GetCommand() → 最高优先级活跃命令
+7. 获取命令：ControlService_GetCommand() → 最高优先级活跃命令
 
 8. 差速分解：ChassisMath_ResolveDifferentialTargets(lx, az, track, &left, &right)
 
@@ -1974,14 +1971,14 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 ## 附录 B：控制源切换时序
 
 ```
-1. PS2 摇杆推前 0.3m/s → ControlManager_SetCommandForGeneration(PS2, ...)
-2. ControlManager_GetCommand() → PS2 活跃，返回 0.3m/s
-3. 上位机发送 0.2m/s → ControlManager_SetCommand(UPPER, ...)
-4. ControlManager_GetCommand() → UPPER 优先级更高，返回 0.2m/s
+1. PS2 摇杆推前 0.3m/s → ControlService_SetCommandForGeneration(PS2, ...)
+2. ControlService_GetCommand() → PS2 活跃，返回 0.3m/s
+3. 上位机发送 0.2m/s → ControlService_SetCommand(UPPER, ...)
+4. ControlService_GetCommand() → UPPER 优先级更高，返回 0.2m/s
 5. 上位机停止发送 → 200ms 后 UPPER 超时
-6. ControlManager_GetCommand() → 回退到 PS2，返回 0.3m/s
+6. ControlService_GetCommand() → 回退到 PS2，返回 0.3m/s
 7. PS2 掉线 → 500ms 后 PS2 超时
-8. ControlManager_GetCommand() → NONE（速度全零，底盘停止）
+8. ControlService_GetCommand() → NONE（速度全零，底盘停止）
 
 安全插入：
 1. 运行中触发 ESTOP → 所有命令清除 → 紧急停止
@@ -2088,6 +2085,6 @@ Mahony AHRS：
 
 ---
 
-> **文档版本：** 1.0  
-> **覆盖范围：** F407 V2.0 全部 50+ 功能模块、11 个 FreeRTOS 任务、35+ 子系统、34 个 Host 测试 target  
+> **文档版本：** 1.0
+> **覆盖范围：** F407 V2.0 全部 50+ 功能模块、11 个 FreeRTOS 任务、35+ 子系统、34 个 Host 测试 target
 > **最后更新：** 2026-07-12

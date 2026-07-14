@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 #include "line_uart.h"
-#include "param_store.h"
+#include "param_service.h"
 #include "usart.h"
 
 static USART_TypeDef      uart4_instance  = {0};
@@ -172,8 +172,8 @@ static void test_rx_frame_still_parses_after_restart(void)
     require_int(data.analog[7] == 107U, "line analog channel");
 
     {
-        param_store_t params;
-        ParamStore_Get(&params);
+        param_model_t params;
+        ParamService_Get(&params);
         params.line_active_low = 0U;
         for (uint8_t ch = 0U; ch < LINE_SENSOR_CHANNELS; ++ch)
         {
@@ -182,7 +182,8 @@ static void test_rx_frame_still_parses_after_restart(void)
             frame[4U + (ch * 2U)]         = (uint8_t)(raw & 0xFFU);
             frame[5U + (ch * 2U)]         = (uint8_t)(raw >> 8);
         }
-        require_int(ParamStore_Set(&params) != 0U, "active-high polarity accepted");
+        require_int(ParamService_Set(&params) != 0U, "active-high polarity accepted");
+        LineUart_SetThresholdConfig(params.line_threshold_raw, params.line_active_low);
         checksum_sum = 0U;
         for (uint8_t i = 2U; i < 20U; ++i)
         {

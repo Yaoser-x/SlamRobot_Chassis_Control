@@ -50,7 +50,7 @@ TIM1/TIM8 均启用 `AutomaticOutput`。TIM1_BKIN 拉低时硬件立即清除 TI
 | M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `15` | `65535` |
 | M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `15` | `0xFFFFFFFF` |
 
-**配置参数**（`App/chassis/chassis_config.h`）：
+**配置参数**（`Domain/config/control_config.h` 与 `BSP/bsp_config.h`）：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -117,7 +117,7 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | USART3 | PD8 TX, PD9 RX | RPI | DMA1 Stream1 Circular | 是 | 上位机 (Raspberry Pi) 帧协议 |
 | UART4 | PC10 TX, PC11 RX | LINE | DMA1 Stream2 Circular | 是 | HiWonder 八路巡线传感器 |
 
-USART3 / ESP12F 共用同一上位机帧协议（`App/protocol/upper_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
+USART3 / ESP12F 共用同一上位机帧协议（`Domain/protocol/upper_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
 
 ---
 
@@ -238,11 +238,11 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 | 文件 | 层级 | 职责 |
 | --- | --- | --- |
 | `BSP/line/line_uart.c` | BSP 驱动 | DMA 循环缓冲管理、二进制帧状态机解析（帧头检测、校验和验证、8 通道模拟量与状态位提取）、传感器初始化与周期查询 |
-| `App/control/line_control.c` | App 控制 | 加权平均线位置计算 → P 控制器 (`angular_z = LINE_KP × error`) → 通过 `ControlManager_SetCommand` 提交至 `CONTROL_SOURCE_LINE` |
+| `Service/control/line_control_service.c` | Service 控制 | 加权平均线位置计算 → PD 控制器 → 通过 `ControlService_SetCommand` 提交至 `CONTROL_SOURCE_LINE` |
 
 ### 8.4 控制参数
 
-所有参数集中在 `App/chassis/chassis_config.h`：
+算法默认值位于 `Domain/config/control_config.h`，运行时值由 `ParamService` 发布：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -313,7 +313,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | 7 | UART4 Line | 暂不检测（直接通过） | `OLED_SC_ERROR_UART4_LINE` (bit 15) |
 | 8 | ESP12F | 暂不检测（直接通过） | `OLED_SC_ERROR_ESP12F` (bit 16) |
 
-> 自检错误 bit 位于 bit 9–16，与 `SystemMonitor` 的 motor/battery 错误 bit（bit 0–8）不冲突。正常运行阶段错误码 hex 为两者 OR 合并显示。
+> 自检错误 bit 位于 bit 9–16，与 `SafetyService` 的 motor/battery 错误 bit（bit 0–8）不冲突。正常运行阶段错误码 hex 为两者 OR 合并显示。
 
 ### 9.5 模块在线检测（正常运行阶段）
 
@@ -326,8 +326,8 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | IMU | BMI270 | `ImuBmi270_GetState().online` |
 | Line | 巡线传感器 | 传感器数据时间戳 < `OLED_MODULE_TIMEOUT_LINE_MS`（50ms） |
 | Enc | 编码器 | `EncoderDriver_GetState().speed_valid_all` |
-| ESP | ESP12F | `Esp12fComm_GetState().rx_frames > 0` |
-| Motr | 电机驱动 | `SystemMonitor_GetState().error_flags` 无 `DRV_FAULT` |
+| ESP | ESP12F | `Esp12fService_GetState().rx_frames > 0` |
+| Motr | 电机驱动 | `SafetyService_GetState().error_flags` 无 `DRV_FAULT` |
 | ADC | 模数采样 | `AdcMonitor_GetState().current_valid`；保护/控制另看 `current_control_valid` |
 
 ### 9.6 配置参数
@@ -361,8 +361,8 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 
 | 文件 | 职责 |
 | --- | --- |
-| `App/debug/reset_trace.c` | 核心逻辑：心跳更新、控制状态跟踪、崩溃捕获、校验和计算 |
-| `App/debug/reset_trace.h` | 类型定义和 API 声明 |
+| `Platform/platform_reset_trace.c` | 核心逻辑：心跳更新、控制状态跟踪、崩溃捕获、校验和计算 |
+| `Platform/platform_reset_trace.h` | 类型定义和 API 声明 |
 | `STM32F407XX_FLASH.ld` | `.noinit` 段定义 |
 
 ### 10.2 崩溃捕获点
@@ -380,7 +380,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 
 ### 10.3 任务心跳
 
-`safetyTask`、`motorTask`、`ps2Task`、`espTask`、`debugTask` 每个周期调用 `ResetTrace_TaskHeartbeat()` 记录当前 tick。崩溃时通过各任务最后心跳判断哪个任务首先停止。
+`safetyTask`、`motorTask`、`ps2Task`、`espTask`、`debugTask` 每个周期调用 `PlatformResetTrace_TaskHeartbeat()` 记录当前 tick。崩溃时通过各任务最后心跳判断哪个任务首先停止。
 
 ### 10.4 调试台输出
 

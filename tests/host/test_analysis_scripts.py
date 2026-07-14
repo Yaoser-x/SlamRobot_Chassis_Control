@@ -24,9 +24,16 @@ imu = load("analyze_imu", ROOT / "scripts" / "analyze_imu.py")
 hil = load("hil_smoke", ROOT / "scripts" / "hil_smoke.py")
 hil_imu = load("hil_imu_calibration", ROOT / "scripts" / "hil_imu_calibration.py")
 straight = load("analyze_straight_hil", ROOT / "scripts" / "analyze_straight_hil.py")
+architecture = load(
+    "check_architecture_dependencies",
+    ROOT / "scripts" / "check_architecture_dependencies.py",
+)
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_five_layer_architecture_dependencies(self):
+        self.assertEqual(architecture.main(), 0)
+
     def test_straight_hil_excludes_caster_transition_and_emits_ram_only_commands(self):
         telemetry = [
             {"straight_transition_distance_m": 0.10,

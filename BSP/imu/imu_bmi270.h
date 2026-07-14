@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "imu_bmi270_calibration.h"
+#include "imu_calibration.h"
 #include "imu_bmi270_profile.h"
 
 #ifdef __cplusplus

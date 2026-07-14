@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 
-#include "motor_driver.h"
+#include "motor_types.h"
+#include "param_types.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -41,7 +42,7 @@ extern "C"
     } encoder_state_t;
 
     void    EncoderDriver_Init(void);
-    void    EncoderDriver_Update(uint32_t now_ms);
+    void    EncoderDriver_Update(uint32_t now_ms, const param_model_t *params);
     void    EncoderDriver_GetState(encoder_state_t *state);
     float   EncoderDriver_GetCountsPerRev(void);
     float   EncoderDriver_GetMotorSpeedMps(motor_id_t motor);

@@ -6,15 +6,15 @@
 
 #include "chassis_config.h"
 #include "chassis_layout.h"
-#include "chassis_math.h"
-#include "chassis_task_timing.h"
-#include "control_manager.h"
+#include "chassis_kinematics.h"
+#include "task_health_service.h"
+#include "control_service.h"
 #include "encoder_math.h"
 #include "imu_bmi270.h"
 #include "motor_output_logic.h"
-#include "param_store.h"
+#include "param_service.h"
 #include "pid_controller.h"
-#include "reset_reason.h"
+#include "reset_reason_service.h"
 #include "upper_protocol.h"
 
 static uint32_t fake_primask;
@@ -288,7 +288,7 @@ static void test_diagnostic_payload_layout(void)
     diagnostic.imu_status_flags         = UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_CALIBRATED;
     diagnostic.post_error_flags         = 0x01020304UL;
     diagnostic.adc_invalid_reason_flags = 0x11223344UL;
-    diagnostic.task_timeout_mask        = (uint16_t)(1U << CHASSIS_TASK_TIMING_IMU);
+    diagnostic.task_timeout_mask        = (uint16_t)(1U << TASK_HEALTH_SERVICE_IMU);
     diagnostic.imu_quality_flags        = 0x55667788UL;
     diagnostic.reset_reason_flags       = 0xA1B2C3D4UL;
     diagnostic.uptime_ms                = 0x10203040UL;
@@ -310,8 +310,8 @@ static void test_diagnostic_payload_layout(void)
 
 static void test_reset_reason_captures_boot_flags(void)
 {
-    ResetReason_Capture(0xA5A55A5AUL);
-    require_int(ResetReason_GetFlags() == 0xA5A55A5AUL, "reset reason preserves startup snapshot");
+    ResetReasonService_Capture(0xA5A55A5AUL);
+    require_int(ResetReasonService_GetFlags() == 0xA5A55A5AUL, "reset reason preserves startup snapshot");
 }
 
 static void test_control_priority_timeout_and_reject_stop(void)
@@ -319,7 +319,7 @@ static void test_control_priority_timeout_and_reject_stop(void)
     chassis_cmd_t cmd      = {0};
     chassis_cmd_t snapshot = {0};
 
-    ControlManager_Init();
+    ControlService_Init();
     fake_tick = 100U;
 
     cmd = (chassis_cmd_t){.linear_x     = 0.1f,
@@ -327,41 +327,41 @@ static void test_control_priority_timeout_and_reject_stop(void)
                           .enable       = 1U,
                           .source       = CONTROL_SOURCE_DEBUG,
                           .timestamp_ms = 100U};
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "debug command accepted");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "debug command accepted");
     cmd.source = CONTROL_SOURCE_ESP12F;
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "esp command accepted");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "esp command accepted");
     cmd.source = CONTROL_SOURCE_PS2;
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "ps2 command accepted");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "ps2 command accepted");
     cmd.source   = CONTROL_SOURCE_UPPER;
     cmd.linear_x = 0.2f;
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper command accepted");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper command accepted");
 
-    require_int(ControlManager_GetCommand(&snapshot, 120U) != 0U, "command available");
+    require_int(ControlService_GetCommand(&snapshot, 120U) != 0U, "command available");
     require_int(snapshot.source == CONTROL_SOURCE_UPPER, "upper has highest priority");
     require_close(snapshot.linear_x, 0.2f, 0.0001f, "upper payload wins");
 
-    ControlManager_ClearSource(CONTROL_SOURCE_UPPER);
-    require_int(ControlManager_GetCommand(&snapshot, 120U) != 0U, "fallback command available");
+    ControlService_ClearSource(CONTROL_SOURCE_UPPER);
+    require_int(ControlService_GetCommand(&snapshot, 120U) != 0U, "fallback command available");
     require_int(snapshot.source == CONTROL_SOURCE_PS2, "ps2 fallback priority");
 
     /* Clear remaining sources, then verify timeout for PS2 specifically */
-    ControlManager_ClearSource(CONTROL_SOURCE_DEBUG);
-    ControlManager_ClearSource(CONTROL_SOURCE_ESP12F);
-    require_int(ControlManager_GetCommand(&snapshot, 601U) == 0U, "command timeout");
+    ControlService_ClearSource(CONTROL_SOURCE_DEBUG);
+    ControlService_ClearSource(CONTROL_SOURCE_ESP12F);
+    require_int(ControlService_GetCommand(&snapshot, 601U) == 0U, "command timeout");
 
     cmd = (chassis_cmd_t){.linear_x     = 0.1f,
                           .angular_z    = 0.0f,
                           .enable       = 1U,
                           .source       = CONTROL_SOURCE_PS2,
                           .timestamp_ms = 700U};
-    ControlManager_ClearSource(CONTROL_SOURCE_DEBUG);
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "ps2 reset accepted");
+    ControlService_ClearSource(CONTROL_SOURCE_DEBUG);
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "ps2 reset accepted");
     cmd.linear_x = NAN;
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED_AND_STOPPED, "nan reject and stop");
-    require_int(ControlManager_GetCommand(&snapshot, 701U) == 0U, "reject clears source");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED_AND_STOPPED, "nan reject and stop");
+    require_int(ControlService_GetCommand(&snapshot, 701U) == 0U, "reject clears source");
 }
 
-static void test_control_manager_uses_runtime_limits(void)
+static void test_control_service_uses_runtime_limits(void)
 {
     chassis_cmd_t cmd = {
         .linear_x     = 1.0f,
@@ -371,22 +371,22 @@ static void test_control_manager_uses_runtime_limits(void)
         .timestamp_ms = 100U,
     };
     chassis_cmd_t snapshot;
-    param_store_t params;
+    param_model_t params;
 
-    ParamStore_Defaults(&params);
+    ParamService_Defaults(&params);
     params.max_linear_mps  = 0.2f;
     params.max_angular_rps = 0.5f;
-    require_int(ParamStore_Set(&params) != 0U, "runtime limits accepted");
-    ControlManager_Init();
+    require_int(ParamService_Set(&params) != 0U, "runtime limits accepted");
+    ControlService_Init();
 
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "runtime-limited command accepted");
-    require_int(ControlManager_GetCommand(&snapshot, 100U) != 0U, "runtime-limited command available");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "runtime-limited command accepted");
+    require_int(ControlService_GetCommand(&snapshot, 100U) != 0U, "runtime-limited command available");
     require_close(snapshot.linear_x, 0.2f, 0.0001f, "runtime linear limit applied");
     require_close(snapshot.angular_z, 0.5f, 0.0001f, "runtime angular limit applied");
-    ParamStore_SetDefaults();
+    ParamService_SetDefaults();
 }
 
-static void test_control_manager_maintenance_rejects_commands(void)
+static void test_control_service_maintenance_rejects_commands(void)
 {
     chassis_cmd_t cmd = {
         .linear_x     = 0.1f,
@@ -398,20 +398,20 @@ static void test_control_manager_maintenance_rejects_commands(void)
     chassis_cmd_t snapshot;
     uint32_t      revoke_generation;
 
-    ControlManager_Init();
-    revoke_generation = ControlManager_GetMotionRevokeGeneration();
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "command exists before maintenance");
-    require_int(ControlManager_BeginMaintenance() != 0U, "maintenance lock acquired");
-    require_int(ControlManager_GetMotionRevokeGeneration() == revoke_generation + 1U,
+    ControlService_Init();
+    revoke_generation = ControlService_GetMotionRevokeGeneration();
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "command exists before maintenance");
+    require_int(ControlService_BeginMaintenance() != 0U, "maintenance lock acquired");
+    require_int(ControlService_GetMotionRevokeGeneration() == revoke_generation + 1U,
                 "maintenance revokes persistent motion producers");
-    require_int(ControlManager_IsMaintenanceLocked() != 0U, "maintenance lock visible");
-    require_int(ControlManager_BeginMaintenance() == 0U, "nested maintenance lock rejected");
-    require_int(ControlManager_IsMaintenanceLocked() != 0U, "rejected nested begin preserves original lock");
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED, "maintenance rejects commands");
-    require_int(ControlManager_GetCommand(&snapshot, 200U) == 0U, "maintenance exposes no active command");
-    ControlManager_EndMaintenance();
-    require_int(ControlManager_IsMaintenanceLocked() == 0U, "maintenance lock released");
-    require_int(ControlManager_GetCommand(&snapshot, 200U) == 0U,
+    require_int(ControlService_IsMaintenanceLocked() != 0U, "maintenance lock visible");
+    require_int(ControlService_BeginMaintenance() == 0U, "nested maintenance lock rejected");
+    require_int(ControlService_IsMaintenanceLocked() != 0U, "rejected nested begin preserves original lock");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED, "maintenance rejects commands");
+    require_int(ControlService_GetCommand(&snapshot, 200U) == 0U, "maintenance exposes no active command");
+    ControlService_EndMaintenance();
+    require_int(ControlService_IsMaintenanceLocked() == 0U, "maintenance lock released");
+    require_int(ControlService_GetCommand(&snapshot, 200U) == 0U,
                 "released maintenance does not restore stale command");
 }
 
@@ -426,13 +426,13 @@ static void test_stale_motion_generation_cannot_submit_after_safety_window(void)
     };
     uint32_t stale_generation;
 
-    ControlManager_Init();
-    stale_generation = ControlManager_GetMotionRevokeGeneration();
-    require_int(ControlManager_BeginMaintenance() != 0U, "maintenance starts safety window");
-    ControlManager_EndMaintenance();
-    require_int(ControlManager_SetCommandForGeneration(&cmd, stale_generation) == CONTROL_COMMAND_REJECTED,
+    ControlService_Init();
+    stale_generation = ControlService_GetMotionRevokeGeneration();
+    require_int(ControlService_BeginMaintenance() != 0U, "maintenance starts safety window");
+    ControlService_EndMaintenance();
+    require_int(ControlService_SetCommandForGeneration(&cmd, stale_generation) == CONTROL_COMMAND_REJECTED,
                 "stale producer token cannot submit after maintenance");
-    require_int(ControlManager_SetCommandForGeneration(&cmd, ControlManager_GetMotionRevokeGeneration())
+    require_int(ControlService_SetCommandForGeneration(&cmd, ControlService_GetMotionRevokeGeneration())
                     == CONTROL_COMMAND_ACCEPTED,
                 "current producer token accepts a new command");
 }
@@ -447,24 +447,24 @@ static void test_control_stop_recovery_requires_new_command(void)
     chassis_cmd_t snapshot = {0};
     uint32_t      revoke_generation;
 
-    ControlManager_Init();
-    revoke_generation = ControlManager_GetMotionRevokeGeneration();
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before estop");
-    ControlManager_SetEmergencyStop(1U);
-    require_int(ControlManager_GetMotionRevokeGeneration() == revoke_generation + 1U,
+    ControlService_Init();
+    revoke_generation = ControlService_GetMotionRevokeGeneration();
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before estop");
+    ControlService_SetEmergencyStop(1U);
+    require_int(ControlService_GetMotionRevokeGeneration() == revoke_generation + 1U,
                 "estop revokes persistent motion producers");
-    require_int(ControlManager_GetCommand(&snapshot, 110U) == 0U, "estop blocks command");
-    ControlManager_SetEmergencyStop(0U);
-    require_int(ControlManager_GetCommand(&snapshot, 111U) == 0U, "estop recovery does not revive command");
+    require_int(ControlService_GetCommand(&snapshot, 110U) == 0U, "estop blocks command");
+    ControlService_SetEmergencyStop(0U);
+    require_int(ControlService_GetCommand(&snapshot, 111U) == 0U, "estop recovery does not revive command");
 
     cmd.timestamp_ms  = 120U;
-    revoke_generation = ControlManager_GetMotionRevokeGeneration();
-    require_int(ControlManager_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before fault");
-    ControlManager_SetFaultStop(1U);
-    require_int(ControlManager_GetMotionRevokeGeneration() == revoke_generation + 1U,
+    revoke_generation = ControlService_GetMotionRevokeGeneration();
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before fault");
+    ControlService_SetFaultStop(1U);
+    require_int(ControlService_GetMotionRevokeGeneration() == revoke_generation + 1U,
                 "fault stop revokes persistent motion producers");
-    ControlManager_SetFaultStop(0U);
-    require_int(ControlManager_GetCommand(&snapshot, 121U) == 0U, "fault recovery does not revive command");
+    ControlService_SetFaultStop(0U);
+    require_int(ControlService_GetCommand(&snapshot, 121U) == 0U, "fault recovery does not revive command");
 }
 
 static void test_side_target_distribution(void)
@@ -639,35 +639,35 @@ static void test_task_timing_next_wake(void)
 {
     chassis_task_health_t health;
     uint8_t               missed = 0U;
-    uint32_t              next   = ChassisTaskTiming_NextWake(100U, 105U, 10U, &missed);
+    uint32_t              next   = TaskHealthService_NextWake(100U, 105U, 10U, &missed);
 
     require_int(next == 110U, "periodic next wake");
     require_int(missed == 0U, "periodic no miss");
 
-    next = ChassisTaskTiming_NextWake(110U, 125U, 10U, &missed);
+    next = TaskHealthService_NextWake(110U, 125U, 10U, &missed);
     require_int(next == 135U, "miss realigns to now plus period");
     require_int(missed == 1U, "miss detected");
 
-    ChassisTaskTiming_Reset();
-    ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_RPI, 100U);
-    ChassisTaskTiming_UpdateTimeouts(141U);
-    ChassisTaskTiming_GetHealth(&health);
-    require_int(health.timeout_count[CHASSIS_TASK_TIMING_RPI] == 1U, "rpi heartbeat timeout counted");
-    require_int(health.timed_out[CHASSIS_TASK_TIMING_RPI] != 0U, "rpi timeout state set");
-    ChassisTaskTiming_UpdateTimeouts(160U);
-    ChassisTaskTiming_GetHealth(&health);
-    require_int(health.timeout_count[CHASSIS_TASK_TIMING_RPI] == 1U, "timeout counted once until recovery");
-    ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_RPI, 170U);
-    ChassisTaskTiming_GetHealth(&health);
-    require_int(health.timed_out[CHASSIS_TASK_TIMING_RPI] == 0U, "heartbeat clears timeout state");
+    TaskHealthService_Reset();
+    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_RPI, 100U);
+    TaskHealthService_UpdateTimeouts(141U);
+    TaskHealthService_GetHealth(&health);
+    require_int(health.timeout_count[TASK_HEALTH_SERVICE_RPI] == 1U, "rpi heartbeat timeout counted");
+    require_int(health.timed_out[TASK_HEALTH_SERVICE_RPI] != 0U, "rpi timeout state set");
+    TaskHealthService_UpdateTimeouts(160U);
+    TaskHealthService_GetHealth(&health);
+    require_int(health.timeout_count[TASK_HEALTH_SERVICE_RPI] == 1U, "timeout counted once until recovery");
+    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_RPI, 170U);
+    TaskHealthService_GetHealth(&health);
+    require_int(health.timed_out[TASK_HEALTH_SERVICE_RPI] == 0U, "heartbeat clears timeout state");
 
-    ChassisTaskTiming_Reset();
-    ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_IMU, 100U);
-    ChassisTaskTiming_UpdateTimeouts(181U);
-    require_int(ChassisTaskTiming_GetTimeoutMask() == (uint16_t)(1U << CHASSIS_TASK_TIMING_IMU),
+    TaskHealthService_Reset();
+    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_IMU, 100U);
+    TaskHealthService_UpdateTimeouts(181U);
+    require_int(TaskHealthService_GetTimeoutMask() == (uint16_t)(1U << TASK_HEALTH_SERVICE_IMU),
                 "only imu timeout bit is reported");
-    ChassisTaskTiming_Heartbeat(CHASSIS_TASK_TIMING_IMU, 182U);
-    require_int(ChassisTaskTiming_GetTimeoutMask() == 0U, "imu heartbeat clears only timeout mask bit");
+    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_IMU, 182U);
+    require_int(TaskHealthService_GetTimeoutMask() == 0U, "imu heartbeat clears only timeout mask bit");
 }
 
 static void test_imu_state_contract(void)
@@ -799,7 +799,7 @@ static void test_pid_direction_reversal_resets(void)
     (void)PidController_Step(&pid, 1.0f, 0.0f, 0.1f);
     require_int(pid.integral > 0.0f, "pid integral positive after positive error");
 
-    /* 反向 → PID reset（由 ChassisControl_StepMotorPid 调用） */
+    /* 反向 → PID reset（由 ChassisService_StepMotorPid 调用） */
     PidController_Reset(&pid);
     require_close(pid.integral, 0.0f, 0.001f, "pid integral cleared after direction reversal");
 }
@@ -900,8 +900,8 @@ int main(void)
     test_diagnostic_payload_layout();
     test_reset_reason_captures_boot_flags();
     test_control_priority_timeout_and_reject_stop();
-    test_control_manager_uses_runtime_limits();
-    test_control_manager_maintenance_rejects_commands();
+    test_control_service_uses_runtime_limits();
+    test_control_service_maintenance_rejects_commands();
     test_stale_motion_generation_cannot_submit_after_safety_window();
     test_control_stop_recovery_requires_new_command();
     test_side_target_distribution();

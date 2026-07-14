@@ -12,18 +12,43 @@ endif()
 
 enable_testing()
 
+include_directories(
+    ../../Platform
+    ../../BSP/transport
+    ../../Domain/chassis
+    ../../Domain/config
+    ../../Domain/control
+    ../../Domain/encoder
+    ../../Domain/imu
+    ../../Domain/line
+    ../../Domain/model
+    ../../Domain/motor
+    ../../Domain/protocol
+    ../../Domain/safety
+    ../../Service/chassis
+    ../../Service/communication
+    ../../Service/control
+    ../../Service/diagnostics
+    ../../Service/param
+    ../../Service/safety
+)
+
+add_library(host_platform STATIC host_platform.c)
+target_include_directories(host_platform PUBLIC ../../Platform)
+link_libraries(host_platform)
+
 add_executable(test_f407_v2
     test_f407_v2.c
-    ../../BSP/chassis_layout.c
-    ../../App/chassis/chassis_math.c
-    ../../App/chassis/chassis_task_timing.c
-    ../../App/control/control_manager.c
-    ../../App/param/param_store.c
-    ../../App/protocol/upper_protocol.c
-    ../../App/monitor/reset_reason.c
-    ../../BSP/encoder/encoder_math.c
-    ../../BSP/motor/motor_output_logic.c
-    ../../BSP/pid/pid_controller.c
+    ../../Domain/chassis/chassis_layout.c
+    ../../Domain/chassis/chassis_kinematics.c
+    ../../Service/diagnostics/task_health_service.c
+    ../../Service/control/control_service.c
+    ../../Service/param/param_service.c
+    ../../Domain/protocol/upper_protocol.c
+    ../../Service/diagnostics/reset_reason_service.c
+    ../../Domain/encoder/encoder_math.c
+    ../../Domain/motor/motor_output_logic.c
+    ../../Domain/control/pid_controller.c
 )
 
 target_include_directories(test_f407_v2 PRIVATE
@@ -46,7 +71,7 @@ add_test(NAME f407_v2_host COMMAND test_f407_v2)
 
 add_executable(test_chassis_layout_2wd
     test_chassis_layout_2wd.c
-    ../../BSP/chassis_layout.c
+    ../../Domain/chassis/chassis_layout.c
 )
 
 target_include_directories(test_chassis_layout_2wd PRIVATE
@@ -63,7 +88,7 @@ add_test(NAME runtime_direction_apply COMMAND test_runtime_direction_apply)
 
 add_executable(test_straight_controller
     test_straight_controller.c
-    ../../App/chassis/straight_controller.c
+    ../../Domain/control/straight_controller.c
 )
 target_include_directories(test_straight_controller PRIVATE ../../App/chassis)
 target_link_libraries(test_straight_controller PRIVATE m)
@@ -82,7 +107,7 @@ add_test(NAME esp_frame_parser COMMAND test_esp_frame_parser)
 add_executable(test_adc_monitor
     test_adc_monitor.c
     ../../BSP/adc/adc_monitor.c
-    ../../BSP/chassis_layout.c
+    ../../Domain/chassis/chassis_layout.c
 )
 
 target_include_directories(test_adc_monitor PRIVATE
@@ -109,7 +134,7 @@ add_test(NAME adc_monitor COMMAND test_adc_monitor)
 add_executable(test_line_uart
     test_line_uart.c
     ../../BSP/line/line_uart.c
-    ../../App/param/param_store.c
+    ../../Service/param/param_service.c
 )
 
 target_include_directories(test_line_uart PRIVATE
@@ -123,13 +148,13 @@ target_include_directories(test_line_uart PRIVATE
 
 add_test(NAME line_uart COMMAND test_line_uart)
 
-add_executable(test_line_control
-    test_line_control.c
-    ../../App/control/line_control.c
-    ../../App/control/line_calibration.c
+add_executable(test_line_control_service
+    test_line_control_service.c
+    ../../Service/control/line_control_service.c
+    ../../Domain/line/line_calibration.c
 )
 
-target_include_directories(test_line_control PRIVATE
+target_include_directories(test_line_control_service PRIVATE
     .
     ../../App/chassis
     ../../App/control
@@ -141,11 +166,11 @@ target_include_directories(test_line_control PRIVATE
     ../../BSP/motor
 )
 
-add_test(NAME line_control COMMAND test_line_control)
+add_test(NAME line_control_service COMMAND test_line_control_service)
 
 add_executable(test_line_calibration
     test_line_calibration.c
-    ../../App/control/line_calibration.c
+    ../../Domain/line/line_calibration.c
 )
 
 target_include_directories(test_line_calibration PRIVATE
@@ -154,13 +179,14 @@ target_include_directories(test_line_calibration PRIVATE
 
 add_test(NAME line_calibration COMMAND test_line_calibration)
 
-add_executable(test_upper_uart
-    test_upper_uart.c
-    ../../App/protocol/upper_uart.c
-    ../../App/protocol/upper_protocol.c
+add_executable(test_upper_uart_service
+    test_upper_uart_service.c
+    ../../Service/communication/upper_uart_service.c
+    ../../Domain/protocol/upper_protocol.c
+    ../../BSP/transport/upper_uart_transport.c
 )
 
-target_include_directories(test_upper_uart PRIVATE
+target_include_directories(test_upper_uart_service PRIVATE
     .
     ../../App/chassis
     ../../App/control
@@ -174,14 +200,14 @@ target_include_directories(test_upper_uart PRIVATE
     ../../BSP/motor
 )
 
-add_test(NAME upper_uart COMMAND test_upper_uart)
+add_test(NAME upper_uart_service COMMAND test_upper_uart_service)
 
 add_executable(test_motor_driver_gpio
     test_motor_driver_gpio.c
-    ../../BSP/chassis_layout.c
+    ../../Domain/chassis/chassis_layout.c
     ../../BSP/motor/motor_driver.c
-    ../../BSP/motor/motor_output_logic.c
-    ../../App/param/param_store.c
+    ../../Domain/motor/motor_output_logic.c
+    ../../Service/param/param_service.c
 )
 
 target_include_directories(test_motor_driver_gpio PRIVATE
@@ -194,13 +220,13 @@ target_include_directories(test_motor_driver_gpio PRIVATE
 
 add_test(NAME motor_driver_gpio COMMAND test_motor_driver_gpio)
 
-add_executable(test_system_monitor
-    test_system_monitor.c
-    ../../App/monitor/system_monitor.c
-    ../../App/chassis/chassis_task_timing.c
+add_executable(test_safety_service
+    test_safety_service.c
+    ../../Service/safety/safety_service.c
+    ../../Service/diagnostics/task_health_service.c
 )
 
-target_include_directories(test_system_monitor PRIVATE
+target_include_directories(test_safety_service PRIVATE
     .
     ../../App/chassis
     ../../App/control
@@ -212,15 +238,15 @@ target_include_directories(test_system_monitor PRIVATE
     ../../BSP/motor
 )
 
-add_test(NAME system_monitor COMMAND test_system_monitor)
+add_test(NAME safety_service COMMAND test_safety_service)
 
-add_executable(test_system_monitor_fault_enabled
-    test_system_monitor.c
-    ../../App/monitor/system_monitor.c
-    ../../App/chassis/chassis_task_timing.c
+add_executable(test_safety_service_fault_enabled
+    test_safety_service.c
+    ../../Service/safety/safety_service.c
+    ../../Service/diagnostics/task_health_service.c
 )
 
-target_include_directories(test_system_monitor_fault_enabled PRIVATE
+target_include_directories(test_safety_service_fault_enabled PRIVATE
     .
     ../../App/chassis
     ../../App/control
@@ -232,16 +258,16 @@ target_include_directories(test_system_monitor_fault_enabled PRIVATE
     ../../BSP/motor
 )
 
-target_compile_definitions(test_system_monitor_fault_enabled PRIVATE
+target_compile_definitions(test_safety_service_fault_enabled PRIVATE
     MOTOR_ADC_OVERCURRENT_FAULT_ENABLED=1U
 )
 
-add_test(NAME system_monitor_fault_enabled COMMAND test_system_monitor_fault_enabled)
+add_test(NAME safety_service_fault_enabled COMMAND test_safety_service_fault_enabled)
 
 add_executable(test_current_guard
     test_current_guard.c
-    ../../App/current/current_guard.c
-    ../../BSP/chassis_layout.c
+    ../../Service/safety/current_guard.c
+    ../../Domain/chassis/chassis_layout.c
 )
 
 target_include_directories(test_current_guard PRIVATE
@@ -258,8 +284,8 @@ add_test(NAME current_guard COMMAND test_current_guard)
 
 add_executable(test_current_guard_soft_limit
     test_current_guard.c
-    ../../App/current/current_guard.c
-    ../../BSP/chassis_layout.c
+    ../../Service/safety/current_guard.c
+    ../../Domain/chassis/chassis_layout.c
 )
 
 target_include_directories(test_current_guard_soft_limit PRIVATE
@@ -281,18 +307,18 @@ target_compile_definitions(test_current_guard_soft_limit PRIVATE
 
 add_test(NAME current_guard_soft_limit COMMAND test_current_guard_soft_limit)
 
-add_executable(test_chassis_control_current_limit
-    test_chassis_control_current_limit.c
-    ../../App/chassis/chassis_control.c
-    ../../App/chassis/chassis_math.c
-    ../../App/chassis/straight_controller.c
-    ../../App/current/current_guard.c
-    ../../App/param/param_store.c
-    ../../BSP/chassis_layout.c
-    ../../BSP/pid/pid_controller.c
+add_executable(test_chassis_service_current_limit
+    test_chassis_service_current_limit.c
+    ../../Service/chassis/chassis_service.c
+    ../../Domain/chassis/chassis_kinematics.c
+    ../../Domain/control/straight_controller.c
+    ../../Service/safety/current_guard.c
+    ../../Service/param/param_service.c
+    ../../Domain/chassis/chassis_layout.c
+    ../../Domain/control/pid_controller.c
 )
 
-target_include_directories(test_chassis_control_current_limit PRIVATE
+target_include_directories(test_chassis_service_current_limit PRIVATE
     .
     ../../App/chassis
     ../../App/current
@@ -307,16 +333,16 @@ target_include_directories(test_chassis_control_current_limit PRIVATE
     ../../BSP/pid
 )
 
-target_link_libraries(test_chassis_control_current_limit PRIVATE m)
+target_link_libraries(test_chassis_service_current_limit PRIVATE m)
 
-add_test(NAME chassis_control_current_limit COMMAND test_chassis_control_current_limit)
+add_test(NAME chassis_service_current_limit COMMAND test_chassis_service_current_limit)
 
-add_executable(test_chassis_maintenance
-    test_chassis_maintenance.c
-    ../../App/chassis/chassis_maintenance.c
+add_executable(test_chassis_maintenance_service
+    test_chassis_maintenance_service.c
+    ../../Service/chassis/chassis_maintenance_service.c
 )
 
-target_include_directories(test_chassis_maintenance PRIVATE
+target_include_directories(test_chassis_maintenance_service PRIVATE
     .
     ../../App/chassis
     ../../App/control
@@ -325,7 +351,7 @@ target_include_directories(test_chassis_maintenance PRIVATE
     ../../BSP/motor
 )
 
-add_test(NAME chassis_maintenance COMMAND test_chassis_maintenance)
+add_test(NAME chassis_maintenance_service COMMAND test_chassis_maintenance_service)
 
 add_executable(test_debug_maintenance_policy
     test_debug_maintenance_policy.c
@@ -360,7 +386,7 @@ add_test(NAME debug_straight_telemetry COMMAND test_debug_straight_telemetry)
 
 add_executable(test_relative_yaw_control
     test_relative_yaw_control.c
-    ../../App/control/relative_yaw_control.c
+    ../../Domain/control/relative_yaw_controller.c
 )
 
 target_include_directories(test_relative_yaw_control PRIVATE
@@ -371,13 +397,13 @@ target_link_libraries(test_relative_yaw_control PRIVATE m)
 
 add_test(NAME relative_yaw_control COMMAND test_relative_yaw_control)
 
-add_executable(test_ps2_control
-    test_ps2_control.c
-    ../../App/control/ps2_control.c
-    ../../App/control/relative_yaw_control.c
+add_executable(test_ps2_control_service
+    test_ps2_control_service.c
+    ../../Service/control/ps2_control_service.c
+    ../../Domain/control/relative_yaw_controller.c
 )
 
-target_include_directories(test_ps2_control PRIVATE
+target_include_directories(test_ps2_control_service PRIVATE
     .
     ../../App/chassis
     ../../App/control
@@ -387,9 +413,9 @@ target_include_directories(test_ps2_control PRIVATE
     ../../BSP/ps2
 )
 
-target_link_libraries(test_ps2_control PRIVATE m)
+target_link_libraries(test_ps2_control_service PRIVATE m)
 
-add_test(NAME ps2_control COMMAND test_ps2_control)
+add_test(NAME ps2_control_service COMMAND test_ps2_control_service)
 
 add_executable(test_oled_ssd1306
     test_oled_ssd1306.c
@@ -407,12 +433,12 @@ add_test(NAME oled_ssd1306 COMMAND test_oled_ssd1306)
 
 add_executable(test_imu_pipeline
     test_imu_pipeline.c
-    ../../App/imu/imu_calibration_gate.c
-    ../../BSP/imu/imu_bmi270_calibration.c
+    ../../Domain/imu/imu_calibration_gate.c
+    ../../Domain/imu/imu_calibration.c
     ../../BSP/imu/imu_bmi270_fifo.c
     ../../BSP/imu/imu_bmi270_math.c
     ../../BSP/imu/imu_bmi270_profile.c
-    ../../BSP/imu/imu_bmi270_time.c
+    ../../Domain/imu/imu_timestamp.c
 )
 
 target_include_directories(test_imu_pipeline PRIVATE
@@ -425,12 +451,12 @@ target_link_libraries(test_imu_pipeline PRIVATE m)
 
 add_test(NAME imu_pipeline COMMAND test_imu_pipeline)
 
-add_executable(test_param_store
-    test_param_store.c
-    ../../App/param/param_store.c
+add_executable(test_param_service
+    test_param_service.c
+    ../../Service/param/param_service.c
 )
 
-target_include_directories(test_param_store PRIVATE
+target_include_directories(test_param_service PRIVATE
     .
     ../../App/chassis
     ../../App/param
@@ -438,13 +464,13 @@ target_include_directories(test_param_store PRIVATE
     ../../BSP/motor
 )
 
-add_test(NAME param_store COMMAND test_param_store)
+add_test(NAME param_service COMMAND test_param_service)
 
 add_executable(test_encoder_driver
     test_encoder_driver.c
-    ../../App/param/param_store.c
+    ../../Service/param/param_service.c
     ../../BSP/encoder/encoder_driver.c
-    ../../BSP/encoder/encoder_math.c
+    ../../Domain/encoder/encoder_math.c
 )
 
 target_include_directories(test_encoder_driver PRIVATE
@@ -462,9 +488,9 @@ add_test(NAME encoder_driver COMMAND test_encoder_driver)
 
 add_executable(test_flash_param
     test_flash_param.c
-    ../../App/param/param_store.c
-    ../../BSP/flash/flash_param.c
-    ../../BSP/imu/imu_bmi270_calibration.c
+    ../../Service/param/param_service.c
+    ../../Service/param/flash_param.c
+    ../../Domain/imu/imu_calibration.c
 )
 
 target_include_directories(test_flash_param PRIVATE
@@ -484,8 +510,8 @@ target_compile_definitions(test_flash_param PRIVATE
 add_test(NAME flash_param COMMAND test_flash_param)
 
 add_executable(test_power_on_self_test
-    test_power_on_self_test.c
-    ../../App/monitor/power_on_self_test.c
+    test_post_service.c
+    ../../Service/safety/post_service.c
 )
 
 target_include_directories(test_power_on_self_test PRIVATE
@@ -536,7 +562,7 @@ add_test(NAME analysis_scripts
 
 add_executable(generate_upper_v2_golden
     generate_upper_v2_golden.c
-    ../../App/protocol/upper_protocol.c
+    ../../Domain/protocol/upper_protocol.c
 )
 
 target_include_directories(generate_upper_v2_golden PRIVATE

@@ -1,8 +1,7 @@
 #include "line_uart.h"
 
-#include "cmsis_os2.h"
+#include "platform_time.h"
 #include "usart.h"
-#include "param_store.h"
 
 #define LINE_UART_RX_BUFFER_SIZE 128U
 
@@ -33,8 +32,23 @@ static uint8_t         line_tx_busy;
 
 /* 最近一次成功解析的传感器数据 */
 static line_sensor_data_t line_sensor_data;
-static const uint8_t      line_manual_mode_cmd  = 0x00U;
-static const uint8_t      line_analog_query_cmd = LINE_SENSOR_CMD_ANALOG;
+static const uint8_t      line_manual_mode_cmd                 = 0x00U;
+static const uint8_t      line_analog_query_cmd                = LINE_SENSOR_CMD_ANALOG;
+static uint16_t           line_threshold[LINE_SENSOR_CHANNELS] = {500U, 500U, 500U, 500U, 500U, 500U, 500U, 500U};
+static uint8_t            line_active_low                      = 1U;
+
+void LineUart_SetThresholdConfig(const uint16_t threshold[LINE_SENSOR_CHANNELS], uint8_t active_low)
+{
+    if (threshold == 0)
+    {
+        return;
+    }
+    for (uint8_t i = 0U; i < LINE_SENSOR_CHANNELS; ++i)
+    {
+        line_threshold[i] = threshold[i];
+    }
+    line_active_low = (active_low != 0U) ? 1U : 0U;
+}
 
 /* ---------- 校验和 ---------- */
 
@@ -175,9 +189,6 @@ static void LineUart_ProcessByte(uint8_t byte)
 
                 if (cmd == LINE_SENSOR_CMD_ANALOG && line_data_len >= 16U)
                 {
-                    param_store_t params;
-
-                    (void)ParamStore_GetSnapshot(&params);
                     /* 提取 8 通道数据 */
                     for (uint8_t ch = 0U; ch < LINE_SENSOR_CHANNELS; ++ch)
                     {
@@ -185,11 +196,10 @@ static void LineUart_ProcessByte(uint8_t byte)
                         uint16_t raw  = (uint16_t)line_frame_buf[base] | ((uint16_t)line_frame_buf[base + 1U] << 8);
 
                         line_sensor_data.analog[ch] = raw;
-                        line_sensor_data.state[ch]  = (params.line_active_low != 0U)
-                                                          ? ((raw < params.line_threshold_raw[ch]) ? 1U : 0U)
-                                                          : ((raw > params.line_threshold_raw[ch]) ? 1U : 0U);
+                        line_sensor_data.state[ch]  = (line_active_low != 0U) ? ((raw < line_threshold[ch]) ? 1U : 0U)
+                                                                              : ((raw > line_threshold[ch]) ? 1U : 0U);
                     }
-                    line_sensor_data.timestamp_ms = osKernelGetTickCount();
+                    line_sensor_data.timestamp_ms = PlatformTime_TaskNowMs();
                     line_sensor_data.valid        = 1U;
                 }
 

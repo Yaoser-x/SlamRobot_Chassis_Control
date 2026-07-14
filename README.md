@@ -36,25 +36,20 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 ## 目录结构
 
 ```
-├── App/              应用层（业务逻辑，不直接操作 HAL 外设句柄）
-│   ├── chassis/       底盘控制核心 (差速/布局/PID/PWM/任务入口)
-│   ├── control/       控制源仲裁 (优先级/超时/ESTOP/fault-stop)
-│   ├── debug/         USART1 调试命令台 + Reset Trace
-│   ├── display/       OLED 三阶段 UI (欢迎/自检/运行)
-│   ├── monitor/       电压/电流/编码器/DRV fault 状态聚合
-│   ├── param/         运行时参数与校准快照
-│   └── protocol/      上位机帧协议 (USART3 + ESP12F 共用)
-├── BSP/              板级驱动层（硬件抽象，每个外设独立目录）
+├── App/              应用编排层（App_Init、ISR 分发、十个业务任务、UI/调试适配）
+├── Service/          用例层（控制/安全/参数/传感器快照/通信编排）
+├── Domain/           纯领域层（值类型、运动学、PID、IMU/编码器/协议算法）
+├── Platform/         系统能力层（时钟、临界区、事件、看门狗、复位追踪）
+├── BSP/              板级驱动层（硬件访问与 UART transport）
 │   ├── adc/           ADC DMA 采样换算
 │   ├── encoder/       编码器计数/回绕差分/速度计算
-│   ├── esp12f/        ESP12F 协议与烧录桥
-│   ├── flash/         STM32 Flash 参数镜像读写
+│   ├── flash/         STM32 Flash 原始双槽存储
 │   ├── imu/           BMI270 SPI 驱动 (配置表/校准/姿态估计/诊断)
 │   ├── led/           状态 LED
 │   ├── line/          八路巡线传感器 (逐通道阈值/极性 + 参数化 PD)
 │   ├── motor/         DRV8874 H-bridge PWM 驱动
 │   ├── oled/          SSD1306 OLED 驱动 (I2C1 128×64)
-│   ├── pid/           速度环 PID
+│   ├── transport/     Upper/ESP/Debug UART 物理收发
 │   └── ps2/           PS2 手柄硬件读取 (DWT 时序容错)
 ├── Core/              CubeMX 生成区 (HAL 初始化/FreeRTOS 入口/中断)
 ├── Drivers/           CMSIS + STM32F4 HAL/LL (第三方，禁止手动修改)
@@ -71,6 +66,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 
 | 文档 | 内容 |
 | --- | --- |
+| [五层架构](docs/architecture.md) | 层职责、依赖方向、状态所有权、CubeMX 边界与验收命令 |
 | [外设资源](docs/peripherals.md) | 电机 PWM/编码器/ADC/通信接口/BMI270/ESP12F GPIO/PS2/巡线传感器 — 完整硬件规格 |
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
 | [Upper Protocol v2](docs/upper-protocol-v2.md) | USART3/ESP12F 帧格式、兼容旧帧的 28B DIAGNOSTIC、温度编码与黄金测试向量 |

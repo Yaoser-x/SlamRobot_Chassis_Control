@@ -25,9 +25,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "chassis_tasks.h"
-#include "iwdg.h"
-#include "reset_trace.h"
+#include "app_init.h"
+#include "app_tasks.h"
+#include "platform_reset.h"
+#include "platform_task_event.h"
+#include "platform_watchdog.h"
+#include "platform_reset_trace.h"
 
 #include <string.h>
 
@@ -96,13 +99,6 @@ const osThreadAttr_t oledTask_attributes = {
 };
 
 /* USER CODE END Variables */
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
-};
 /* Definitions for safetyTask */
 osThreadId_t safetyTaskHandle;
 const osThreadAttr_t safetyTask_attributes = {
@@ -155,14 +151,13 @@ static reset_trace_task_t FreeRtos_TaskFromName(const char *name);
 
 /* USER CODE END FunctionPrototypes */
 
-void StartDefaultTask(void *argument);
 void StartTask02(void *argument);  /* safetyTask — 状态聚合/看门狗 */
 void StartTask03(void *argument);  /* motorTask — 电机控制链 */
 void StartTask04(void *argument);  /* rpiCommTask — USART3 上位机协议 */
 void StartTask05(void *argument);  /* imuTask — BMI270 采样 */
 void StartTask06(void *argument);  /* lineTask — 巡线传感器 */
 void StartTask07(void *argument);  /* espTask — ESP12F 协议 */
-void Task_Usart1DebugConsole(void *argument);
+void Task_Debug(void *argument);
 void Task_Ps2(void *argument);
 void Task_Led(void *argument);
 void Task_Oled(void *argument);
@@ -211,13 +206,9 @@ static void FreeRtos_FatalStop(uint32_t reason,
   freertos_fatal_reason = reason;
   freertos_fatal_file = file;
   freertos_fatal_line = line;
-  ResetTrace_CaptureWithTask(RESET_TRACE_KIND_FREERTOS, reason, line, task);
+  PlatformResetTrace_CaptureWithTask(RESET_TRACE_KIND_FREERTOS, reason, line, task);
   DRV_SLEEP_ALL_GPIO_Port->BSRR = ((uint32_t)DRV_SLEEP_ALL_Pin << 16U);
-  __disable_irq();
-  for (;;)
-  {
-    __NOP();
-  }
+  PlatformReset_FatalStop();
 }
 
 void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
@@ -264,7 +255,7 @@ void vApplicationAssertHook(const char *file, unsigned long line)
   */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
-  ChassisTasks_InitHardware();
+  App_Init();
 
   /* USER CODE END Init */
 
@@ -285,9 +276,6 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
   /* creation of safetyTask */
   safetyTaskHandle = osThreadNew(StartTask02, NULL, &safetyTask_attributes);
 
@@ -307,7 +295,7 @@ void MX_FREERTOS_Init(void) {
   espTaskHandle = osThreadNew(StartTask07, NULL, &espTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  usart1DebugTaskHandle = osThreadNew(Task_Usart1DebugConsole, NULL, &usart1DebugTask_attributes);
+  usart1DebugTaskHandle = osThreadNew(Task_Debug, NULL, &usart1DebugTask_attributes);
   ps2TaskHandle = osThreadNew(Task_Ps2, NULL, &ps2Task_attributes);
   ledTaskHandle = osThreadNew(Task_Led, NULL, &ledTask_attributes);
   oledTaskHandle = osThreadNew(Task_Oled, NULL, &oledTask_attributes);
@@ -315,8 +303,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
-  if (defaultTaskHandle == NULL ||
-      safetyTaskHandle == NULL ||
+  if (safetyTaskHandle == NULL ||
       motorTaskHandle == NULL ||
       rpiCommTaskHandle == NULL ||
       imuTaskHandle == NULL ||
@@ -329,30 +316,13 @@ void MX_FREERTOS_Init(void) {
   {
     FreeRtos_FatalStop(FREERTOS_FATAL_TASK_CREATE, __FILE__, __LINE__, RESET_TRACE_TASK_NONE);
   }
+  PlatformTaskEvent_Bind(PLATFORM_TASK_EVENT_IMU_DRDY, imuTaskHandle);
 #if defined(DEBUG)
   __HAL_DBGMCU_FREEZE_IWDG();
 #endif
-  MX_IWDG_Init();
+  PlatformWatchdog_Init();
   /* USER CODE END RTOS_EVENTS */
 
-}
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN StartDefaultTask */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END StartDefaultTask */
 }
 
 /* USER CODE BEGIN Header_StartTask02 */

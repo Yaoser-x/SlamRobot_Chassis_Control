@@ -3,25 +3,12 @@
 
 #include <stdint.h>
 
+#include "motor_types.h"
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-    typedef enum
-    {
-        MOTOR_ID_M1    = 0,
-        MOTOR_ID_M2    = 1,
-        MOTOR_ID_M3    = 2,
-        MOTOR_ID_M4    = 3,
-        MOTOR_ID_COUNT = 4
-    } motor_id_t;
-
-    typedef enum
-    {
-        MOTOR_SIDE_LEFT  = 0,
-        MOTOR_SIDE_RIGHT = 1
-    } motor_side_t;
 
     typedef enum
     {
@@ -79,6 +66,7 @@ extern "C"
 
     void    MotorDriver_Init(void);
     void    MotorDriver_SetSpeedGetter(motor_speed_getter_t getter);
+    void    MotorDriver_SetDirectionConfig(const int8_t direction[MOTOR_ID_COUNT]);
     void    MotorDriver_SetPermille(motor_id_t motor, int16_t permille);
     void    MotorDriver_SetSidePermille(motor_side_t side, int16_t permille);
     void    MotorDriver_Stop(motor_id_t motor, motor_stop_mode_t mode);

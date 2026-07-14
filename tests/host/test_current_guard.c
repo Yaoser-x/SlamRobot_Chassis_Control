@@ -5,11 +5,11 @@
 #include "adc_monitor.h"
 #include "bsp_config.h"
 #include "current_guard.h"
-#include "param_store.h"
+#include "param_service.h"
 
-uint32_t ParamStore_GetSnapshot(param_store_t *params)
+uint32_t ParamService_GetSnapshot(param_model_t *params)
 {
-    *params = (param_store_t){0};
+    *params = (param_model_t){0};
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         params->current_observe_a[i]    = MOTOR_STALL_CURRENT_A;

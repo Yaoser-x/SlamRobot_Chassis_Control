@@ -43,6 +43,7 @@ extern "C"
     } line_sensor_data_t;
 
     void    LineUart_Init(void);
+    void    LineUart_SetThresholdConfig(const uint16_t threshold[LINE_SENSOR_CHANNELS], uint8_t active_low);
     void    LineUart_Update(void);
     void    LineUart_GetState(line_uart_state_t *state);
     uint8_t LineUart_GetSensorData(line_sensor_data_t *data);

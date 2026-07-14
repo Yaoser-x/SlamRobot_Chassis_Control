@@ -30,7 +30,7 @@
 
 TIM1 低有效 BKIN 是权威硬切断，Automatic Output 禁用；触发后清 MOE/CCR 并软件锁存。TIM8 在同一 nFAULT 汇聚网上仅作冗余 BIF/count/last 诊断，不计为第二个独立故障。用户确认连线为四路 nFAULT→两组 BAT54A→47k 上拉→PE15/PA6；仓库无原理图可独立复核。
 
-系统 error flag 以 `system_monitor.h` 为准；bit 9–16 中除 `TIM_BREAK` 外的位保留给现有诊断命名空间：
+系统 error flag 以 `safety_service.h` 为准；bit 9–16 中除 `TIM_BREAK` 外的位保留给现有诊断命名空间：
 
 | 位 | 宏 | 含义 | 触发条件 | 是否锁存 |
 |----|-----|------|----------|---------|
@@ -54,7 +54,7 @@ TIM1 低有效 BKIN 是权威硬切断，Automatic Output 禁用；触发后清 
 ```
 DRV8874 nFAULT 拉低 → SYSTEM_ERROR_DRV_FAULT
     → latched → SYSTEM_ERROR_FAULT_STOP
-    → ControlManager_SetFaultStop(1)
+    → ControlService_SetFaultStop(1)
     → 清空全部控制源 + EN=0 停止输出
     → 全部电机进入 PH/EN 低侧慢衰减制动
 ```

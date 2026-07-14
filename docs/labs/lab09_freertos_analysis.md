@@ -10,7 +10,7 @@
 
 ### 1. 任务模型
 
-本固件共有 11 个任务（`freertos.c` + `chassis_tasks.h`）：
+本固件共有 10 个业务任务（`freertos.c` + `App/tasks/app_tasks.h`）；无业务职责的 CubeMX `defaultTask` 已删除：
 
 | 任务 | 优先级 | 周期 | 调度方式 | 栈 (W) | 核心职责 |
 |------|--------|------|----------|--------|----------|
@@ -24,7 +24,6 @@
 | debugTask | BelowNormal | 10ms | osDelay | 调试台 |
 | oledTask | Low | 100ms | osDelayUntil | OLED 显示 |
 | ledTask | Low | 50ms | osDelayUntil | 状态 LED |
-| defaultTask | Low | 1ms | osDelay | 空闲保活 |
 
 ### 2. 优先级与抢占
 
@@ -39,7 +38,7 @@ High > AboveNormal > Normal > BelowNormal > Low > Idle
     ↓ 抢占
   lineTask / espTask / debugTask (BelowNormal)
     ↓ 抢占
-  oledTask / ledTask / defaultTask (Low)
+  oledTask / ledTask (Low)
 ```
 
 高优先级任务就绪时立即抢占低优先级任务的 CPU。同一优先级任务按时间片轮转。
@@ -196,7 +195,6 @@ rtos                # 记录 heap_min 最终值
 ```bash
 rtos
 # 大多数任务 state=2 (Blocked)，因为它们在 osDelayUntil 中等待
-# defaultTask state=1 (Ready)，因为它是 Low 优先级且 1ms 周期
 ```
 
 ## 数据分析
@@ -240,7 +238,7 @@ plt.savefig('lab09_rtos_perf.png', dpi=150)
 
 3. 假设 `motorTask` 栈深度在最坏情况下为 896B，当前 `stack_free=1024B`。余量是否足够？如果不够，增大栈的开销是什么？
 
-4. `defaultTask` 优先级最低且周期仅 1ms。为什么设计一个如此高频的低优先级任务？（提示：参考 STM32 CubeMX FreeRTOS 默认任务的设计意图）
+4. 为什么删除无业务职责的 `defaultTask` 后，FreeRTOS Idle task 仍能承担系统空闲处理？
 
 5. 如果要在不修改固件的情况下测量每个任务的 CPU 使用率，FreeRTOS 提供了哪些 hook 函数？`vApplicationTickHook` 和 `Tracealyzer` 的测量原理是什么？
 
@@ -251,4 +249,3 @@ plt.savefig('lab09_rtos_perf.png', dpi=150)
 | `heap_free` 极低 (< 5KB) | `configTOTAL_HEAP_SIZE` 不足或内存泄漏 | 增大 FreeRTOS heap；排查 malloc-free 配对 |
 | 高优先级任务 `missed` > 0 | 任务执行时间超过周期 | 优化任务逻辑；增大周期；提高 CPU 频率 |
 | 某任务 `stack_free` 持续下降 | 递归调用过深或局部变量过大 | 增大对应任务栈（`freertos.c` 中 `stack_size`，+128W） |
-| `defaultTask` 显示 `missing` | 任务创建失败 | 检查 heap 是否耗尽 |

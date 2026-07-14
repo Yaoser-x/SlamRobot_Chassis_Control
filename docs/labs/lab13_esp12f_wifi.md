@@ -21,7 +21,7 @@
   PC (esptool.py) ──bin──→ USART1 ──透明桥──→ USART2 ──→ ESP12F BootROM
 ```
 
-**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 `upper_protocol` 帧协议发送给 STM32（`App/protocol/esp12f_comm.c` 解析），提交至 `CONTROL_SOURCE_ESP12F`。这不是桥接，而是标准的帧协议通信。
+**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 `upper_protocol` 帧协议发送给 STM32（`Service/communication/esp12f_service.c` 解析），提交至 `CONTROL_SOURCE_ESP12F`。这不是桥接，而是标准的帧协议通信。
 
 **烧录模式** (`espflash on`)：USART1 和 USART2 之间建立透明桥——STM32 将 PC 发来的二进制流直传给 ESP12F，同时将 ESP12F 的回复直传给 PC。此模式下调试台暂停命令解析（避免二进制流被误当作文本命令）。**桥接仅用于烧录固件，正常通信不使用桥接。**
 

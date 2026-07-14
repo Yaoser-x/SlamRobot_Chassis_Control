@@ -12,7 +12,7 @@ extern "C"
     void Usart1DebugConsole_OnRxCplt(void);
     void Usart1DebugConsole_OnUartError(void);
     void Usart1DebugConsole_RevokeMaintenanceAuthorization(void);
-    void Task_Usart1DebugConsole(void *argument);
+    void DebugConsole_RunTask(void *argument);
 
 #ifdef __cplusplus
 }

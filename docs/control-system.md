@@ -3,8 +3,8 @@
 ## 1. 控制链数据流
 
 ```
-控制源 → ControlManager          优先级仲裁 + 超时 + reject-and-stop
-       → ChassisControl_Step     每 10ms，motorTask 驱动
+控制源 → ControlService          优先级仲裁 + 超时 + reject-and-stop
+       → ChassisService_Step     每 10ms，motorTask 驱动
          → ChassisLayout         电机启用/侧别/方向查表
          → 差速模型              linear_x / angular_z → left_mps / right_mps
          → 速度斜坡              按 CHASSIS_SPEED_RAMP_MPS2 平滑过渡
@@ -32,7 +32,7 @@
 
 ### 2.1 仲裁逻辑
 
-`ControlManager_GetCommand()` 按优先级数组 `{UPPER, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
+`ControlService_GetCommand()` 按优先级数组 `{UPPER, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
 
 1. 检查源命令的 `enable` 标志
 2. 按控制源验证命令年龄：UPPER 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
@@ -59,7 +59,7 @@
 
 ### 3.2 命令拒绝规则
 
-`ControlManager_SetCommand()` 在以下任一条件时拒绝命令（`CONTROL_COMMAND_REJECTED`）：
+`ControlService_SetCommand()` 在以下任一条件时拒绝命令（`CONTROL_COMMAND_REJECTED`）：
 
 - 当前处于 ESTOP 或 fault-stop 状态
 - 源 ID 非法（`NONE` 或超出 `CONTROL_SOURCE_LINE`）
@@ -80,7 +80,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 ### 3.3 P0 运动安全
 
-- ParamStore generation 快照供 ControlManager、ChassisControl 和 EncoderDriver 同代消费；代际变化清 PID/斜坡。电机/编码器方向支持编译期默认（`ChassisLayout`）和运行时覆盖（`set motor_dir`/`set encoder_dir`）。
+- ParamService generation 快照供 ControlService、ChassisService 和 EncoderDriver 同代消费；代际变化清 PID/斜坡。电机/编码器方向支持编译期默认（`ChassisLayout`）和运行时覆盖（`set motor_dir`/`set encoder_dir`）。
 - 维护锁先阻止新命令，再清控制源/raw/open-loop/PWM 并确认编码器静止。raw/open-loop 租约 400ms；Release 还需本地 `maint arm` 60s 授权。
 - 维护、ESTOP 和 fault-stop 首次置位都会递增 motion-revoke generation；此前启用的 LINE 和自动续发 DEBUG `vel` 会失效，解除安全锁后必须重新执行 `line on` 或发送新的本地 `vel`，不会恢复旧运动模式。
 - 正常闭环任一 enabled encoder 无效，或 RUN/PWM 有效时非零 requested target 持续 150ms 无运动，当前 motorTask 周期立即整车停车并锁存 bit17。
@@ -92,17 +92,16 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 | 任务 | 入口函数 | 优先级 | 周期 | 调度方式 | 栈大小 | 核心职责 |
 | --- | --- | --- | --- | --- | --- | --- |
-| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | `osDelayUntil` | 4096B | `SystemMonitor_Update` + `ResetTrace_UpdateControl` + `ResetTrace_TaskHeartbeat`：状态聚合、命令超时检测、fault-stop 锁存、崩溃追踪心跳和 motorTask 心跳守卫 |
-| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `EncoderDriver_Update` + `ChassisControl_Step`：编码器刷新、差速+PID+PWM |
-| **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUart_Update`：USART3 上位机协议收发 |
+| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | Platform 周期延时 | 4096B | 更新传感器、`SafetyService_Update`、ResetTrace 心跳与看门狗门控 |
+| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | Platform 周期延时 | 512W (2048B) | `EncoderService_Update` + `ChassisService_Step` |
+| **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `UpperUartService_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
-| **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
+| **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
 | **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 1024W (4096B) | `LineUart_Update` + `LineUart_RequestAnalog` + `LineControl_Update`：帧解析、传感器查询、P 控制提交 |
-| **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `ResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `Esp12fComm_Update`：ESP12F 协议收发与烧录桥 |
-| **debugTask** | `Task_Usart1DebugConsole` | BelowNormal | 10ms | `osDelay` | 2048W (8192B) | `ResetTrace_TaskHeartbeat` + 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
+| **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `Esp12fService_Update`：ESP12F 协议收发与烧录桥 |
+| **debugTask** | `Task_Debug` | BelowNormal | 10ms | `osDelay` | 2048W (8192B) | `PlatformResetTrace_TaskHeartbeat` + 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
 | **ledTask** | `Task_Led` | Low (osPriorityLow) | 50ms | `osDelayUntil` | 128W (512B) | `LedStatus_TaskStep`：TEST_LED 状态闪烁 |
 | **oledTask** | `Task_Oled` | Low (osPriorityLow) | 100ms | `osDelayUntil` | 256W (1024B) | `OLED_UI_Update`：SSD1306 OLED 三阶段 UI 刷新（欢迎/自检/运行） |
-| **defaultTask** | `StartDefaultTask` | Low (osPriorityLow) | 1ms | `osDelay` | 128W (512B) | 空闲保活（无实质工作） |
 
 ### 4.2 FreeRTOS 关键配置
 
@@ -167,7 +166,7 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 - **ESP12F flash bridge**：维护功能。进入前获取统一维护锁并确认静止，active 全生命周期拒绝所有控制源；USART1 被二进制透传接管，30s 无活动自动退出并释放锁
 # P1-P3 运行时增强
 
-- 电机/编码器方向、巡线阈值/极性/PD/速度、电流三层阈值与直行补偿增益均由 ParamStore 原子快照驱动；编译期宏只提供安全默认值。
+- 电机/编码器方向、巡线阈值/极性/PD/速度、电流三层阈值与直行补偿增益均由 ParamService 原子快照驱动；编译期宏只提供安全默认值。
 - 所有来源的 `angular_z=0` 在底盘层统一进入 `StraightController`。控制器按前进/后退和 0.15/0.30m/s 插值 trim，再叠加轮速耦合与 gyro-z 积分航向 PI；不等待 400ms，也不使用 Mahony yaw。
 - IMU stale、未校准、SPI/timestamp/gyro quality 异常时同周期退化为 trim + wheel，恢复周期清零航向参考，禁止输出阶跃。纠偏/PWM/电流饱和时冻结积分；弱侧无法增速时降低共同速度以保留差速。
 - 默认 trim、Kp、Ki 和航向保持关闭，必须用匹配固件身份的双向 2m 基线/改后报告决定参数。前 0.30m 万向轮翻转段单独记录，不计入稳态验收。

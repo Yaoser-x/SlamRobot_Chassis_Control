@@ -138,6 +138,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Five-layer architecture check
+        run: python3 scripts/check_architecture_dependencies.py
+
       - name: Install clang-format
         run: |
           sudo apt-get update
@@ -145,11 +148,11 @@ jobs:
 
       - name: clang-format dry run
         run: |
-          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'tests/host/*.c' 'tests/host/*.h')
+          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
             echo "$files" | xargs clang-format --dry-run --Werror
           else
-            echo "No App/BSP/tests C/H files."
+            echo "No five-layer/tests C/H files."
           fi
 
   static-analysis:
@@ -167,7 +170,7 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'tests/host/*.c' 'tests/host/*.h')
+          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
             cppcheck --enable=warning --error-exitcode=1 \
               --suppress=missingIncludeSystem \
@@ -175,7 +178,7 @@ jobs:
               --inline-suppr \
               $files
           else
-            echo "No App/BSP/tests C/H files."
+            echo "No five-layer/tests C/H files."
           fi
 
   esp8266-build:

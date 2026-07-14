@@ -31,7 +31,7 @@ u(k) = P(k) + I(k) + D(k)
 ### 2. 控制链全貌
 
 ```
-vel V [W]  ──→  ControlManager  ──→  ChassisControl_Step (10ms)
+vel V [W]  ──→  ControlService  ──→  ChassisService_Step (10ms)
                   ├─ 差速模型: linear_x/angular_z → left_mps/right_mps
                   ├─ 速度斜坡: 1.0 m/s² 平滑过渡
                   ├─ PID 速度环: 独立四路 PI(D)

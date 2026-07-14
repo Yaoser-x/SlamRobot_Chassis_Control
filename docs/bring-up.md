@@ -9,7 +9,7 @@
 **命令**：`rtos`
 
 **确认项**：
-- 所有 11 个任务均已创建（`defaultTask`–`oledTask`，无 `missing`）
+- 十个业务任务均已创建（`safetyTask`–`oledTask`，无 `missing`）
 - `heap_free` > 10KB，`heap_min` 不异常小
 - 各任务 `stack_free` > 256B（尤其 `debugTask` 需 > 1KB，`motorTask` > 512B）
 - 核心任务（`safety`/`motor`/`rpi`/`imu`/`oled`）`missed=0`

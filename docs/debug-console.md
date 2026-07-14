@@ -81,15 +81,15 @@ adccal plan m2 500             用 M2 当前读数和已知 500mA 负载估算�
 
 | 字段名 | 输出列 | 列数 | 数据来源 |
 | --- | --- | --- | --- |
-| `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisControl_GetState` |
+| `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisService_GetState` |
 | `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `AdcMonitor_GetState` 的慢速稳定电流，兼容旧 CSV |
 | `adcraw` | `m*_mean_ma, m*_rms_ma, m*_pk_ma, m*_n` | 16 | 最近 ADC 窗口的均值/RMS/峰值/样本数，用于电流校准；不改变旧列顺序 |
 | `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg, imu_stime, imu_q*_milli, imu_quality` | 20 | `ImuBmi270_GetState`（车体坐标系） |
-| `errors` | `errors` | 1 | `SystemMonitor_GetState` |
-| `source` | `source` | 1 | `SystemMonitor_GetState` |
+| `errors` | `errors` | 1 | `SafetyService_GetState` |
+| `source` | `source` | 1 | `SafetyService_GetState` |
 | `ps2` | `ps2_ok, ps2_fail` | 2 | `Ps2Control_GetState` |
 | `line` | `line_bytes, line_frames` | 2 | `LineUart_GetState` |
-| `esp` | `esp_rx, esp_tx` | 2 | `Esp12fComm_GetState` |
+| `esp` | `esp_rx, esp_tx` | 2 | `Esp12fService_GetState` |
 
 **输出格式**：第一列为 `t_ms`（`osKernelGetTickCount()`），后续按用户输入顺序排列字段列。所有浮点值缩放为毫/微单位整数（×1000），避免 `printf` 浮点开销。
 
@@ -152,7 +152,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 ### 5.1 状态查询
 
-- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度、`current_control_valid`、`signed_mean/noise/zero_span/quality_flags`）、POST、ParamStore、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
+- **`status` / `s`**：单次输出所有子系统快照，含编码器速度与计数、底盘目标/实际速度与 PWM、TIM1/TIM8 BREAK 的 MOE/BIF/累计观测次数、ADC 电压电流（含零点校准进度、`current_control_valid`、`signed_mean/noise/zero_span/quality_flags`）、POST、ParamService、IMU profile/init/SensorTime/quaternion/quality、系统错误标志/复位标志/控制源、通信统计、ResetTrace 崩溃记录
 
 `ADCCAL` 行中的 `valid` 表示电流可显示，`cvalid` 表示可用于保护/控制，`cmask` 是按 M1~M4 位排列的逐路控制有效掩码。`observe` 是 dry-run 阶段观察到超过堵转阈值的累计次数，`would` 是如果打开软件锁停本会锁停的累计次数。`ADCQ` 行中的 `signed` 保留带符号均值，`noise` 为窗口噪声估计，`span` 为零点学习窗口 raw 跨度，`q` 为质量标志。
 
@@ -174,7 +174,7 @@ LINE rx_bytes=14280 frames=680 proto_err=2 ovf=0
 
 - `get <param>`：读取当前 RAM 中的参数值。
 - `set <param> <value>`：修改当前 RAM 中的参数值；超出安全范围会拒绝。
-- `set save`：保存当前 ParamStore，并抓取 ADC current-zero 与 IMU gyro bias 校准快照写入 STM32 Flash。
+- `set save`：保存当前 ParamService，并抓取 ADC current-zero 与 IMU gyro bias 校准快照写入 STM32 Flash。
 - `set reset`：擦除 Flash 参数镜像并恢复编译期默认值。
 
 `set <param>`、`set save`、`set reset` 都会进入统一底盘维护锁：清控制源和 raw/open-loop，PWM 归零，并要求所有 enabled encoder 有效且静止。维护事件还会撤销此前的 LINE enable 和自动续发 DEBUG `vel`；释放锁后需新的 `line on`/`vel` 才能运动。保存成功或失败都会释放锁。
@@ -212,7 +212,7 @@ Flash 参数镜像带 magic、版本号和 CRC32。启动时若镜像为空、CR
 
 - 所有 motor/raw 命令受 ESTOP 和 fault-stop 保护，激活时拒绝执行并提示 `"rejected: estop/fault active"`
 - permille 参数自动钳位至 `±CHASSIS_PWM_MAX_PERMILLE`（默认 900‰）
-- `vel` 通过 `ControlManager` 提交至 `CONTROL_SOURCE_DEBUG`（最低优先级），每 10ms 自动刷新时间戳避免超时
+- `vel` 通过 `ControlService` 提交至 `CONTROL_SOURCE_DEBUG`（最低优先级），每 10ms 自动刷新时间戳避免超时
 - raw/open-loop 只在最近 400ms 内收到刷新时有效。Release 构建还必须先在本地 USART1 执行 `maint arm`，授权 60s；`maint off`、UART 错误、ESP 桥接、ESTOP/fault 或超时立即撤销并停车。Debug 构建无需 arm，但仍受 400ms deadman 保护。
 
 ### 5.4 IMU 操作
