@@ -1,6 +1,7 @@
 #include "app_tasks.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "control_service.h"
 #include "imu_calibration_service.h"
 #include "platform_time.h"
@@ -9,6 +10,7 @@
 #include "platform_reset_trace.h"
 #include "safety_service.h"
 #include "task_health_service.h"
+#include "system_snapshot_service.h"
 
 void Task_Safety(void *argument)
 {
@@ -21,6 +23,7 @@ void Task_Safety(void *argument)
 
         SafetyService_Update();
         PostService_UpdateRuntime(now_ms);
+        SystemSnapshotService_Update(now_ms);
         PlatformResetTrace_UpdateControl(ControlService_GetActiveSource(),
                                          ControlService_IsEmergencyStop(),
                                          ControlService_IsFaultStop());

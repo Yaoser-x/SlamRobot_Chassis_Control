@@ -1,4 +1,6 @@
 #include "safety_service.h"
+#include "battery_guard.h"
+#include "safety_fault_policy.h"
 #include "platform_critical.h"
 #include "platform_time.h"
 #include "bsp_config.h"
@@ -25,15 +27,7 @@ static uint8_t                   motor_output_active[MOTOR_ID_COUNT];
 static uint8_t                   startup_blank_armed[MOTOR_ID_COUNT];
 static uint32_t                  overcurrent_blank_until_ms[MOTOR_ID_COUNT];
 static uint32_t                  inactive_since_ms[MOTOR_ID_COUNT];
-static uint8_t                   battery_warning_active;
-static uint8_t                   battery_critical_debounce_active;
-static uint8_t                   battery_recovery_debounce_active;
-static uint32_t                  battery_critical_since_ms;
-static uint32_t                  battery_recovery_since_ms;
-
-#define SYSTEM_FAULT_STOP_CAUSE_MASK                                                                                   \
-    (SYSTEM_ERROR_LEFT_OVERCURRENT | SYSTEM_ERROR_RIGHT_OVERCURRENT | SYSTEM_ERROR_DRV_FAULT | SYSTEM_ERROR_TIM_BREAK  \
-     | SYSTEM_ERROR_ENCODER_FEEDBACK_LOST | SYSTEM_ERROR_BATTERY_CRITICAL)
+static battery_guard_t           battery_guard;
 
 static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
     SYSTEM_ERROR_M1_OVERCURRENT,
@@ -168,12 +162,8 @@ static void SafetyService_UpdateCurrentDryRun(const adc_monitor_state_t *adc_sta
 
 void SafetyService_Init(void)
 {
-    monitor_state                    = (safety_service_snapshot_t){0};
-    battery_warning_active           = 0U;
-    battery_critical_debounce_active = 0U;
-    battery_recovery_debounce_active = 0U;
-    battery_critical_since_ms        = 0UL;
-    battery_recovery_since_ms        = 0UL;
+    monitor_state = (safety_service_snapshot_t){0};
+    BatteryGuard_Init(&battery_guard);
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         overcurrent_count[i]                = 0U;
@@ -205,6 +195,7 @@ void SafetyService_Update(void)
     uint8_t                   release_fault_stop = 0U;
     uint8_t                   battery_sample_valid;
     uint8_t                   battery_critical_latched;
+    battery_guard_result_t    battery_result;
     uint32_t                  auto_clear_latched_flags = 0UL;
     uint32_t                  now_ms;
     uint32_t                  primask;
@@ -291,63 +282,23 @@ void SafetyService_Update(void)
                                             next_overcurrent_count,
                                             &new_latched_flags);
     battery_sample_valid = SafetyService_BatterySampleValid(&adc_state);
-    if (BATTERY_LOW_MONITOR_ENABLED != 0U && battery_sample_valid != 0U)
-    {
-        if (next_state.battery_voltage < BATTERY_LOW_WARN_V)
-        {
-            battery_warning_active = 1U;
-        }
-        else if (next_state.battery_voltage > BATTERY_LOW_CLEAR_V)
-        {
-            battery_warning_active = 0U;
-        }
-    }
-    if (battery_warning_active != 0U)
+    BatteryGuard_Update(&battery_guard,
+                        next_state.battery_voltage,
+                        battery_sample_valid,
+                        battery_critical_latched,
+                        now_ms,
+                        &battery_result);
+    if (battery_result.warning_active != 0U)
     {
         next_state.error_flags |= SYSTEM_ERROR_LOW_BATTERY;
     }
-
-    if (battery_critical_latched == 0U)
+    if (battery_result.latch_critical != 0U)
     {
-        battery_recovery_debounce_active = 0U;
-        if (battery_sample_valid != 0U && next_state.battery_voltage < BATTERY_CRITICAL_V)
-        {
-            if (battery_critical_debounce_active == 0U)
-            {
-                battery_critical_debounce_active = 1U;
-                battery_critical_since_ms        = now_ms;
-            }
-            else if ((uint32_t)(now_ms - battery_critical_since_ms) >= BATTERY_CRITICAL_DEBOUNCE_MS)
-            {
-                new_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
-                battery_critical_debounce_active = 0U;
-            }
-        }
-        else
-        {
-            battery_critical_debounce_active = 0U;
-        }
+        new_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
     }
-    else
+    if (battery_result.clear_critical != 0U)
     {
-        battery_critical_debounce_active = 0U;
-        if (battery_sample_valid != 0U && next_state.battery_voltage > BATTERY_RECOVER_V)
-        {
-            if (battery_recovery_debounce_active == 0U)
-            {
-                battery_recovery_debounce_active = 1U;
-                battery_recovery_since_ms        = now_ms;
-            }
-            else if ((uint32_t)(now_ms - battery_recovery_since_ms) >= BATTERY_RECOVER_DEBOUNCE_MS)
-            {
-                auto_clear_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
-                battery_recovery_debounce_active = 0U;
-            }
-        }
-        else
-        {
-            battery_recovery_debounce_active = 0U;
-        }
+        auto_clear_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
     }
     if (estop_active != 0U)
     {
@@ -401,7 +352,7 @@ void SafetyService_Update(void)
     monitor_state.latched_error_flags &= ~auto_clear_latched_flags;
     latched_after_commit      = monitor_state.latched_error_flags;
     monitor_state.error_flags = next_state.error_flags | latched_after_commit;
-    if ((latched_after_commit & SYSTEM_FAULT_STOP_CAUSE_MASK) != 0U)
+    if (SafetyFaultPolicy_RequiresFaultStop(latched_after_commit) != 0U)
     {
         request_fault_stop = 1U;
         monitor_state.error_flags |= SYSTEM_ERROR_FAULT_STOP;
@@ -438,7 +389,7 @@ void SafetyService_GetState(safety_service_snapshot_t *state)
 
 void SafetyService_ClearLatchedFaults(uint32_t mask)
 {
-    uint32_t                  clearable = mask & ~SYSTEM_ERROR_BATTERY_CRITICAL;
+    uint32_t                  clearable = SafetyFaultPolicy_ManualClearMask(mask);
     safety_service_snapshot_t snapshot;
     motor_driver_state_t      motor_state;
     encoder_state_t           encoder_state;
@@ -492,7 +443,7 @@ void SafetyService_ClearLatchedFaults(uint32_t mask)
     primask = PlatformCritical_Enter();
     monitor_state.latched_error_flags &= ~clearable;
     latched_after_clear = monitor_state.latched_error_flags;
-    if ((latched_after_clear & SYSTEM_FAULT_STOP_CAUSE_MASK) == 0U)
+    if (SafetyFaultPolicy_RequiresFaultStop(latched_after_clear) == 0U)
     {
         for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
         {

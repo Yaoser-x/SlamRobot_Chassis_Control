@@ -41,9 +41,11 @@ extern "C"
         uint32_t last_update_ms;
     } encoder_state_t;
 
-    void    EncoderDriver_Init(void);
-    void    EncoderDriver_Update(uint32_t now_ms, const param_model_t *params);
-    void    EncoderDriver_GetState(encoder_state_t *state);
+    void EncoderDriver_Init(void);
+    void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params);
+    void EncoderDriver_GetState(encoder_state_t *state);
+    /** Read the raw hardware timer count for each logical motor. */
+    void    EncoderDriver_GetHardwareCounts(uint32_t counts[MOTOR_ID_COUNT]);
     float   EncoderDriver_GetCountsPerRev(void);
     float   EncoderDriver_GetMotorSpeedMps(motor_id_t motor);
     int32_t EncoderDriver_DiffCount(uint32_t now, uint32_t last, uint32_t period);

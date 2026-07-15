@@ -1,3 +1,4 @@
+
 # Lab 01: 基础运动控制
 
 ## 实验目标
@@ -41,7 +42,7 @@ EN/IN1 = 0,   PH/IN2 = GPIO 低  →  低侧慢衰减制动
 
 ### 3. 电机编号与布局
 
-默认四驱配置（`chassis_config.h`）：
+默认四驱配置（`control_config.h / bsp_config.h`）：
 
 ```
         前
@@ -99,7 +100,7 @@ m1 0 0          # 停止 M1
 
 重复 `m2`、`m3`、`m4` 命令。
 
-**观察**：正转时车轮应向前进方向旋转；反转时向后倒退方向旋转。若某路方向相反，需修改 `chassis_config.h` 中对应的 `CHASSIS_Mx_MOTOR_DIR = -1` 并重新烧录。
+**观察**：正转时车轮应向前进方向旋转；反转时向后倒退方向旋转。若某路方向相反，需修改 `control_config.h / bsp_config.h` 中对应的 `CHASSIS_Mx_MOTOR_DIR = -1` 并重新烧录。
 
 记录每路电机的实际旋转方向：
 

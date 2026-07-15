@@ -47,6 +47,18 @@ float EncoderDriver_GetCountsPerRev(void)
     return CHASSIS_ENCODER_BASE_PPR * CHASSIS_ENCODER_QUADRATURE_MULT * CHASSIS_MOTOR_GEAR_RATIO;
 }
 
+void EncoderDriver_GetHardwareCounts(uint32_t counts[MOTOR_ID_COUNT])
+{
+    if (counts == 0)
+    {
+        return;
+    }
+    for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+        counts[i] = __HAL_TIM_GET_COUNTER(encoder_hw[i].htim);
+    }
+}
+
 void EncoderDriver_Init(void)
 {
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)

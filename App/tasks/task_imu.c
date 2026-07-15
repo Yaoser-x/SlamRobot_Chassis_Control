@@ -1,6 +1,7 @@
 #include "app_tasks.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "imu_calibration_service.h"
 #include "imu_service.h"
 #include "platform_task_event.h"

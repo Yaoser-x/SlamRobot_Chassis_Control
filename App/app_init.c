@@ -1,7 +1,5 @@
 #include "app_init.h"
 
-#include "main.h"
-
 #include "chassis_service.h"
 #include "current_sensor_service.h"
 #include "encoder_service.h"
@@ -16,10 +14,12 @@
 #include "param_persistence.h"
 #include "param_service.h"
 #include "post_service.h"
+#include "platform_reset.h"
 #include "ps2_control_service.h"
 #include "reset_reason_service.h"
 #include "safety_service.h"
 #include "ssd1306.h"
+#include "system_snapshot_service.h"
 #include "task_health_service.h"
 #include "upper_uart_service.h"
 #include "usart1_debug_console.h"
@@ -31,7 +31,8 @@ void App_Init(void)
     uint8_t              params_loaded;
     uint8_t              first_calibration_save_needed = 1U;
 
-    ResetReasonService_Capture(RCC->CSR);
+    ResetReasonService_Capture(PlatformReset_ReadReasonFlags());
+    PlatformReset_ClearReasonFlags();
     TaskHealthService_Reset();
     ParamService_SetDefaults();
     params_loaded = (ParamPersistence_Load(&bundle) == FLASH_PARAM_STATUS_OK) ? 1U : 0U;
@@ -68,6 +69,7 @@ void App_Init(void)
     LineControlService_Init();
     Ps2ControlService_Init();
     Esp12fService_Init();
+    SystemSnapshotService_Init();
     Esp12fFlashBridge_Init();
     Usart1DebugConsole_Init();
     PostService_Run();

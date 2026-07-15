@@ -1,3 +1,4 @@
+
 # 外设资源
 
 ## 1. 电机 PWM 与 DRV8874 H-Bridge
@@ -332,7 +333,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 
 ### 9.6 配置参数
 
-所有参数集中在 `App/chassis/chassis_config.h`：
+所有参数集中在 `Domain/config/control_config.h / BSP/bsp_config.h`：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |

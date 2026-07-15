@@ -1,3 +1,4 @@
+
 # Lab 04: 电流监测与限流
 
 ## 实验目标
@@ -17,7 +18,7 @@ I_motor = max(V_adc - V_zero, 0) / MOTOR_CURRENT_VOLTS_PER_AMP
          = max(ADC_raw - ADC_zero_raw, 0) / 4095 × 3.3 / 1.0
 ```
 
-参数（`chassis_config.h`）：
+参数（`control_config.h / bsp_config.h`）：
 
 | 参数 | 符号 | 默认值 |
 |------|------|--------|

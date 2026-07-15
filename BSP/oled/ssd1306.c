@@ -64,6 +64,11 @@ static uint8_t SSD1306_WriteCmd(uint8_t cmd)
         HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1), 0x00, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 10));
 }
 
+uint8_t SSD1306_IsReady(void)
+{
+    return (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(OLED_I2C_ADDR << 1), 2U, 10U) == HAL_OK) ? 1U : 0U;
+}
+
 /* --- Initialization sequence --- */
 void SSD1306_Init(void)
 {

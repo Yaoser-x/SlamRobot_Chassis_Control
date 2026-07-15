@@ -170,11 +170,28 @@ static void test_runtime_wheel_radius_changes_speed_generation(void)
                   "runtime radius doubles converted speed");
 }
 
+static void test_hardware_count_snapshot_uses_logical_motor_order(void)
+{
+    uint32_t counts[MOTOR_ID_COUNT] = {0U};
+
+    tim2_instance.CNT = 12U;
+    tim4_instance.CNT = 24U;
+    tim3_instance.CNT = 33U;
+    tim5_instance.CNT = 45U;
+    EncoderDriver_GetHardwareCounts(counts);
+
+    require_int(counts[MOTOR_ID_M1] == 12U, "M1 maps to TIM2");
+    require_int(counts[MOTOR_ID_M2] == 24U, "M2 maps to TIM4");
+    require_int(counts[MOTOR_ID_M3] == 33U, "M3 maps to TIM3");
+    require_int(counts[MOTOR_ID_M4] == 45U, "M4 maps to TIM5");
+}
+
 int main(void)
 {
     test_runtime_encoder_direction_reverses_delta();
     test_update_publishes_after_unmasked_calculation();
     test_runtime_wheel_radius_changes_speed_generation();
+    test_hardware_count_snapshot_uses_logical_motor_order();
     (void)printf("PASS: encoder driver host tests\n");
     return 0;
 }

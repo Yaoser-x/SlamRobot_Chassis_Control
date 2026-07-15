@@ -8,7 +8,7 @@
  * @brief BSP 层硬件配置常量。
  *
  * 包含电机布局、编码器物理参数、PWM 限制、ADC 标定等 BSP 驱动所需的
- * 编译期常量。App 层通过 chassis_config.h 间接包含此文件。
+ * 编译期硬件常量。需要这些常量的上层适配器应显式包含本文件。
  */
 
 #ifdef __cplusplus

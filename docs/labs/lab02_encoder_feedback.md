@@ -1,3 +1,4 @@
+
 # Lab 02: 编码器与速度反馈
 
 ## 实验目标
@@ -48,7 +49,7 @@ V2.0 逻辑电机与编码器定时器映射如下：
 线速度 (m/s) = 转速 × 2π × R_wheel
 ```
 
-本平台参数（`chassis_config.h`）：
+本平台参数（`control_config.h / bsp_config.h`）：
 
 | 参数 | 符号 | 默认值 |
 |------|------|--------|
@@ -122,7 +123,7 @@ s                   # 记录四路 speed_mm/s 符号
 motor 0 0
 ```
 
-**判断标准**：前进时四路 `speed_mm/s` 均应为**正值**。若某路为负值，将 `chassis_config.h` 中对应的 `CHASSIS_Mx_ENCODER_DIR` 改为 `-1`。
+**判断标准**：前进时四路 `speed_mm/s` 均应为**正值**。若某路为负值，将 `control_config.h / bsp_config.h` 中对应的 `CHASSIS_Mx_ENCODER_DIR` 改为 `-1`。
 
 | 电机 | speed_mm/s (前进时) | 符号正确？ | 如需修正 |
 |------|---------------------|-----------|---------|

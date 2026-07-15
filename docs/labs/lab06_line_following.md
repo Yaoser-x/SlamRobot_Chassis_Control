@@ -1,3 +1,4 @@
+
 # Lab 06: 巡线传感器与跟踪控制
 
 ## 实验目标
@@ -56,7 +57,7 @@ angular_z = clamp(angular_z, ±LINE_ANGULAR_MAX_RPS)
 控制命令: linear_x = LINE_SPEED_MPS, angular_z = P(error)
 ```
 
-参数（`chassis_config.h`）：
+参数（`control_config.h / bsp_config.h`）：
 
 | 参数 | 默认值 | 含义 |
 |------|--------|------|
@@ -151,7 +152,7 @@ line off            # 关闭巡线
 
 ### 步骤 4：巡线参数调优
 
-落地前先调整 P 控制参数。修改 `chassis_config.h`：
+落地前先调整 P 控制参数。修改 `control_config.h / bsp_config.h`：
 
 ```c
 #define LINE_KP             2.5f    // 增大 → 转弯更猛，减小 → 跟踪更平滑

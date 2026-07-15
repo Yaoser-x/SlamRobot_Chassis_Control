@@ -1,57 +1,21 @@
 #include "imu_bmi270.h"
 
+#include "bmi270_bus.h"
+#include "bmi270_device.h"
+#include "bmi270_registers.h"
 #include "imu_calibration.h"
-#include "imu_bmi270_config.h"
+#include "imu_filter.h"
 #include "imu_bmi270_fifo.h"
 #include "imu_bmi270_math.h"
 #include "imu_timestamp.h"
 #include "main.h"
-#include "spi.h"
 
 #include <math.h>
-#include <string.h>
 
-#define BMI270_REG_CHIP_ID                  0x00U
-#define BMI270_REG_ERR_REG                  0x02U
-#define BMI270_REG_DATA_8                   0x0CU
-#define BMI270_REG_SENSORTIME_0             0x18U
-#define BMI270_REG_INTERNAL_STATUS          0x21U
-#define BMI270_REG_TEMP_0                   0x22U
-#define BMI270_REG_FIFO_LENGTH_0            0x24U
-#define BMI270_REG_FIFO_DATA                0x26U
-#define BMI270_REG_ACC_CONF                 0x40U
-#define BMI270_REG_ACC_RANGE                0x41U
-#define BMI270_REG_GYR_CONF                 0x42U
-#define BMI270_REG_GYR_RANGE                0x43U
-#define BMI270_REG_FIFO_DOWNS               0x45U
-#define BMI270_REG_FIFO_WTM_0               0x46U
-#define BMI270_REG_FIFO_WTM_1               0x47U
-#define BMI270_REG_FIFO_CONFIG_0            0x48U
-#define BMI270_REG_FIFO_CONFIG_1            0x49U
-#define BMI270_REG_INT1_IO_CTRL             0x53U
-#define BMI270_REG_INT_MAP_DATA             0x58U
-#define BMI270_REG_INIT_CTRL                0x59U
-#define BMI270_REG_INIT_ADDR_0              0x5BU
-#define BMI270_REG_INIT_ADDR_1              0x5CU
-#define BMI270_REG_INIT_DATA                0x5EU
-#define BMI270_REG_PWR_CONF                 0x7CU
-#define BMI270_REG_PWR_CTRL                 0x7DU
-#define BMI270_REG_CMD                      0x7EU
-#define BMI270_READ_BIT                     0x80U
-#define BMI270_CHIP_ID                      0x24U
-#define BMI270_CMD_SOFT_RESET               0xB6U
-#define BMI270_SPI_TIMEOUT_MS               10U
 #define BMI270_SPI_SELECT_DELAY_MS          1U
-#define BMI270_INIT_POLL_DELAY_MS           1U
-#define BMI270_INIT_TIMEOUT_MS              25U
 #define BMI270_INIT_RETRY_MS                1000U
-#define BMI270_CONFIG_CHUNK_SIZE            32U
 #define BMI270_FIFO_READ_MAX_BYTES          128U
 #define BMI270_FIFO_MAX_SAMPLES             8U
-#define BMI270_INTERNAL_STATUS_MSG_MASK     0x0FU
-#define BMI270_INTERNAL_STATUS_INIT_OK      0x01U
-#define BMI270_INIT_CTRL_PREPARE            0x00U
-#define BMI270_INIT_CTRL_COMPLETE           0x01U
 #define BMI270_ACCEL_LSB_PER_G              16384.0f
 #define BMI270_GYRO_LSB_PER_DPS             65.6f
 #define BMI270_ACCEL_FILTER_ALPHA           0.20f
@@ -87,16 +51,6 @@ static uint8_t                           imu_gyro_calibration_is_auto;
 static uint32_t                          imu_gyro_cal_last_imu_sample_count;
 
 static void ImuBmi270_ServiceAutoCal(uint32_t now_ms, uint8_t stationary);
-
-static void ImuBmi270_CsLow(void)
-{
-    HAL_GPIO_WritePin(IMU_CS_GPIO_Port, IMU_CS_Pin, GPIO_PIN_RESET);
-}
-
-static void ImuBmi270_CsHigh(void)
-{
-    HAL_GPIO_WritePin(IMU_CS_GPIO_Port, IMU_CS_Pin, GPIO_PIN_SET);
-}
 
 static int16_t ImuBmi270_ReadI16(const uint8_t *data)
 {
@@ -148,24 +102,6 @@ static void ImuBmi270_ScheduleAutoCal(uint32_t now_ms, uint32_t delay_ms)
     {
         imu_state.gyro_auto_cal_state = IMU_BMI270_GYRO_AUTO_CAL_WAIT;
     }
-}
-
-static float ImuBmi270_Filter(float previous, float input, float alpha)
-{
-    return previous + (alpha * (input - previous));
-}
-
-static float ImuBmi270_WrapAngleDeg(float angle_deg)
-{
-    while (angle_deg > 180.0f)
-    {
-        angle_deg -= 360.0f;
-    }
-    while (angle_deg <= -180.0f)
-    {
-        angle_deg += 360.0f;
-    }
-    return angle_deg;
 }
 
 static void ImuBmi270_SetError(uint8_t error)
@@ -245,161 +181,27 @@ static void ImuBmi270_ClearTransientQuality(void)
           | IMU_BMI270_QUALITY_TEMPERATURE_INVALID);
 }
 
-static HAL_StatusTypeDef ImuBmi270_ReadRegRaw(uint8_t reg, uint8_t rx[3])
-{
-    uint8_t           tx[3] = {(uint8_t)(reg | BMI270_READ_BIT), 0U, 0U};
-    HAL_StatusTypeDef status;
-
-    ImuBmi270_CsLow();
-    status = HAL_SPI_TransmitReceive(&hspi2, tx, rx, sizeof(tx), BMI270_SPI_TIMEOUT_MS);
-    ImuBmi270_CsHigh();
-    return status;
-}
-
 uint8_t ImuBmi270_ReadReg(uint8_t reg, uint8_t *value)
 {
-    uint8_t           rx[3] = {0U, 0U, 0U};
-    HAL_StatusTypeDef status;
-
-    if (value == 0)
-    {
-        return 0U;
-    }
-
-    status = ImuBmi270_ReadRegRaw(reg, rx);
-    if (status != HAL_OK)
+    if (Bmi270Bus_ReadReg(reg, value) == 0U)
     {
         ImuBmi270_SetError(IMU_BMI270_ERROR_SPI);
         return 0U;
     }
-    *value = rx[2];
     return 1U;
-}
-
-static void ImuBmi270_ConfigGpioOutput(GPIO_TypeDef *port, uint16_t pin, GPIO_PinState state)
-{
-    GPIO_InitTypeDef gpio = {0};
-
-    HAL_GPIO_WritePin(port, pin, state);
-    gpio.Pin   = pin;
-    gpio.Mode  = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull  = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(port, &gpio);
-}
-
-static void ImuBmi270_ConfigMisoInput(uint32_t pull)
-{
-    GPIO_InitTypeDef gpio = {0};
-
-    gpio.Pin   = IMU_MISO_Pin;
-    gpio.Mode  = GPIO_MODE_INPUT;
-    gpio.Pull  = pull;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(IMU_MISO_GPIO_Port, &gpio);
-}
-
-static uint8_t ImuBmi270_BitBangByte(uint8_t tx)
-{
-    uint8_t rx = 0U;
-
-    for (uint8_t bit = 0U; bit < 8U; ++bit)
-    {
-        HAL_GPIO_WritePin(IMU_MOSI_GPIO_Port, IMU_MOSI_Pin, ((tx & 0x80U) != 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-        for (volatile uint32_t delay = 0U; delay < 80U; ++delay)
-        {
-            __NOP();
-        }
-        HAL_GPIO_WritePin(IMU_SCK_GPIO_Port, IMU_SCK_Pin, GPIO_PIN_SET);
-        for (volatile uint32_t delay = 0U; delay < 80U; ++delay)
-        {
-            __NOP();
-        }
-        rx <<= 1U;
-        if (HAL_GPIO_ReadPin(IMU_MISO_GPIO_Port, IMU_MISO_Pin) == GPIO_PIN_SET)
-        {
-            rx |= 1U;
-        }
-        HAL_GPIO_WritePin(IMU_SCK_GPIO_Port, IMU_SCK_Pin, GPIO_PIN_RESET);
-        tx <<= 1U;
-    }
-    return rx;
-}
-
-static void ImuBmi270_BitBangReadRegRaw(uint8_t reg, uint8_t rx[3])
-{
-    ImuBmi270_ConfigGpioOutput(IMU_SCK_GPIO_Port, IMU_SCK_Pin, GPIO_PIN_RESET);
-    ImuBmi270_ConfigGpioOutput(IMU_MOSI_GPIO_Port, IMU_MOSI_Pin, GPIO_PIN_RESET);
-    ImuBmi270_ConfigGpioOutput(IMU_CS_GPIO_Port, IMU_CS_Pin, GPIO_PIN_SET);
-    ImuBmi270_ConfigMisoInput(GPIO_NOPULL);
-
-    ImuBmi270_CsLow();
-    rx[0] = ImuBmi270_BitBangByte((uint8_t)(reg | BMI270_READ_BIT));
-    rx[1] = ImuBmi270_BitBangByte(0U);
-    rx[2] = ImuBmi270_BitBangByte(0U);
-    ImuBmi270_CsHigh();
-}
-
-static uint8_t ImuBmi270_ReadMisoWithPull(uint32_t pull)
-{
-    ImuBmi270_ConfigMisoInput(pull);
-    HAL_Delay(1U);
-    return (HAL_GPIO_ReadPin(IMU_MISO_GPIO_Port, IMU_MISO_Pin) == GPIO_PIN_SET) ? 1U : 0U;
 }
 
 uint8_t ImuBmi270_Diagnose(imu_bmi270_diag_t *diag)
 {
-    if (diag == 0)
-    {
-        return 0U;
-    }
-
-    memset(diag, 0, sizeof(*diag));
-    ImuBmi270_CsHigh();
-    HAL_Delay(BMI270_SPI_SELECT_DELAY_MS);
-
-    for (uint8_t i = 0U; i < 2U; ++i)
-    {
-        HAL_StatusTypeDef status = ImuBmi270_ReadRegRaw(BMI270_REG_CHIP_ID, diag->hal_rx[i]);
-        diag->hal_status[i]      = (uint8_t)status;
-        HAL_Delay(BMI270_SPI_SELECT_DELAY_MS);
-    }
-
-    (void)HAL_SPI_DeInit(&hspi2);
-    ImuBmi270_BitBangReadRegRaw(BMI270_REG_CHIP_ID, diag->bitbang_rx);
-    diag->miso_nopull   = ImuBmi270_ReadMisoWithPull(GPIO_NOPULL);
-    diag->miso_pullup   = ImuBmi270_ReadMisoWithPull(GPIO_PULLUP);
-    diag->miso_pulldown = ImuBmi270_ReadMisoWithPull(GPIO_PULLDOWN);
-
-    MX_SPI2_Init();
-    ImuBmi270_CsHigh();
-    return 1U;
+    return Bmi270Bus_RunRecoveryProbe(BMI270_REG_CHIP_ID, diag);
 }
 
 static uint8_t ImuBmi270_ReadBytes(uint8_t reg, uint8_t *data, uint8_t len)
 {
-    HAL_StatusTypeDef status;
-    uint8_t           addr                                = (uint8_t)(reg | BMI270_READ_BIT);
-    uint8_t           rx[BMI270_FIFO_READ_MAX_BYTES + 2U] = {0U};
-    uint8_t           tx[BMI270_FIFO_READ_MAX_BYTES + 2U] = {0U};
-
-    if (data == 0 || len == 0U || len > BMI270_FIFO_READ_MAX_BYTES)
-    {
-        return 0U;
-    }
-
-    tx[0] = addr;
-    ImuBmi270_CsLow();
-    status = HAL_SPI_TransmitReceive(&hspi2, tx, rx, (uint16_t)(len + 2U), BMI270_SPI_TIMEOUT_MS);
-    ImuBmi270_CsHigh();
-    if (status != HAL_OK)
+    if (Bmi270Bus_ReadBytes(reg, data, len) == 0U)
     {
         ImuBmi270_SetError(IMU_BMI270_ERROR_SPI);
         return 0U;
-    }
-    for (uint8_t i = 0U; i < len; ++i)
-    {
-        data[i] = rx[i + 2U];
     }
     return 1U;
 }
@@ -489,13 +291,7 @@ static uint8_t ImuBmi270_ReadFifoLength(uint16_t *fifo_len)
 
 uint8_t ImuBmi270_WriteReg(uint8_t reg, uint8_t value)
 {
-    uint8_t           tx[2] = {(uint8_t)(reg & (uint8_t)~BMI270_READ_BIT), value};
-    HAL_StatusTypeDef status;
-
-    ImuBmi270_CsLow();
-    status = HAL_SPI_Transmit(&hspi2, tx, sizeof(tx), BMI270_SPI_TIMEOUT_MS);
-    ImuBmi270_CsHigh();
-    if (status != HAL_OK)
+    if (Bmi270Bus_WriteReg(reg, value) == 0U)
     {
         ImuBmi270_SetError(IMU_BMI270_ERROR_SPI);
         return 0U;
@@ -505,24 +301,7 @@ uint8_t ImuBmi270_WriteReg(uint8_t reg, uint8_t value)
 
 static uint8_t ImuBmi270_WriteBytes(uint8_t reg, const uint8_t *data, uint8_t len)
 {
-    HAL_StatusTypeDef status;
-    uint8_t           tx[BMI270_CONFIG_CHUNK_SIZE + 1U];
-
-    if (data == 0 || len == 0U || len > BMI270_CONFIG_CHUNK_SIZE)
-    {
-        return 0U;
-    }
-
-    tx[0] = (uint8_t)(reg & (uint8_t)~BMI270_READ_BIT);
-    for (uint8_t i = 0U; i < len; ++i)
-    {
-        tx[i + 1U] = data[i];
-    }
-
-    ImuBmi270_CsLow();
-    status = HAL_SPI_Transmit(&hspi2, tx, (uint16_t)(len + 1U), BMI270_SPI_TIMEOUT_MS);
-    ImuBmi270_CsHigh();
-    if (status != HAL_OK)
+    if (Bmi270Bus_WriteBytes(reg, data, len) == 0U)
     {
         ImuBmi270_SetError(IMU_BMI270_ERROR_SPI);
         return 0U;
@@ -530,164 +309,38 @@ static uint8_t ImuBmi270_WriteBytes(uint8_t reg, const uint8_t *data, uint8_t le
     return 1U;
 }
 
-static uint8_t ImuBmi270_SetInitAddress(uint16_t byte_offset)
-{
-    uint16_t word_addr = (uint16_t)(byte_offset / 2U);
+static const bmi270_device_io_t imu_device_io = {
+    .read_reg    = ImuBmi270_ReadReg,
+    .write_reg   = ImuBmi270_WriteReg,
+    .write_bytes = ImuBmi270_WriteBytes,
+};
 
-    if (ImuBmi270_WriteReg(BMI270_REG_INIT_ADDR_0, (uint8_t)(word_addr & 0x0FU)) == 0U)
+static uint8_t ImuBmi270_HandleDeviceStatus(bmi270_device_status_t status)
+{
+    if (status == BMI270_DEVICE_CONFIG_ERROR)
     {
-        return 0U;
+        ImuBmi270_SetError(IMU_BMI270_ERROR_CONFIG);
     }
-    if (ImuBmi270_WriteReg(BMI270_REG_INIT_ADDR_1, (uint8_t)((word_addr >> 4U) & 0xFFU)) == 0U)
+    else if (status == BMI270_DEVICE_PROFILE_MISMATCH)
     {
-        return 0U;
+        ImuBmi270_SetError(IMU_BMI270_ERROR_PROFILE_VERIFY);
     }
-    return 1U;
+    return (status == BMI270_DEVICE_OK) ? 1U : 0U;
 }
 
 static uint8_t ImuBmi270_LoadConfigFile(void)
 {
-    uint32_t offset = 0U;
-
-    if (ImuBmi270_WriteReg(BMI270_REG_INIT_CTRL, BMI270_INIT_CTRL_PREPARE) == 0U)
-    {
-        return 0U;
-    }
-
-    while (offset < bmi270_config_file_size)
-    {
-        uint32_t remaining = bmi270_config_file_size - offset;
-        uint8_t  chunk_len = (remaining > BMI270_CONFIG_CHUNK_SIZE) ? BMI270_CONFIG_CHUNK_SIZE : (uint8_t)remaining;
-
-        if ((chunk_len & 1U) != 0U)
-        {
-            ImuBmi270_SetError(IMU_BMI270_ERROR_CONFIG);
-            return 0U;
-        }
-        if (ImuBmi270_SetInitAddress((uint16_t)offset) == 0U)
-        {
-            return 0U;
-        }
-        if (ImuBmi270_WriteBytes(BMI270_REG_INIT_DATA, &bmi270_config_file[offset], chunk_len) == 0U)
-        {
-            return 0U;
-        }
-        offset += chunk_len;
-    }
-
-    if (ImuBmi270_WriteReg(BMI270_REG_INIT_CTRL, BMI270_INIT_CTRL_COMPLETE) == 0U)
-    {
-        return 0U;
-    }
-    return 1U;
+    return ImuBmi270_HandleDeviceStatus(Bmi270Device_LoadConfig(&imu_device_io));
 }
 
 static uint8_t ImuBmi270_WaitInitOk(void)
 {
-    uint8_t status = 0U;
-
-    for (uint32_t elapsed_ms = 0U; elapsed_ms < BMI270_INIT_TIMEOUT_MS; elapsed_ms += BMI270_INIT_POLL_DELAY_MS)
-    {
-        HAL_Delay(BMI270_INIT_POLL_DELAY_MS);
-        if (ImuBmi270_ReadReg(BMI270_REG_INTERNAL_STATUS, &status) == 0U)
-        {
-            return 0U;
-        }
-        if ((status & BMI270_INTERNAL_STATUS_MSG_MASK) == BMI270_INTERNAL_STATUS_INIT_OK)
-        {
-            return 1U;
-        }
-    }
-
-    ImuBmi270_SetError(IMU_BMI270_ERROR_CONFIG);
-    return 0U;
+    return ImuBmi270_HandleDeviceStatus(Bmi270Device_WaitInitOk(&imu_device_io));
 }
 
 static uint8_t ImuBmi270_ApplyProfile(const imu_bmi270_profile_t *profile)
 {
-    imu_bmi270_profile_check_t check;
-
-    if (profile == 0)
-    {
-        return 0U;
-    }
-
-    if (ImuBmi270_WriteReg(BMI270_REG_PWR_CONF, profile->pwr_conf) == 0U)
-    {
-        return 0U;
-    }
-    HAL_Delay(BMI270_SPI_SELECT_DELAY_MS);
-    if (ImuBmi270_WriteReg(BMI270_REG_ACC_CONF, profile->acc_conf) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_ACC_RANGE, profile->acc_range) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_GYR_CONF, profile->gyr_conf) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_GYR_RANGE, profile->gyr_range) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_FIFO_DOWNS, profile->fifo_downs) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_FIFO_WTM_0, profile->fifo_wtm_0) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_FIFO_WTM_1, profile->fifo_wtm_1) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_FIFO_CONFIG_0, profile->fifo_config_0) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_FIFO_CONFIG_1, profile->fifo_config_1) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_INT1_IO_CTRL, profile->int1_io_ctrl) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_INT_MAP_DATA, profile->int_map_data) == 0U)
-    {
-        return 0U;
-    }
-    if (ImuBmi270_WriteReg(BMI270_REG_PWR_CTRL, profile->pwr_ctrl) == 0U)
-    {
-        return 0U;
-    }
-    HAL_Delay(2U);
-
-    memset(&check, 0, sizeof(check));
-    if (ImuBmi270_ReadReg(BMI270_REG_ACC_CONF, &check.acc_conf) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_ACC_RANGE, &check.acc_range) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_GYR_CONF, &check.gyr_conf) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_GYR_RANGE, &check.gyr_range) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_PWR_CONF, &check.pwr_conf) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_PWR_CTRL, &check.pwr_ctrl) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_FIFO_CONFIG_0, &check.fifo_config_0) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_FIFO_CONFIG_1, &check.fifo_config_1) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_INT1_IO_CTRL, &check.int1_io_ctrl) == 0U
-        || ImuBmi270_ReadReg(BMI270_REG_INT_MAP_DATA, &check.int_map_data) == 0U)
-    {
-        return 0U;
-    }
-
-    if (ImuBmi270Profile_Check(profile, &check) == 0U)
-    {
-        ImuBmi270_SetError(IMU_BMI270_ERROR_PROFILE_VERIFY);
-        return 0U;
-    }
-    return 1U;
+    return ImuBmi270_HandleDeviceStatus(Bmi270Device_ApplyProfile(&imu_device_io, profile));
 }
 
 void ImuBmi270_Init(void)
@@ -709,7 +362,7 @@ void ImuBmi270_Init(void)
     ImuBmi270Calibration_Default(&imu_calibration);
     imu_fusion_params = ImuBmi270Mahony_DefaultParams();
     ImuBmi270Mahony_Init(&imu_fusion);
-    ImuBmi270_CsHigh();
+    Bmi270Bus_Deselect();
 }
 
 uint8_t ImuBmi270_SetEnabled(uint8_t enabled)
@@ -929,17 +582,18 @@ static void ImuBmi270_ProcessMeasurement(const int16_t accel_raw[3],
     {
         for (uint8_t i = 0U; i < 3U; ++i)
         {
-            imu_state.accel_g[i] = ImuBmi270_Filter(imu_state.accel_g[i], sensor_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+            imu_state.accel_g[i] =
+                ImuFilter_LowPass(imu_state.accel_g[i], sensor_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
             imu_state.body_accel_g[i] =
-                ImuBmi270_Filter(imu_state.body_accel_g[i], body_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+                ImuFilter_LowPass(imu_state.body_accel_g[i], body_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
             imu_state.ros_accel_g[i] =
-                ImuBmi270_Filter(imu_state.ros_accel_g[i], ros_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+                ImuFilter_LowPass(imu_state.ros_accel_g[i], ros_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
             imu_state.gyro_filtered_dps[i] =
-                ImuBmi270_Filter(imu_state.gyro_filtered_dps[i], body_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
+                ImuFilter_LowPass(imu_state.gyro_filtered_dps[i], body_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
             imu_state.gyro_dps[i]      = imu_state.gyro_filtered_dps[i];
             imu_state.body_gyro_dps[i] = imu_state.gyro_filtered_dps[i];
             imu_state.ros_gyro_dps[i] =
-                ImuBmi270_Filter(imu_state.ros_gyro_dps[i], ros_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
+                ImuFilter_LowPass(imu_state.ros_gyro_dps[i], ros_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
         }
     }
     imu_state.quaternion[0]           = imu_fusion.q.w;
@@ -948,7 +602,7 @@ static void ImuBmi270_ProcessMeasurement(const int16_t accel_raw[3],
     imu_state.quaternion[3]           = imu_fusion.q.z;
     imu_state.roll_deg                = euler_deg[0];
     imu_state.pitch_deg               = euler_deg[1];
-    imu_state.yaw_deg                 = ImuBmi270_WrapAngleDeg(euler_deg[2]);
+    imu_state.yaw_deg                 = ImuFilter_WrapAngleDeg(euler_deg[2]);
     imu_state.accel_correction_weight = imu_fusion.accel_weight;
     imu_state.sensor_time             = sensor_time & IMU_BMI270_SENSOR_TIME_MASK;
     imu_state.sensor_time_valid       = sensor_time_valid;

@@ -2,6 +2,7 @@
 #include "esp12f_flash_bridge.h"
 #include "line_uart.h"
 #include "upper_uart_service.h"
+#include "uart_bridge_transport.h"
 #include "usart1_debug_console.h"
 #include "usart.h"
 
@@ -9,7 +10,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
     {
-        Esp12fFlashBridge_OnRxCplt(huart);
+        UartBridgeTransport_OnRx((huart == &huart1) ? UART_BRIDGE_PORT_PC : UART_BRIDGE_PORT_ESP);
     }
     else if (huart == &huart3)
     {
@@ -37,7 +38,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
     if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
     {
-        Esp12fFlashBridge_OnTxCplt(huart);
+        UartBridgeTransport_OnTxComplete((huart == &huart1) ? UART_BRIDGE_PORT_PC : UART_BRIDGE_PORT_ESP);
     }
     else if (huart == &huart4)
     {
@@ -53,7 +54,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
     {
-        Esp12fFlashBridge_OnUartError(huart);
+        UartBridgeTransport_OnError((huart == &huart1) ? UART_BRIDGE_PORT_PC : UART_BRIDGE_PORT_ESP);
     }
     else if (huart == &huart1)
     {

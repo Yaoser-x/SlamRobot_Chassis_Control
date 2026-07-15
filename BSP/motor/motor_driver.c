@@ -1,4 +1,5 @@
 #include "motor_driver.h"
+#include "motor_hw_map.h"
 
 #include "bsp_config.h"
 #include "chassis_layout.h"
@@ -7,30 +8,17 @@
 #include "direction_apply.h"
 #include "tim.h"
 
-typedef struct
-{
-    TIM_HandleTypeDef *in1_htim;
-    uint32_t           in1_channel;
-    GPIO_TypeDef      *phase_port;
-    uint16_t           phase_pin;
-    GPIO_TypeDef      *fault_port;
-    uint16_t           fault_pin;
-} motor_hw_t;
-
-typedef struct
-{
-    int16_t              requested_pwm;
-    int16_t              applied_pwm;
-    int8_t               current_ph_dir;
-    int8_t               pending_dir;
-    motor_driver_phase_t phase;
-    uint8_t              wait_cycles;
-    uint8_t              phase_initialized;
-} motor_runtime_t;
-
 #define MOTOR_PWM_RISE_STEP_PER_CYCLE 15
 #define MOTOR_PWM_FALL_STEP_PER_CYCLE 25
 #define MOTOR_REVERSE_BRAKE_CYCLES    2U
+
+static const motor_reversal_config_t motor_reversal_config = {
+    .rise_step_per_cycle         = MOTOR_PWM_RISE_STEP_PER_CYCLE,
+    .fall_step_per_cycle         = MOTOR_PWM_FALL_STEP_PER_CYCLE,
+    .fixed_brake_cycles          = MOTOR_REVERSE_BRAKE_CYCLES,
+    .feedback_brake_cycles       = MOTOR_REVERSE_MAX_BRAKE_CYCLES,
+    .reverse_speed_threshold_mps = MOTOR_REVERSE_SPEED_THRESHOLD_MPS,
+};
 
 static motor_speed_getter_t g_speed_getter;
 static int8_t               motor_direction[MOTOR_ID_COUNT] = {
@@ -57,33 +45,37 @@ void MotorDriver_SetDirectionConfig(const int8_t direction[MOTOR_ID_COUNT])
     }
 }
 
-/* CubeMX labels keep legacy M2/M3 names; logical M2/M3 nFAULT pins are crossed here. */
-static const motor_hw_t motor_hw[MOTOR_ID_COUNT] = {
-    {&htim1, TIM_CHANNEL_1, M1_IN2_GPIO_Port, M1_IN2_Pin, M1_FAULT_GPIO_Port, M1_FAULT_Pin},
-    {&htim1, TIM_CHANNEL_2, M2_IN2_GPIO_Port, M2_IN2_Pin, M3_FAULT_GPIO_Port, M3_FAULT_Pin},
-    {&htim1, TIM_CHANNEL_3, M3_IN2_GPIO_Port, M3_IN2_Pin, M2_FAULT_GPIO_Port, M2_FAULT_Pin},
-    {&htim1, TIM_CHANNEL_4, M4_IN2_GPIO_Port, M4_IN2_Pin, M4_FAULT_GPIO_Port, M4_FAULT_Pin},
-};
-
-static motor_runtime_t      motor_runtime[MOTOR_ID_COUNT];
-static motor_driver_state_t motor_state;
+static motor_reversal_state_t motor_runtime[MOTOR_ID_COUNT];
+static motor_driver_state_t   motor_state;
 
 static void MotorDriver_UpdateEffectivePwmAll(void);
 
-static void MotorDriver_LatchTim1BreakLocked(void)
+static void MotorDriver_SyncBreakSnapshot(void)
 {
-    htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
-    htim1.Instance->CCR1 = 0U;
-    htim1.Instance->CCR2 = 0U;
-    htim1.Instance->CCR3 = 0U;
-    htim1.Instance->CCR4 = 0U;
+    motor_break_snapshot_t snapshot;
+
+    MotorBreak_GetSnapshot(&snapshot);
+    motor_state.tim1_moe_active          = snapshot.tim1_moe_active;
+    motor_state.tim1_break_flag          = snapshot.tim1_break_flag;
+    motor_state.tim1_break_latched       = snapshot.tim1_break_latched;
+    motor_state.tim8_moe_active          = snapshot.tim8_moe_active;
+    motor_state.tim8_break_flag          = snapshot.tim8_break_flag;
+    motor_state.tim1_break_count         = snapshot.tim1_break_count;
+    motor_state.tim8_break_count         = snapshot.tim8_break_count;
+    motor_state.tim1_break_last_ms       = snapshot.tim1_break_last_ms;
+    motor_state.tim8_break_last_ms       = snapshot.tim8_break_last_ms;
+    motor_state.startup_qualified        = snapshot.startup_qualified;
+    motor_state.startup_pre_wake_bif     = snapshot.startup_pre_wake_bif;
+    motor_state.startup_bkin_high        = snapshot.startup_bkin_high;
+    motor_state.startup_nfault_high_mask = snapshot.startup_nfault_high_mask;
+    motor_state.break_origin             = snapshot.break_origin;
+}
+
+static void MotorDriver_ClearRuntimeAfterBreak(void)
+{
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        motor_runtime[i].requested_pwm = 0;
-        motor_runtime[i].applied_pwm   = 0;
-        motor_runtime[i].pending_dir   = 0;
-        motor_runtime[i].phase         = MOTOR_DRIVER_PHASE_IDLE_BRAKE;
-        motor_runtime[i].wait_cycles   = 0U;
+        MotorReversalState_ClearOutput(&motor_runtime[i]);
         motor_state.requested_pwm[i]   = 0;
         motor_state.applied_pwm[i]     = 0;
         motor_state.output_permille[i] = 0;
@@ -91,18 +83,13 @@ static void MotorDriver_LatchTim1BreakLocked(void)
         motor_state.pending_dir[i]     = 0;
         motor_state.phase[i]           = MOTOR_DRIVER_PHASE_IDLE_BRAKE;
     }
-    motor_state.tim1_moe_active    = 0U;
-    motor_state.tim1_break_flag    = 1U;
-    motor_state.tim1_break_latched = 1U;
-    motor_state.tim1_break_count++;
-    motor_state.tim1_break_last_ms = osKernelGetTickCount();
+    MotorDriver_SyncBreakSnapshot();
 }
 
 void MotorDriver_OnTim1BreakFromIsr(void)
 {
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
-    motor_state.break_origin = MOTOR_BREAK_ORIGIN_TIM1_RUNTIME;
-    MotorDriver_LatchTim1BreakLocked();
+    MotorBreak_OnTim1Runtime(osKernelGetTickCount());
+    MotorDriver_ClearRuntimeAfterBreak();
 }
 
 static uint8_t MotorDriver_ReadNfaultHighMask(void)
@@ -111,7 +98,8 @@ static uint8_t MotorDriver_ReadNfaultHighMask(void)
 
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (HAL_GPIO_ReadPin(motor_hw[i].fault_port, motor_hw[i].fault_pin) == GPIO_PIN_SET)
+        const motor_hw_t *hw = MotorHwMap_Get((motor_id_t)i);
+        if (HAL_GPIO_ReadPin(hw->fault_port, hw->fault_pin) == GPIO_PIN_SET)
         {
             mask |= (uint8_t)(1U << i);
         }
@@ -135,41 +123,21 @@ static uint8_t MotorDriver_StartupInputsHigh(uint8_t *nfault_high_mask)
     {
         *nfault_high_mask = high_mask;
     }
-    return (HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_SET
-            && (high_mask & required_mask) == required_mask)
-               ? 1U
-               : 0U;
+    return (MotorBreak_IsBkinHigh() != 0U && (high_mask & required_mask) == required_mask) ? 1U : 0U;
 }
 
 static void MotorDriver_UpdateBreakStatus(void)
 {
-    uint8_t  tim1_break_flag = (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
-    uint8_t  tim8_break_flag = (__HAL_TIM_GET_FLAG(&htim8, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
-    uint8_t  tim1_moe_active = ((htim1.Instance->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
-    uint8_t  tim8_moe_active = ((htim8.Instance->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
     uint32_t primask;
 
-    if (tim1_break_flag != 0U)
+    if (MotorBreak_Update(osKernelGetTickCount()) != 0U)
     {
-        MotorDriver_OnTim1BreakFromIsr();
-        tim1_moe_active = 0U;
-    }
-    if (tim8_break_flag != 0U)
-    {
-        __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
+        MotorDriver_ClearRuntimeAfterBreak();
     }
 
     primask = __get_PRIMASK();
     __disable_irq();
-    motor_state.tim1_moe_active = tim1_moe_active;
-    motor_state.tim1_break_flag = tim1_break_flag;
-    motor_state.tim8_moe_active = tim8_moe_active;
-    motor_state.tim8_break_flag = tim8_break_flag;
-    if (tim8_break_flag != 0U)
-    {
-        motor_state.tim8_break_count++;
-        motor_state.tim8_break_last_ms = osKernelGetTickCount();
-    }
+    MotorDriver_SyncBreakSnapshot();
     MotorDriver_UpdateEffectivePwmAll();
     __set_PRIMASK(primask);
 }
@@ -238,40 +206,9 @@ static uint32_t MotorDriver_PulseFromPermille(TIM_HandleTypeDef *htim, int16_t p
     return ((arr + 1U) * (uint32_t)permille) / 1000U;
 }
 
-static int8_t MotorDriver_Sign(int16_t value)
-{
-    if (value > 0)
-    {
-        return 1;
-    }
-    if (value < 0)
-    {
-        return -1;
-    }
-    return 0;
-}
-
 static int16_t MotorDriver_AbsSigned(int16_t value)
 {
     return (value < 0) ? (int16_t)-value : value;
-}
-
-static int16_t MotorDriver_RampMagnitude(uint16_t current, uint16_t target)
-{
-    if (current < target)
-    {
-        uint16_t next = (uint16_t)(current + MOTOR_PWM_RISE_STEP_PER_CYCLE);
-        return (next > target) ? (int16_t)target : (int16_t)next;
-    }
-    if (current > target)
-    {
-        if ((uint16_t)(current - target) <= MOTOR_PWM_FALL_STEP_PER_CYCLE)
-        {
-            return (int16_t)target;
-        }
-        return (int16_t)(current - MOTOR_PWM_FALL_STEP_PER_CYCLE);
-    }
-    return (int16_t)current;
 }
 
 static void MotorDriver_SetEnPulse(const motor_hw_t *motor, uint32_t in1_pulse)
@@ -294,8 +231,8 @@ static void MotorDriver_SetRaw(const motor_hw_t *motor, uint32_t in1_pulse, int8
 
 static void MotorDriver_RecordRuntime(motor_id_t motor)
 {
-    uint32_t               primask;
-    const motor_runtime_t *runtime;
+    uint32_t                      primask;
+    const motor_reversal_state_t *runtime;
 
     if (MotorDriver_IsValidMotor(motor) == 0U)
     {
@@ -317,8 +254,8 @@ static void MotorDriver_RecordRuntime(motor_id_t motor)
 
 static void MotorDriver_ApplyRuntimeOutput(motor_id_t motor)
 {
-    const motor_hw_t      *hw      = &motor_hw[(uint32_t)motor];
-    const motor_runtime_t *runtime = &motor_runtime[(uint32_t)motor];
+    const motor_hw_t             *hw      = MotorHwMap_Get(motor);
+    const motor_reversal_state_t *runtime = &motor_runtime[(uint32_t)motor];
     uint32_t pulse = MotorDriver_PulseFromPermille(hw->in1_htim, MotorDriver_AbsSigned(runtime->applied_pwm));
 
     MotorDriver_SetEnPulse(hw, pulse);
@@ -327,39 +264,19 @@ static void MotorDriver_ApplyRuntimeOutput(motor_id_t motor)
 
 static void MotorDriver_ClearRuntimeOutput(motor_id_t motor)
 {
-    const motor_hw_t *hw = &motor_hw[(uint32_t)motor];
+    const motor_hw_t *hw = MotorHwMap_Get(motor);
 
-    motor_runtime[(uint32_t)motor].requested_pwm = 0;
-    motor_runtime[(uint32_t)motor].applied_pwm   = 0;
-    motor_runtime[(uint32_t)motor].pending_dir   = 0;
-    motor_runtime[(uint32_t)motor].phase         = MOTOR_DRIVER_PHASE_IDLE_BRAKE;
-    motor_runtime[(uint32_t)motor].wait_cycles   = 0U;
+    MotorReversalState_ClearOutput(&motor_runtime[(uint32_t)motor]);
     MotorDriver_SetEnPulse(hw, 0U);
     MotorDriver_RecordRuntime(motor);
 }
 
 static void MotorDriver_DisableRuntimeOutput(motor_id_t motor)
 {
-    const motor_hw_t *hw = &motor_hw[(uint32_t)motor];
+    const motor_hw_t *hw = MotorHwMap_Get(motor);
 
-    motor_runtime[(uint32_t)motor] = (motor_runtime_t){
-        .current_ph_dir = -1,
-        .phase          = MOTOR_DRIVER_PHASE_IDLE_BRAKE,
-    };
+    MotorReversalState_Disable(&motor_runtime[(uint32_t)motor]);
     MotorDriver_SetRaw(hw, 0U, -1);
-    MotorDriver_RecordRuntime(motor);
-}
-
-static void MotorDriver_SwitchPhase(motor_id_t motor, int8_t target_dir)
-{
-    motor_runtime_t *runtime = &motor_runtime[(uint32_t)motor];
-
-    MotorDriver_SetEnPulse(&motor_hw[(uint32_t)motor], 0U);
-    MotorDriver_WritePhase(&motor_hw[(uint32_t)motor], target_dir);
-    runtime->current_ph_dir    = target_dir;
-    runtime->pending_dir       = 0;
-    runtime->phase             = MOTOR_DRIVER_PHASE_RAMP_UP;
-    runtime->phase_initialized = 1U;
     MotorDriver_RecordRuntime(motor);
 }
 
@@ -370,7 +287,6 @@ static void MotorDriver_StartPwm(const motor_hw_t *motor)
 
 void MotorDriver_Init(void)
 {
-    uint8_t pre_wake_bif;
     uint8_t startup_qualified = 1U;
 
     motor_direction[MOTOR_ID_M1] = CHASSIS_M1_MOTOR_DIR;
@@ -380,23 +296,17 @@ void MotorDriver_Init(void)
     uint8_t  nfault_high_mask    = 0U;
     uint32_t stable_high_ms      = 0U;
 
-    htim1.Instance->DIER &= ~TIM_IT_BREAK;
-    htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
-    pre_wake_bif = (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET) ? 1U : 0U;
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
+    MotorBreak_Init();
     HAL_GPIO_WritePin(DRV_SLEEP_ALL_GPIO_Port, DRV_SLEEP_ALL_Pin, GPIO_PIN_SET);
     HAL_Delay(DRV8874_WAKE_DELAY_MS);
     motor_state               = (motor_driver_state_t){0};
     motor_state.sleep_enabled = 1U;
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        motor_runtime[i] = (motor_runtime_t){
-            .current_ph_dir = -1,
-            .phase          = MOTOR_DRIVER_PHASE_IDLE_BRAKE,
-        };
-        MotorDriver_StartPwm(&motor_hw[i]);
-        htim1.Instance->BDTR &= ~TIM_BDTR_MOE;
-        MotorDriver_SetRaw(&motor_hw[i], 0U, -1);
+        MotorReversalState_Init(&motor_runtime[i]);
+        const motor_hw_t *hw = MotorHwMap_Get((motor_id_t)i);
+        MotorDriver_StartPwm(hw);
+        MotorDriver_SetRaw(hw, 0U, -1);
         MotorDriver_RecordRuntime((motor_id_t)i);
     }
     startup_qualified = 0U;
@@ -417,39 +327,24 @@ void MotorDriver_Init(void)
         }
         HAL_Delay(1U);
     }
-    motor_state.startup_pre_wake_bif = pre_wake_bif;
-    motor_state.startup_bkin_high    = (HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_SET) ? 1U : 0U;
-    motor_state.startup_nfault_high_mask = nfault_high_mask;
-    motor_state.startup_qualified        = startup_qualified;
     /* 清除 PWM 启动期间可能由 HAL_TIM_PWM_Start 触发的 TIM1/TIM8 break 标志，
      避免因 BKIN 脚在 DRV 唤醒过程中短暂低电平导致的误锁存。 */
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
-    __HAL_TIM_CLEAR_FLAG(&htim8, TIM_FLAG_BREAK);
-    if (startup_qualified == 0U || __HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_BREAK) != RESET
-        || HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET)
+    if (MotorBreak_CompleteStartup(startup_qualified, nfault_high_mask, osKernelGetTickCount()) != 0U)
     {
-        __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
-        motor_state.break_origin = MOTOR_BREAK_ORIGIN_STARTUP_TIMEOUT;
-        MotorDriver_LatchTim1BreakLocked();
+        MotorDriver_ClearRuntimeAfterBreak();
     }
     else
     {
-        __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
-        htim1.Instance->BDTR |= TIM_BDTR_MOE;
+        MotorDriver_SyncBreakSnapshot();
     }
-    __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_BREAK);
     MotorDriver_UpdateFaults();
 }
 
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 {
-    motor_runtime_t *runtime;
-    int16_t          corrected;
-    int8_t           target_dir;
-    uint16_t         target_mag;
-    uint16_t         applied_mag;
-    int8_t           applied_dir;
-    int16_t          next_mag;
+    motor_reversal_state_t *runtime;
+    motor_reversal_input_t  input = {0};
+    motor_reversal_output_t output;
 
     if (MotorDriver_IsValidMotor(motor) == 0U)
     {
@@ -468,98 +363,20 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
         return;
     }
 
-    corrected =
+    input.requested_pwm =
         MotorDriver_ClampSignedPermille(DirectionApply_Signed((int32_t)permille, motor_direction[(uint32_t)motor]));
-    runtime->requested_pwm = corrected;
-    target_dir             = MotorDriver_Sign(corrected);
-    target_mag             = (uint16_t)MotorDriver_AbsSigned(corrected);
-    applied_dir            = MotorDriver_Sign(runtime->applied_pwm);
-    applied_mag            = (uint16_t)MotorDriver_AbsSigned(runtime->applied_pwm);
-
-    if (target_dir == 0)
+    input.speed_feedback_available = (g_speed_getter != 0) ? 1U : 0U;
+    if (runtime->phase == MOTOR_DRIVER_PHASE_REVERSE_BRAKE && g_speed_getter != 0)
     {
-        next_mag             = MotorDriver_RampMagnitude(applied_mag, 0U);
-        runtime->applied_pwm = (applied_dir != 0) ? (int16_t)(next_mag * applied_dir) : 0;
-        runtime->pending_dir = 0;
-        runtime->wait_cycles = 0U;
-        runtime->phase = (runtime->applied_pwm == 0) ? MOTOR_DRIVER_PHASE_IDLE_BRAKE : MOTOR_DRIVER_PHASE_RAMP_DOWN;
-        MotorDriver_ApplyRuntimeOutput(motor);
-        return;
+        input.speed_mps = g_speed_getter(motor);
     }
-
-    if (runtime->applied_pwm != 0 && applied_dir != target_dir)
+    output = MotorReversalState_Step(runtime, &motor_reversal_config, &input);
+    if (output.phase_changed != 0U)
     {
-        next_mag             = MotorDriver_RampMagnitude(applied_mag, 0U);
-        runtime->applied_pwm = (int16_t)(next_mag * applied_dir);
-        runtime->pending_dir = target_dir;
-        if (runtime->applied_pwm == 0)
-        {
-            runtime->phase       = MOTOR_DRIVER_PHASE_REVERSE_BRAKE;
-            runtime->wait_cycles = (g_speed_getter != 0) ? MOTOR_REVERSE_MAX_BRAKE_CYCLES : MOTOR_REVERSE_BRAKE_CYCLES;
-        }
-        else
-        {
-            runtime->phase = MOTOR_DRIVER_PHASE_RAMP_DOWN;
-        }
-        MotorDriver_ApplyRuntimeOutput(motor);
-        return;
+        const motor_hw_t *hw = MotorHwMap_Get(motor);
+        MotorDriver_SetEnPulse(hw, 0U);
+        MotorDriver_WritePhase(hw, output.current_ph_dir);
     }
-
-    if (runtime->applied_pwm == 0 && runtime->current_ph_dir != target_dir)
-    {
-        runtime->pending_dir = target_dir;
-        runtime->applied_pwm = 0;
-
-        if (runtime->phase == MOTOR_DRIVER_PHASE_REVERSE_BRAKE)
-        {
-            uint8_t ready_to_reverse = 0U;
-            if (g_speed_getter != 0)
-            {
-                float speed     = g_speed_getter(motor);
-                float abs_speed = (speed < 0.0f) ? -speed : speed;
-                if (abs_speed < MOTOR_REVERSE_SPEED_THRESHOLD_MPS)
-                {
-                    ready_to_reverse = 1U;
-                }
-            }
-            if (ready_to_reverse == 0U && runtime->wait_cycles > 1U)
-            {
-                runtime->wait_cycles--;
-            }
-            else
-            {
-                runtime->wait_cycles = 0U;
-                runtime->phase       = MOTOR_DRIVER_PHASE_PH_SETTLE;
-            }
-            MotorDriver_ApplyRuntimeOutput(motor);
-            return;
-        }
-
-        if (runtime->phase_initialized != 0U)
-        {
-            runtime->phase = MOTOR_DRIVER_PHASE_PH_SETTLE;
-            MotorDriver_SwitchPhase(motor, target_dir);
-            return;
-        }
-
-        MotorDriver_WritePhase(&motor_hw[(uint32_t)motor], target_dir);
-        runtime->current_ph_dir    = target_dir;
-        runtime->pending_dir       = 0;
-        runtime->phase_initialized = 1U;
-        runtime->phase             = MOTOR_DRIVER_PHASE_RAMP_UP;
-    }
-
-    if (runtime->phase == MOTOR_DRIVER_PHASE_PH_SETTLE)
-    {
-        MotorDriver_SwitchPhase(motor, target_dir);
-        return;
-    }
-
-    runtime->phase_initialized = 1U;
-    next_mag             = MotorDriver_RampMagnitude((uint16_t)MotorDriver_AbsSigned(runtime->applied_pwm), target_mag);
-    runtime->applied_pwm = (int16_t)(next_mag * target_dir);
-    runtime->pending_dir = 0;
-    runtime->phase       = (runtime->applied_pwm == 0) ? MOTOR_DRIVER_PHASE_IDLE_BRAKE : MOTOR_DRIVER_PHASE_RUN;
     MotorDriver_ApplyRuntimeOutput(motor);
 }
 
@@ -621,8 +438,8 @@ void MotorDriver_UpdateFaults(void)
     {
         if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
         {
-            fault_active[i] =
-                (HAL_GPIO_ReadPin(motor_hw[i].fault_port, motor_hw[i].fault_pin) == GPIO_PIN_RESET) ? 1U : 0U;
+            const motor_hw_t *hw = MotorHwMap_Get((motor_id_t)i);
+            fault_active[i]      = (HAL_GPIO_ReadPin(hw->fault_port, hw->fault_pin) == GPIO_PIN_RESET) ? 1U : 0U;
         }
         else
         {
@@ -671,38 +488,28 @@ uint8_t MotorDriver_HasFault(void)
 uint8_t MotorDriver_ClearBreakLatch(void)
 {
     uint32_t primask;
+    uint8_t  external_safe = 1U;
+    uint8_t  cleared;
 
     MotorDriver_UpdateFaults();
-    if (HAL_GPIO_ReadPin(TIM1_BKIN_GPIO_Port, TIM1_BKIN_Pin) == GPIO_PIN_RESET)
-    {
-        return 0U;
-    }
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
         {
-            return 0U;
+            external_safe = 0U;
         }
         if (motor_state.effective_pwm[i] != 0 || motor_runtime[i].applied_pwm != 0)
         {
-            return 0U;
+            external_safe = 0U;
         }
-    }
-    if (htim1.Instance->CCR1 != 0U || htim1.Instance->CCR2 != 0U || htim1.Instance->CCR3 != 0U
-        || htim1.Instance->CCR4 != 0U)
-    {
-        return 0U;
     }
     primask = __get_PRIMASK();
     __disable_irq();
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_BREAK);
-    motor_state.tim1_break_flag    = 0U;
-    motor_state.tim1_break_latched = 0U;
-    htim1.Instance->BDTR |= TIM_BDTR_MOE;
-    motor_state.tim1_moe_active = 1U;
+    cleared = MotorBreak_ClearLatch(external_safe);
+    MotorDriver_SyncBreakSnapshot();
     MotorDriver_UpdateEffectivePwmAll();
     __set_PRIMASK(primask);
-    return 1U;
+    return cleared;
 }
 
 void MotorDriver_GetState(motor_driver_state_t *state)

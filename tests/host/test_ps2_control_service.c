@@ -1,6 +1,7 @@
 #include "ps2_control_service.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "control_service.h"
 #include "imu_bmi270.h"
 #include "led_status.h"

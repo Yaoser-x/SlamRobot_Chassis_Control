@@ -44,6 +44,7 @@ OLD_SYMBOLS = re.compile(
     r"\b(?:ChassisTasks_|ControlManager_|SystemMonitor_|ParamStore_)|"
     r"(?:chassis_tasks|control_manager|system_monitor|param_store)"
 )
+REMOVED_HEADERS = {"chassis_config.h"}
 
 
 def strip_non_code(text: str) -> str:
@@ -87,6 +88,9 @@ def main() -> int:
             raw = path.read_text(encoding="utf-8", errors="replace")
             without_comments = LINE_COMMENT.sub(" ", BLOCK_COMMENT.sub(" ", raw))
             for include in INCLUDE.findall(without_comments):
+                normalized_include = include.replace("\\", "/")
+                if Path(normalized_include).name in REMOVED_HEADERS:
+                    errors.append(f"{relative}: removed legacy header {include}")
                 target = include_layer(include, header_index)
                 if target is not None and target not in ALLOWED[layer]:
                     errors.append(f"{relative}: {layer} must not include {target} header {include}")

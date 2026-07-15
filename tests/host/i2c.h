@@ -29,5 +29,7 @@ HAL_StatusTypeDef HAL_I2C_Mem_Write(I2C_HandleTypeDef *hi2c,
                                     uint32_t           Timeout);
 HAL_StatusTypeDef HAL_I2C_DeInit(I2C_HandleTypeDef *hi2c);
 HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef *hi2c);
+HAL_StatusTypeDef
+HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c, uint16_t DevAddress, uint32_t Trials, uint32_t Timeout);
 
 #endif

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "motor_break.h"
+#include "motor_reversal_state.h"
 #include "motor_types.h"
 
 #ifdef __cplusplus
@@ -14,23 +16,6 @@ extern "C"
     {
         MOTOR_STOP_LOW_SIDE_BRAKE = 0
     } motor_stop_mode_t;
-
-    typedef enum
-    {
-        MOTOR_DRIVER_PHASE_IDLE_BRAKE = 0,
-        MOTOR_DRIVER_PHASE_RUN,
-        MOTOR_DRIVER_PHASE_RAMP_DOWN,
-        MOTOR_DRIVER_PHASE_REVERSE_BRAKE,
-        MOTOR_DRIVER_PHASE_PH_SETTLE,
-        MOTOR_DRIVER_PHASE_RAMP_UP
-    } motor_driver_phase_t;
-
-    typedef enum
-    {
-        MOTOR_BREAK_ORIGIN_NONE = 0,
-        MOTOR_BREAK_ORIGIN_STARTUP_TIMEOUT,
-        MOTOR_BREAK_ORIGIN_TIM1_RUNTIME
-    } motor_break_origin_t;
 
     typedef struct
     {

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -25,9 +24,10 @@ def main() -> int:
     link_policy = (SKETCH_PATH.parent / "esp_link_policy.h").read_text(encoding="utf-8")
     frame_parser = (SKETCH_PATH.parent / "esp_frame_parser.h").read_text(encoding="utf-8")
     esp_source = sketch + "\n" + link_policy + "\n" + frame_parser
-    upper_uart = (ROOT / "App/protocol/upper_uart.c").read_text(encoding="utf-8")
-    esp_comm = (ROOT / "App/protocol/esp12f_comm.c").read_text(encoding="utf-8")
-    bridge = (ROOT / "BSP/esp12f/esp12f_flash_bridge.c").read_text(encoding="utf-8")
+    upper_uart = (ROOT / "Service/communication/upper_uart_service.c").read_text(encoding="utf-8")
+    esp_comm = (ROOT / "Service/communication/esp12f_service.c").read_text(encoding="utf-8")
+    command_router = (ROOT / "Service/communication/communication_command_router.c").read_text(encoding="utf-8")
+    bridge = (ROOT / "App/protocol/esp12f_flash_bridge.c").read_text(encoding="utf-8")
     errors: list[str] = []
 
     required = (
@@ -115,19 +115,17 @@ def main() -> int:
         errors.append("ESP startup does not actively revoke stale STM32 motion modes")
     bridge_enable = section(bridge, "uint8_t Esp12fFlashBridge_Enable", "void Esp12fFlashBridge_Disable")
     bridge_disable = section(bridge, "void Esp12fFlashBridge_Disable", "uint8_t Esp12fFlashBridge_IsActive")
-    bridge_update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_OnTxCplt")
-    bridge_rx_failure = section(bridge_enable, "if (rx_ok == 0U)", "return 1U;")
-    begin_index = bridge_enable.find("ChassisMaintenance_Begin()")
-    active_match = re.search(r'bridge_state\.active\s*=\s*1U', bridge_enable)
-    active_index = active_match.start() if active_match else -1
-    failure_end_index = bridge_rx_failure.find("ChassisMaintenance_End();")
+    bridge_update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_GetState")
+    bridge_rx_failure = section(bridge_enable, "if (UartBridgeTransport_Start", "return 1U;")
+    begin_index = bridge_enable.find("ChassisMaintenanceService_Begin()")
+    active_index = bridge_enable.find("UartBridgeTransport_Start(")
+    failure_end_index = bridge_rx_failure.find("Esp12fFlashBridge_ReleaseMaintenance();")
     failure_return_index = bridge_rx_failure.find("return 0U;")
-    disable_match = re.search(r'bridge_state\.active\s*=\s*0U', bridge_disable)
-    disable_active_index = disable_match.start() if disable_match else -1
-    disable_end_index = bridge_disable.rfind("ChassisMaintenance_End();")
+    disable_active_index = bridge_disable.find("UartBridgeTransport_Stop();")
+    disable_end_index = bridge_disable.rfind("Esp12fFlashBridge_ReleaseMaintenance();")
     idle_condition_index = bridge_update.find("idle_ms >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS")
     idle_disable_index = bridge_update.find("Esp12fFlashBridge_Disable();", idle_condition_index)
-    if ('#include "chassis_maintenance.h"' not in bridge or
+    if ('#include "chassis_maintenance_service.h"' not in bridge or
             "bridge_maintenance_lock_held" not in bridge or
             begin_index < 0 or active_index < 0 or begin_index > active_index or
             failure_end_index < 0 or failure_return_index < 0 or
@@ -135,11 +133,9 @@ def main() -> int:
             disable_active_index < 0 or disable_end_index < disable_active_index or
             idle_condition_index < 0 or idle_disable_index < idle_condition_index):
         errors.append("ESP bridge does not hold the unified maintenance lock")
-    if "UpperProtocol_RemoteEstopSetRequested" not in upper_uart:
-        errors.append("upper UART remote ESTOP is not set-only")
-    if "UpperProtocol_RemoteEstopSetRequested" not in esp_comm:
-        errors.append("STM32 ESP remote ESTOP is not set-only")
-    for marker in ("rx_timeout_resets", "uart_errors", "Esp12fComm_ResetParser();"):
+    if "UpperProtocol_RemoteEstopSetRequested" not in command_router:
+        errors.append("shared remote ESTOP routing is not set-only")
+    for marker in ("rx_timeout_resets", "uart_errors", "Esp12fService_ResetParser();"):
         if marker not in esp_comm:
             errors.append(f"STM32 ESP recovery marker missing: {marker}")
     loop_body = section(sketch, "void loop()", "// --- 推送遥测 ---")

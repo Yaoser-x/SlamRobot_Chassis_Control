@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-#include "stm32f4xx_hal.h"
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -33,9 +31,6 @@ extern "C"
     uint8_t  Esp12fFlashBridge_IsActive(void);
     uint32_t Esp12fFlashBridge_GetIdleMs(void);
     void     Esp12fFlashBridge_Update(uint32_t now_ms);
-    void     Esp12fFlashBridge_OnRxCplt(UART_HandleTypeDef *huart);
-    void     Esp12fFlashBridge_OnTxCplt(UART_HandleTypeDef *huart);
-    void     Esp12fFlashBridge_OnUartError(UART_HandleTypeDef *huart);
     void     Esp12fFlashBridge_GetState(esp12f_flash_bridge_state_t *state);
 
 #ifdef __cplusplus

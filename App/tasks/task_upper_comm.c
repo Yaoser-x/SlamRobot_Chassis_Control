@@ -1,6 +1,7 @@
 #include "app_tasks.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "platform_time.h"
 #include "task_health_service.h"
 #include "upper_uart_service.h"

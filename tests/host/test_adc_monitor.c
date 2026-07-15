@@ -4,7 +4,8 @@
 
 #include "adc_monitor.h"
 #include "adc.h"
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "tim.h"
 
 ADC_HandleTypeDef  hadc1;

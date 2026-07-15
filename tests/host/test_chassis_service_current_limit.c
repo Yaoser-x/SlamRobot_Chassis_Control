@@ -4,7 +4,8 @@
 
 #include "adc_monitor.h"
 #include "bsp_config.h"
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "chassis_service.h"
 #include "control_service.h"
 #include "encoder_driver.h"

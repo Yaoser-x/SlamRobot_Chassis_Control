@@ -1,3 +1,4 @@
+
 # 控制体系
 
 ## 1. 控制链数据流
@@ -138,7 +139,7 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 
 ## 5. 底盘布局配置
 
-`App/chassis/chassis_config.h` 提供编译期布局配置，支持四驱/两驱和自定义左右侧：
+`Domain/config/control_config.h / BSP/bsp_config.h` 提供编译期布局配置，支持四驱/两驱和自定义左右侧：
 
 | 宏 | 可选值 | 说明 |
 | --- | --- | --- |

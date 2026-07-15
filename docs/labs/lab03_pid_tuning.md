@@ -1,3 +1,4 @@
+
 # Lab 03: PID 速度环调参
 
 ## 实验目标
@@ -58,7 +59,7 @@ vel V [W]  ──→  ControlService  ──→  ChassisService_Step (10ms)
 
 ### 4. 当前 PID 参数配置
 
-所有 PID 参数为 `chassis_config.h` 中的编译期常量（默认值）：
+所有 PID 参数为 `control_config.h / bsp_config.h` 中的编译期常量（默认值）：
 
 ```c
 // 每路电机独立 PID
@@ -81,7 +82,7 @@ vel V [W]  ──→  ControlService  ──→  ChassisService_Step (10ms)
 #define CHASSIS_PID_STOP_EPSILON_MPS   0.005f   // 停止判定阈值
 ```
 
-> **注意**：当前 PID 参数通过修改 `chassis_config.h` → 重编译 → 烧录的方式调整。平台暂未实现运行时 `set` 命令。
+> **注意**：当前 PID 参数通过修改 `control_config.h / bsp_config.h` → 重编译 → 烧录的方式调整。平台暂未实现运行时 `set` 命令。
 
 ## 实验设备
 
@@ -128,7 +129,7 @@ CHASSIS req=100,0mm/s target=100,0mm/s actual=89,92mm/s pwm=523,518,541,537 out=
 
 ### 步骤 2：P 参数扫描
 
-依次修改 `chassis_config.h` 中的 Kp 值，观察不同 Kp 下的阶跃响应：
+依次修改 `control_config.h / bsp_config.h` 中的 Kp 值，观察不同 Kp 下的阶跃响应：
 
 | 实验编号 | Kp (M1/M2) | Kp (M3/M4) | 预期 |
 |----------|------------|------------|------|

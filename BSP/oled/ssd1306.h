@@ -16,7 +16,9 @@ extern "C"
 #define SSD1306_HEIGHT 64
 #define SSD1306_PAGES  (SSD1306_HEIGHT / 8)
 
-    void     SSD1306_Init(void);
+    void SSD1306_Init(void);
+    /** Return nonzero when the configured OLED responds on I2C1. */
+    uint8_t  SSD1306_IsReady(void);
     void     SSD1306_Clear(void);
     void     SSD1306_Refresh(void);
     void     SSD1306_SetPixel(uint8_t x, uint8_t y, uint8_t on);

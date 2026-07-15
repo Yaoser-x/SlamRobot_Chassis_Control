@@ -1,6 +1,7 @@
 #include "app_tasks.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "esp12f_flash_bridge.h"
 #include "esp12f_service.h"
 #include "platform_time.h"

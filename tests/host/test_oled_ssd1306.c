@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "ssd1306.h"
+#include "control_config.h"
 #include "i2c.h"
 
 static I2C_TypeDef i2c1_instance = {.CR1 = I2C_CR1_PE};
@@ -12,6 +13,9 @@ static uint32_t          mem_write_count;
 static uint32_t          data_write_count;
 static uint32_t          deinit_count;
 static uint32_t          init_count;
+static uint16_t          ready_address;
+static uint32_t          ready_trials;
+static uint32_t          ready_timeout;
 static HAL_StatusTypeDef next_i2c_status = HAL_OK;
 
 void HAL_Delay(uint32_t delay_ms)
@@ -54,6 +58,15 @@ HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef *hi2c)
     return HAL_OK;
 }
 
+HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c, uint16_t DevAddress, uint32_t Trials, uint32_t Timeout)
+{
+    (void)hi2c;
+    ready_address = DevAddress;
+    ready_trials  = Trials;
+    ready_timeout = Timeout;
+    return next_i2c_status;
+}
+
 static void require_int(int condition, const char *message)
 {
     if (condition == 0)
@@ -90,10 +103,23 @@ static void test_i2c_failures_trigger_recovery(void)
     require_int(init_count != 0U, "i2c recovery initializes bus");
 }
 
+static void test_ready_probe_uses_oled_address(void)
+{
+    next_i2c_status = HAL_OK;
+    require_int(SSD1306_IsReady() != 0U, "ready probe reports HAL success");
+    require_int(ready_address == (uint16_t)(OLED_I2C_ADDR << 1), "ready probe uses shifted address");
+    require_int(ready_trials == 2U, "ready probe uses two trials");
+    require_int(ready_timeout == 10U, "ready probe uses bounded timeout");
+
+    next_i2c_status = HAL_TIMEOUT;
+    require_int(SSD1306_IsReady() == 0U, "ready probe reports HAL failure");
+}
+
 int main(void)
 {
     test_dirty_pages_only_refresh_changed_pages();
     test_i2c_failures_trigger_recovery();
+    test_ready_probe_uses_oled_address();
     (void)printf("PASS: oled ssd1306 host tests\n");
     return 0;
 }

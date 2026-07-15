@@ -177,9 +177,9 @@ v_right = linear_x + (angular_z × track_width / 2)
 
 **模块：** `BSP/chassis_layout.c`
 **头文件：** `BSP/chassis_layout.h`
-**配置：** `App/chassis/chassis_config.h`
+**配置：** `Domain/config/control_config.h / BSP/bsp_config.h`
 
-**编译期配置常量（chassis_config.h）：**
+**编译期配置常量（control_config.h / bsp_config.h）：**
 
 | 宏 | 默认值 | 说明 |
 |----|--------|------|
@@ -253,7 +253,7 @@ typedef struct {
 2. 条件冻结：输出超出边界且误差方向继续超出时，停积积分
 3. 执行器饱和感知：actuator 在误差推方向已达极限时，冻结积分
 
-**默认 PID 参数（chassis_config.h）：**
+**默认 PID 参数（control_config.h / bsp_config.h）：**
 
 | 电机 | Kp | Ki | Kd | 积分上限 |
 |------|-----|-----|-----|---------|
@@ -264,7 +264,7 @@ typedef struct {
 
 ### 2.4 速度斜坡
 
-**配置（chassis_config.h / param_model_t）：**
+**配置（control_config.h / bsp_config.h / param_model_t）：**
 - `CHASSIS_SPEED_RAMP_MPS2` — 线速度斜坡，默认 0.5 m/s²
 - `CHASSIS_ANGULAR_RAMP_RPS2` — 角速度斜坡，默认 2.0 rad/s²
 - `CHASSIS_OPENLOOP_FULL_MPS` — 开环全速映射，默认 0.5 m/s
@@ -597,7 +597,7 @@ typedef enum {
 4. 返回最高优先级有效（enable=1 + 未超时）的命令
 5. 所有源都无效时返回 NONE（速度全零）
 
-**超时配置（chassis_config.h）：**
+**超时配置（control_config.h / bsp_config.h）：**
 
 | 控制源 | 超时 | 说明 |
 |--------|------|------|
@@ -698,7 +698,7 @@ typedef struct {
 - **巡线模式：** PS2 在巡线启用时显式让权（不提交运动命令），巡线关时持续提交零速（维持占用）
 - **离线保护：** 连续 3 次读取失败后标记离线，取消所有宏
 
-**关键常量（chassis_config.h）：**
+**关键常量（control_config.h / bsp_config.h）：**
 
 | 常量 | 值 | 说明 |
 |------|-----|------|
@@ -1363,8 +1363,8 @@ typedef struct {
 
 ### 5.4 ESP12F 通信透传桥
 
-**模块：** `BSP/esp12f/esp12f_flash_bridge.c`
-**头文件：** `BSP/esp12f/esp12f_flash_bridge.h`
+**编排模块：** `App/protocol/esp12f_flash_bridge.c`
+**硬件模块：** `BSP/esp12f/esp12f_boot_control.c`、`BSP/transport/uart_bridge_transport.c`
 
 **功能：** PC ↔ ESP8266 双向 UART 透传，用于固件烧录。
 
@@ -1386,8 +1386,8 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 - `Esp12fFlashBridge_Enable(download_mode)` — 获取维护锁，中止 UART，配置 ESP 启动模式
 - `Esp12fFlashBridge_Disable()` — 正常启动 ESP，重启通信
 - `Esp12fFlashBridge_Update(now_ms)` — 服务 TX + 空闲超时检查
-- `Esp12fFlashBridge_OnRxCplt()` / `_OnTxCplt()` / `_OnUartError()` — UART 事件处理
 - `Esp12fFlashBridge_IsActive()` / `Esp12fFlashBridge_GetIdleMs()` / `Esp12fFlashBridge_GetState()`
+- `UartBridgeTransport_OnRx()` / `_OnTxComplete()` / `_OnError()` — BSP UART 事件处理
 
 **调试命令：**
 - `espflash on` — 进入烧录模式（自动保持维护锁）

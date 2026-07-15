@@ -1,4 +1,5 @@
 #include "imu_calibration.h"
+#include "imu_filter.h"
 #include "imu_bmi270_fifo.h"
 #include "imu_bmi270.h"
 #include "imu_bmi270_math.h"
@@ -344,6 +345,13 @@ static void test_quaternion_initializes_roll_pitch_from_accel(void)
     require_int(ImuBmi270Quaternion_FromAccel(0, &q) == 0U, "quaternion accel init rejects null accel");
 }
 
+static void test_filter_and_angle_wrap(void)
+{
+    require_close(ImuFilter_LowPass(10.0f, 20.0f, 0.2f), 12.0f, 0.0001f, "low-pass uses established alpha");
+    require_close(ImuFilter_WrapAngleDeg(181.0f), -179.0f, 0.0001f, "positive yaw wraps below 180");
+    require_close(ImuFilter_WrapAngleDeg(-180.0f), 180.0f, 0.0001f, "negative boundary wraps to positive 180");
+}
+
 int main(void)
 {
     test_fifo_header_sensor_time_and_overflow();
@@ -361,6 +369,7 @@ int main(void)
     test_coordinate_mapping_and_calibration_defaults();
     test_mahony_static_and_yaw_continuity();
     test_quaternion_initializes_roll_pitch_from_accel();
+    test_filter_and_angle_wrap();
 
     if (failures != 0)
     {

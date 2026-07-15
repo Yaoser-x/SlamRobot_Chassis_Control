@@ -1,4 +1,11 @@
 #include "chassis_service.h"
+#include "chassis_feedback_guard.h"
+#include "chassis_output_service.h"
+#include "chassis_param_sync.h"
+#include "chassis_snapshot.h"
+#include "chassis_speed_loop.h"
+#include "chassis_target_planner.h"
+#include "chassis_test_mode.h"
 #include "platform_critical.h"
 #include "platform_time.h"
 #include "bsp_config.h"
@@ -21,48 +28,19 @@
 
 #include "param_service.h"
 
-#include "pid_controller.h"
-
 #include "safety_service.h"
-
-#include "straight_controller.h"
 
 #include "imu_bmi270.h"
 
 static chassis_service_snapshot_t chassis_state;
-static uint8_t                    open_loop_test_enabled;
-static uint8_t                    raw_input_test_enabled;
-static int16_t                    open_loop_side[2];
-static int16_t                    raw_forward[MOTOR_ID_COUNT];
-static int16_t                    raw_reverse[MOTOR_ID_COUNT];
-static float                      ramped_linear_x;
-static float                      ramped_angular_z;
-static float                      last_pid_target_mps[MOTOR_ID_COUNT];
-static uint8_t                    feedback_loss_count[MOTOR_ID_COUNT];
-static uint32_t                   feedback_no_motion_since_ms[MOTOR_ID_COUNT];
-static uint8_t                    feedback_no_motion_active[MOTOR_ID_COUNT];
-static pid_state_t                pid_motor[MOTOR_ID_COUNT];
 static uint32_t                   last_control_step_ms;
 static uint8_t                    control_dt_initialized;
 static volatile uint8_t           control_step_active;
-static uint32_t                   test_mode_last_refresh_ms;
-static uint8_t                    test_mode_lease_active;
-static param_model_t              runtime_params;
-static uint32_t                   runtime_params_generation;
-static straight_controller_t      straight_controller;
-
-static int16_t ChassisService_ClampPermille(int32_t permille)
-{
-    if (permille > CHASSIS_PWM_MAX_PERMILLE)
-    {
-        return CHASSIS_PWM_MAX_PERMILLE;
-    }
-    if (permille < -CHASSIS_PWM_MAX_PERMILLE)
-    {
-        return -CHASSIS_PWM_MAX_PERMILLE;
-    }
-    return (int16_t)permille;
-}
+static chassis_param_sync_t       param_sync;
+static chassis_target_planner_t   target_planner;
+static chassis_speed_loop_t       speed_loop;
+static chassis_feedback_guard_t   feedback_guard;
+static chassis_test_mode_t        test_mode;
 
 static float ChassisService_AbsFloat(float value)
 {
@@ -99,32 +77,9 @@ void ChassisService_ResolveSideTargets(float linear_x, float angular_z, float *l
     ChassisService_ResolveSideTargetsWithParams(linear_x, angular_z, &params, left_mps, right_mps);
 }
 
-static float ChassisService_RampToward(float current, float target, float step)
-{
-    if (current < target)
-    {
-        current += step;
-        if (current > target)
-        {
-            current = target;
-        }
-    }
-    else if (current > target)
-    {
-        current -= step;
-        if (current < target)
-        {
-            current = target;
-        }
-    }
-    return current;
-}
-
 static void ChassisService_ResetRamps(void)
 {
-    ramped_linear_x  = 0.0f;
-    ramped_angular_z = 0.0f;
-    StraightController_Reset(&straight_controller);
+    ChassisTargetPlanner_Reset(&target_planner);
     chassis_state.straight_active                 = 0U;
     chassis_state.straight_direction              = 0;
     chassis_state.straight_transition_distance_m  = 0.0f;
@@ -143,386 +98,24 @@ static void ChassisService_ResetRamps(void)
 
 static void ChassisService_ResetPidTargets(void)
 {
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        last_pid_target_mps[i]               = 0.0f;
-        feedback_loss_count[i]               = 0U;
-        feedback_no_motion_since_ms[i]       = 0UL;
-        feedback_no_motion_active[i]         = 0U;
-        chassis_state.motor_feedback_lost[i] = 0U;
-    }
-    chassis_state.left_feedback_lost  = 0U;
-    chassis_state.right_feedback_lost = 0U;
-}
-
-static uint8_t ChassisService_FeedbackFaultDetected(uint32_t                    now_ms,
-                                                    const encoder_state_t      *encoder_state,
-                                                    const motor_driver_state_t *motor_state)
-{
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
-        {
-            feedback_no_motion_active[i] = 0U;
-            continue;
-        }
-        if (encoder_state->speed_valid[i] == 0U)
-        {
-            chassis_state.motor_feedback_lost[i] = 1U;
-            return 1U;
-        }
-        if (ChassisService_AbsFloat(chassis_state.motor_requested_mps[i]) < CHASSIS_PID_FEEDBACK_MIN_TARGET_MPS
-            || ChassisService_AbsFloat(encoder_state->speed_mps[i]) >= CHASSIS_PID_FEEDBACK_MIN_SPEED_MPS)
-        {
-            feedback_no_motion_active[i] = 0U;
-            continue;
-        }
-        if (motor_state->phase[i] != MOTOR_DRIVER_PHASE_RUN || motor_state->effective_pwm[i] == 0)
-        {
-            feedback_no_motion_active[i] = 0U;
-            continue;
-        }
-        if (feedback_no_motion_active[i] == 0U)
-        {
-            feedback_no_motion_active[i]   = 1U;
-            feedback_no_motion_since_ms[i] = now_ms;
-        }
-        else if ((uint32_t)(now_ms - feedback_no_motion_since_ms[i]) >= CHASSIS_ENCODER_FEEDBACK_TIMEOUT_MS)
-        {
-            chassis_state.motor_feedback_lost[i] = 1U;
-            return 1U;
-        }
-    }
-    return 0U;
+    ChassisSpeedLoop_ResetTargets(&speed_loop);
+    ChassisFeedbackGuard_Reset(&feedback_guard, &chassis_state);
 }
 
 static uint8_t ChassisService_RefreshRuntimeParams(void)
 {
-    param_model_t params;
-    uint32_t      generation = ParamService_GetSnapshot(&params);
-
-    if (generation == runtime_params_generation)
+    if (ChassisParamSync_Refresh(&param_sync, speed_loop.pid_motor) == 0U)
     {
         return 0U;
-    }
-
-    runtime_params            = params;
-    runtime_params_generation = generation;
-    MotorDriver_SetDirectionConfig(params.motor_dir);
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        pid_params_t pid_params = {
-            params.pid_kp[i],
-            params.pid_ki[i],
-            params.pid_kd[i],
-            params.pid_integral_limit,
-            CHASSIS_PID_CORRECTION_LIMIT,
-        };
-
-        if (pid_motor[i].initialized == 0U)
-        {
-            PidController_Init(&pid_motor[i], &pid_params);
-        }
-        else
-        {
-            PidController_SetParams(&pid_motor[i], &pid_params);
-        }
     }
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
     return 1U;
 }
 
-static void ChassisService_ClearTestModeUnsafe(void)
-{
-    open_loop_test_enabled           = 0U;
-    raw_input_test_enabled           = 0U;
-    test_mode_lease_active           = 0U;
-    open_loop_side[MOTOR_SIDE_LEFT]  = 0;
-    open_loop_side[MOTOR_SIDE_RIGHT] = 0;
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        raw_forward[i] = 0;
-        raw_reverse[i] = 0;
-    }
-}
-
 void ChassisService_CancelTestMode(void)
 {
-    uint32_t primask = PlatformCritical_Enter();
-    ChassisService_ClearTestModeUnsafe();
-    PlatformCritical_Exit(primask);
-}
-
-static void ChassisService_ScaleWheelTargets(float *left_mps, float *right_mps)
-{
-    float abs_left;
-    float abs_right;
-    float max_abs;
-
-    if (CHASSIS_WHEEL_SPEED_PROPORTIONAL_SCALE == 0U)
-    {
-        return;
-    }
-    if (left_mps == 0 || right_mps == 0)
-    {
-        return;
-    }
-
-    abs_left  = (*left_mps < 0.0f) ? -*left_mps : *left_mps;
-    abs_right = (*right_mps < 0.0f) ? -*right_mps : *right_mps;
-    max_abs   = (abs_left > abs_right) ? abs_left : abs_right;
-
-    if (max_abs > CHASSIS_OPENLOOP_FULL_MPS)
-    {
-        float scale = CHASSIS_OPENLOOP_FULL_MPS / max_abs;
-        *left_mps *= scale;
-        *right_mps *= scale;
-    }
-}
-
-static int16_t ChassisService_MpsToPermille(float target_mps)
-{
-    int32_t permille;
-
-    if (CHASSIS_OPENLOOP_FULL_MPS <= 0.0f)
-    {
-        return 0;
-    }
-    if (target_mps > CHASSIS_OPENLOOP_FULL_MPS)
-    {
-        target_mps = CHASSIS_OPENLOOP_FULL_MPS;
-    }
-    else if (target_mps < -CHASSIS_OPENLOOP_FULL_MPS)
-    {
-        target_mps = -CHASSIS_OPENLOOP_FULL_MPS;
-    }
-
-    permille = (int32_t)((target_mps / CHASSIS_OPENLOOP_FULL_MPS) * (float)CHASSIS_PWM_MAX_PERMILLE);
-    return ChassisService_ClampPermille(permille);
-}
-
-static int16_t ChassisService_ApplyCurrentLimit(motor_id_t                 motor,
-                                                int16_t                    permille,
-                                                const adc_monitor_state_t *adc_state,
-                                                uint8_t                   *limited)
-{
-    return ChassisService_ClampPermille(CurrentGuard_ApplyMotorLimit(motor, permille, adc_state, 0U, limited));
-}
-
-static void ChassisService_SetMotorOutput(motor_id_t motor, int16_t permille)
-{
-    adc_monitor_state_t adc_state;
-    int16_t             applied;
-
-    if (ChassisLayout_MotorEnabled(motor) == 0U)
-    {
-        chassis_state.motor_current_limited[motor] = 0U;
-        chassis_state.motor_output_permille[motor] = 0;
-        MotorDriver_SetPermille(motor, 0);
-        return;
-    }
-
-    permille = ChassisService_ClampPermille(permille);
-    applied  = permille;
-
-    AdcMonitor_GetState(&adc_state);
-    chassis_state.motor_current_limited[motor] = 0U;
-    applied = ChassisService_ApplyCurrentLimit(motor, applied, &adc_state, &chassis_state.motor_current_limited[motor]);
-    chassis_state.motor_output_permille[motor] = applied;
-    MotorDriver_SetPermille(motor, applied);
-}
-
-static float ChassisService_SelectSideValue(motor_id_t motor, float left_value, float right_value)
-{
-    return (ChassisLayout_MotorSide(motor) == MOTOR_SIDE_LEFT) ? left_value : right_value;
-}
-
-static uint8_t ChassisService_AnyActiveMotorOutput(void)
-{
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && chassis_state.motor_output_permille[i] != 0)
-        {
-            return 1U;
-        }
-    }
-    return 0U;
-}
-
-static void ChassisService_SyncSideState(void)
-{
-    uint8_t left_count          = 0U;
-    uint8_t right_count         = 0U;
-    float   left_target_sum     = 0.0f;
-    float   right_target_sum    = 0.0f;
-    float   left_requested_sum  = 0.0f;
-    float   right_requested_sum = 0.0f;
-    float   left_actual_sum     = 0.0f;
-    float   right_actual_sum    = 0.0f;
-    float   left_error_sum      = 0.0f;
-    float   right_error_sum     = 0.0f;
-    int32_t left_output_sum     = 0;
-    int32_t right_output_sum    = 0;
-
-    chassis_state.left_speed_valid      = (ChassisLayout_SideMotorCount(MOTOR_SIDE_LEFT) != 0U) ? 1U : 0U;
-    chassis_state.right_speed_valid     = (ChassisLayout_SideMotorCount(MOTOR_SIDE_RIGHT) != 0U) ? 1U : 0U;
-    chassis_state.left_pid_active       = 0U;
-    chassis_state.right_pid_active      = 0U;
-    chassis_state.left_feedback_lost    = 0U;
-    chassis_state.right_feedback_lost   = 0U;
-    chassis_state.left_current_limited  = 0U;
-    chassis_state.right_current_limited = 0U;
-
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        motor_id_t motor = (motor_id_t)i;
-        if (ChassisLayout_MotorEnabled(motor) == 0U)
-        {
-            continue;
-        }
-
-        if (ChassisLayout_MotorSide(motor) == MOTOR_SIDE_LEFT)
-        {
-            left_count++;
-            left_target_sum += chassis_state.motor_target_mps[i];
-            left_requested_sum += chassis_state.motor_requested_mps[i];
-            left_actual_sum += chassis_state.motor_actual_mps[i];
-            left_error_sum += chassis_state.motor_error_mps[i];
-            left_output_sum += chassis_state.motor_output_permille[i];
-            if (chassis_state.motor_speed_valid[i] == 0U)
-            {
-                chassis_state.left_speed_valid = 0U;
-            }
-            chassis_state.left_pid_active |= chassis_state.motor_pid_active[i];
-            chassis_state.left_feedback_lost |= chassis_state.motor_feedback_lost[i];
-            chassis_state.left_current_limited |= chassis_state.motor_current_limited[i];
-        }
-        else
-        {
-            right_count++;
-            right_target_sum += chassis_state.motor_target_mps[i];
-            right_requested_sum += chassis_state.motor_requested_mps[i];
-            right_actual_sum += chassis_state.motor_actual_mps[i];
-            right_error_sum += chassis_state.motor_error_mps[i];
-            right_output_sum += chassis_state.motor_output_permille[i];
-            if (chassis_state.motor_speed_valid[i] == 0U)
-            {
-                chassis_state.right_speed_valid = 0U;
-            }
-            chassis_state.right_pid_active |= chassis_state.motor_pid_active[i];
-            chassis_state.right_feedback_lost |= chassis_state.motor_feedback_lost[i];
-            chassis_state.right_current_limited |= chassis_state.motor_current_limited[i];
-        }
-    }
-
-    chassis_state.left_target_mps       = (left_count != 0U) ? (left_target_sum / (float)left_count) : 0.0f;
-    chassis_state.right_target_mps      = (right_count != 0U) ? (right_target_sum / (float)right_count) : 0.0f;
-    chassis_state.left_requested_mps    = (left_count != 0U) ? (left_requested_sum / (float)left_count) : 0.0f;
-    chassis_state.right_requested_mps   = (right_count != 0U) ? (right_requested_sum / (float)right_count) : 0.0f;
-    chassis_state.left_actual_mps       = (left_count != 0U) ? (left_actual_sum / (float)left_count) : 0.0f;
-    chassis_state.right_actual_mps      = (right_count != 0U) ? (right_actual_sum / (float)right_count) : 0.0f;
-    chassis_state.left_error_mps        = (left_count != 0U) ? (left_error_sum / (float)left_count) : 0.0f;
-    chassis_state.right_error_mps       = (right_count != 0U) ? (right_error_sum / (float)right_count) : 0.0f;
-    chassis_state.left_output_permille  = (left_count != 0U) ? (int16_t)(left_output_sum / (int32_t)left_count) : 0;
-    chassis_state.right_output_permille = (right_count != 0U) ? (int16_t)(right_output_sum / (int32_t)right_count) : 0;
-}
-
-static void ChassisService_SetSideTargets(float left_mps, float right_mps, uint8_t requested)
-{
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        motor_id_t motor  = (motor_id_t)i;
-        float      target = 0.0f;
-
-        if (ChassisLayout_MotorEnabled(motor) != 0U)
-        {
-            target = ChassisService_SelectSideValue(motor, left_mps, right_mps);
-        }
-        chassis_state.motor_target_mps[i] = target;
-        if (requested != 0U)
-        {
-            chassis_state.motor_requested_mps[i] = target;
-        }
-    }
-}
-
-static uint8_t
-ChassisService_CheckFeedbackUsable(motor_id_t motor, float target_mps, float actual_mps, uint8_t encoder_valid)
-{
-    chassis_state.motor_feedback_lost[motor] = 0U;
-    if (encoder_valid == 0U)
-    {
-        feedback_loss_count[motor]               = CHASSIS_PID_FEEDBACK_LOSS_COUNT;
-        chassis_state.motor_feedback_lost[motor] = 1U;
-        return 0U;
-    }
-    if (ChassisService_AbsFloat(target_mps) < CHASSIS_PID_FEEDBACK_MIN_TARGET_MPS
-        || ChassisService_AbsFloat(actual_mps) >= CHASSIS_PID_FEEDBACK_MIN_SPEED_MPS)
-    {
-        feedback_loss_count[motor] = 0U;
-        return 1U;
-    }
-    if (feedback_loss_count[motor] < CHASSIS_PID_FEEDBACK_LOSS_COUNT)
-    {
-        feedback_loss_count[motor]++;
-    }
-    if (feedback_loss_count[motor] >= CHASSIS_PID_FEEDBACK_LOSS_COUNT)
-    {
-        chassis_state.motor_feedback_lost[motor] = 1U;
-        return 0U;
-    }
-    return 1U;
-}
-
-static uint8_t ChassisService_ShouldFreezePid(motor_driver_phase_t phase)
-{
-    return (phase == MOTOR_DRIVER_PHASE_RAMP_DOWN || phase == MOTOR_DRIVER_PHASE_REVERSE_BRAKE
-            || phase == MOTOR_DRIVER_PHASE_PH_SETTLE)
-               ? 1U
-               : 0U;
-}
-
-static int16_t ChassisService_StepMotorPid(motor_id_t motor,
-                                           float      target_mps,
-                                           float      actual_mps,
-                                           uint8_t    speed_valid,
-                                           float      dt_s,
-                                           int8_t     actuator_limit_direction,
-                                           int16_t    base_permille)
-{
-    int8_t last_sign;
-    int8_t target_sign;
-    float  pid_out;
-
-    chassis_state.motor_pid_active[motor] = 0U;
-    chassis_state.motor_error_mps[motor]  = 0.0f;
-
-    if (ChassisService_AbsFloat(target_mps) <= CHASSIS_PID_STOP_EPSILON_MPS || speed_valid == 0U)
-    {
-        PidController_Reset(&pid_motor[motor]);
-        last_pid_target_mps[motor] = target_mps;
-        return 0;
-    }
-
-    last_sign   = ChassisService_TargetSign(last_pid_target_mps[motor]);
-    target_sign = ChassisService_TargetSign(target_mps);
-    if (last_sign != 0 && target_sign != 0 && last_sign != target_sign)
-    {
-        PidController_Reset(&pid_motor[motor]);
-    }
-    last_pid_target_mps[motor] = target_mps;
-
-    chassis_state.motor_error_mps[motor]  = target_mps - actual_mps;
-    pid_out                               = PidController_StepBounded(&pid_motor[motor],
-                                        target_mps,
-                                        actual_mps,
-                                        dt_s,
-                                        actuator_limit_direction,
-                                        (float)(-CHASSIS_PWM_MAX_PERMILLE - base_permille),
-                                        (float)(CHASSIS_PWM_MAX_PERMILLE - base_permille));
-    chassis_state.motor_pid_active[motor] = 1U;
-    return ChassisService_ClampPermille((int32_t)base_permille + (int32_t)pid_out);
+    ChassisTestMode_Cancel(&test_mode);
 }
 
 static void ChassisService_StopOutput(void)
@@ -534,12 +127,12 @@ static void ChassisService_StopOutput(void)
         chassis_state.motor_error_mps[i]     = 0.0f;
         chassis_state.motor_pid_active[i]    = 0U;
         chassis_state.motor_feedback_lost[i] = 0U;
-        ChassisService_SetMotorOutput((motor_id_t)i, 0);
+        ChassisOutputService_SetMotor(&chassis_state, (motor_id_t)i, 0);
     }
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
-    chassis_state.output_enabled = ChassisService_AnyActiveMotorOutput();
-    ChassisService_SyncSideState();
+    chassis_state.output_enabled = ChassisOutputService_AnyActive(&chassis_state);
+    ChassisSnapshot_SyncSides(&chassis_state);
 }
 
 void ChassisService_Init(void)
@@ -548,27 +141,15 @@ void ChassisService_Init(void)
     MotorDriver_SetSpeedGetter(EncoderDriver_GetMotorSpeedMps);
     ControlService_Init();
     CurrentGuard_Init();
-    chassis_state             = (chassis_service_snapshot_t){0};
-    pid_motor[0]              = (pid_state_t){0};
-    pid_motor[1]              = (pid_state_t){0};
-    pid_motor[2]              = (pid_state_t){0};
-    pid_motor[3]              = (pid_state_t){0};
-    runtime_params_generation = 0UL;
-    StraightController_Init(&straight_controller);
+    chassis_state = (chassis_service_snapshot_t){0};
+    ChassisParamSync_Init(&param_sync);
+    ChassisTargetPlanner_Init(&target_planner);
+    ChassisSpeedLoop_Init(&speed_loop);
+    ChassisFeedbackGuard_Init(&feedback_guard);
+    ChassisTestMode_Init(&test_mode);
     last_control_step_ms   = 0U;
     control_dt_initialized = 0U;
     control_step_active    = 0U;
-    open_loop_test_enabled = 0U;
-    raw_input_test_enabled = 0U;
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        raw_forward[i] = 0;
-        raw_reverse[i] = 0;
-    }
-    open_loop_side[MOTOR_SIDE_LEFT]  = 0;
-    open_loop_side[MOTOR_SIDE_RIGHT] = 0;
-    test_mode_last_refresh_ms        = 0UL;
-    test_mode_lease_active           = 0U;
     (void)ChassisService_RefreshRuntimeParams();
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
@@ -577,17 +158,11 @@ void ChassisService_Init(void)
 
 static void ChassisService_StepImpl(uint32_t now_ms)
 {
-    chassis_cmd_t   cmd;
-    encoder_state_t encoder_state;
-    uint8_t         valid_cmd;
-    uint8_t         open_loop_active;
-    uint8_t         raw_input_active;
-    uint8_t         test_mode_expired = 0U;
-    int16_t         open_loop_snapshot[2];
-    int16_t         raw_forward_snapshot[MOTOR_ID_COUNT];
-    int16_t         raw_reverse_snapshot[MOTOR_ID_COUNT];
-    uint32_t        primask;
-    float           dt_s;
+    chassis_cmd_t                cmd;
+    encoder_state_t              encoder_state;
+    uint8_t                      valid_cmd;
+    chassis_test_mode_snapshot_t test_snapshot;
+    float                        dt_s;
 
     (void)ChassisService_RefreshRuntimeParams();
     MotorDriver_UpdateFaults();
@@ -601,7 +176,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         chassis_state.motor_actual_mps[i]  = encoder_state.speed_mps[i];
         chassis_state.motor_speed_valid[i] = encoder_state.speed_valid[i];
     }
-    ChassisService_SyncSideState();
+    ChassisSnapshot_SyncSides(&chassis_state);
 
     if (ControlService_IsMaintenanceLocked() != 0U || ControlService_IsEmergencyStop() != 0U
         || ControlService_IsFaultStop() != 0U)
@@ -611,23 +186,8 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         return;
     }
 
-    primask = PlatformCritical_Enter();
-    if (test_mode_lease_active != 0U && (uint32_t)(now_ms - test_mode_last_refresh_ms) > CHASSIS_TEST_MODE_LEASE_MS)
-    {
-        ChassisService_ClearTestModeUnsafe();
-        test_mode_expired = 1U;
-    }
-    open_loop_active                     = open_loop_test_enabled;
-    raw_input_active                     = raw_input_test_enabled;
-    open_loop_snapshot[MOTOR_SIDE_LEFT]  = open_loop_side[MOTOR_SIDE_LEFT];
-    open_loop_snapshot[MOTOR_SIDE_RIGHT] = open_loop_side[MOTOR_SIDE_RIGHT];
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        raw_forward_snapshot[i] = raw_forward[i];
-        raw_reverse_snapshot[i] = raw_reverse[i];
-    }
-    PlatformCritical_Exit(primask);
-    if (test_mode_expired != 0U)
+    ChassisTestMode_GetSnapshot(&test_mode, now_ms, &test_snapshot);
+    if (test_snapshot.expired != 0U)
     {
         ControlService_ClearCommand();
         ChassisService_StopOutput();
@@ -637,10 +197,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
     valid_cmd = ControlService_GetCommand(&cmd, now_ms);
     if (ChassisMath_ControlDt(now_ms, &last_control_step_ms, &control_dt_initialized, &dt_s) == 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-        {
-            PidController_Reset(&pid_motor[i]);
-        }
+        ChassisSpeedLoop_Reset(&speed_loop);
         ChassisService_StopOutput();
         return;
     }
@@ -656,80 +213,31 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         }
     }
 
-    if (open_loop_active != 0U)
+    if (test_snapshot.open_loop_active != 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-        {
-            PidController_Reset(&pid_motor[i]);
-            chassis_state.motor_pid_active[i]    = 0U;
-            chassis_state.motor_feedback_lost[i] = 0U;
-            chassis_state.motor_error_mps[i]     = 0.0f;
-            if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
-            {
-                ChassisService_SetMotorOutput(
-                    (motor_id_t)i,
-                    ChassisService_SelectSideValue((motor_id_t)i,
-                                                   (float)open_loop_snapshot[MOTOR_SIDE_LEFT],
-                                                   (float)open_loop_snapshot[MOTOR_SIDE_RIGHT]));
-            }
-            else
-            {
-                ChassisService_SetMotorOutput((motor_id_t)i, 0);
-            }
-        }
-        chassis_state.output_enabled = ChassisService_AnyActiveMotorOutput();
+        ChassisTestMode_ApplyOpenLoop(&test_snapshot, &chassis_state, &speed_loop);
+        chassis_state.output_enabled = ChassisOutputService_AnyActive(&chassis_state);
         ChassisService_ResetRamps();
-        ChassisService_SetSideTargets(0.0f, 0.0f, 1U);
-        ChassisService_SyncSideState();
+        ChassisSnapshot_SetSideTargets(&chassis_state, 0.0f, 0.0f, 1U);
+        ChassisSnapshot_SyncSides(&chassis_state);
         return;
     }
 
-    if (raw_input_active != 0U)
+    if (test_snapshot.raw_input_active != 0U)
     {
-        adc_monitor_state_t adc_state;
-
-        AdcMonitor_GetState(&adc_state);
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-        {
-            PidController_Reset(&pid_motor[i]);
-            chassis_state.motor_current_limited[i] = 0U;
-            if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
-            {
-                int16_t target =
-                    ChassisService_ClampPermille((int32_t)raw_forward_snapshot[i] - (int32_t)raw_reverse_snapshot[i]);
-                int16_t applied = target;
-                applied         = ChassisService_ApplyCurrentLimit((motor_id_t)i,
-                                                           applied,
-                                                           &adc_state,
-                                                           &chassis_state.motor_current_limited[i]);
-                MotorDriver_SetPermille((motor_id_t)i, applied);
-                chassis_state.motor_output_permille[i] = applied;
-            }
-            else
-            {
-                MotorDriver_SetPermille((motor_id_t)i, 0);
-                chassis_state.motor_output_permille[i] = 0;
-            }
-            chassis_state.motor_pid_active[i]    = 0U;
-            chassis_state.motor_feedback_lost[i] = 0U;
-            chassis_state.motor_error_mps[i]     = 0.0f;
-        }
+        ChassisTestMode_ApplyRaw(&test_snapshot, &chassis_state, &speed_loop);
         ChassisService_ResetRamps();
-        ChassisService_SetSideTargets(0.0f, 0.0f, 1U);
-        chassis_state.output_enabled = ChassisService_AnyActiveMotorOutput();
-        ChassisService_SyncSideState();
+        ChassisSnapshot_SetSideTargets(&chassis_state, 0.0f, 0.0f, 1U);
+        chassis_state.output_enabled = ChassisOutputService_AnyActive(&chassis_state);
+        ChassisSnapshot_SyncSides(&chassis_state);
         return;
     }
 
     if (valid_cmd != 0U)
     {
-        motor_driver_state_t motor_state;
-        float                req_left;
-        float                req_right;
-        float                ramp_left;
-        float                ramp_right;
-        float                linear_step  = runtime_params.speed_ramp_mps2 * dt_s;
-        float                angular_step = runtime_params.angular_ramp_rps2 * dt_s;
+        motor_driver_state_t            motor_state;
+        chassis_target_planner_input_t  planner_input = {0};
+        chassis_target_planner_result_t planner_result;
 
         if (ChassisLayout_HasBothSides() == 0U)
         {
@@ -738,130 +246,66 @@ static void ChassisService_StepImpl(uint32_t now_ms)
             return;
         }
 
-        ChassisService_ResolveSideTargetsWithParams(cmd.linear_x,
-                                                    cmd.angular_z,
-                                                    &runtime_params,
-                                                    &req_left,
-                                                    &req_right);
-        ChassisService_ScaleWheelTargets(&req_left, &req_right);
-        ChassisService_SetSideTargets(req_left, req_right, 1U);
-
-        ramped_linear_x  = ChassisService_RampToward(ramped_linear_x, cmd.linear_x, linear_step);
-        ramped_angular_z = ChassisService_RampToward(ramped_angular_z, cmd.angular_z, angular_step);
-        ChassisService_ResolveSideTargetsWithParams(ramped_linear_x,
-                                                    ramped_angular_z,
-                                                    &runtime_params,
-                                                    &ramp_left,
-                                                    &ramp_right);
+        planner_input.now_ms                = now_ms;
+        planner_input.dt_s                  = dt_s;
+        planner_input.command               = &cmd;
+        planner_input.params                = &param_sync.params;
+        planner_input.motion_generation     = ControlService_GetMotionRevokeGeneration();
+        planner_input.actual_left_mps       = chassis_state.left_actual_mps;
+        planner_input.actual_right_mps      = chassis_state.right_actual_mps;
+        planner_input.left_speed_valid      = chassis_state.left_speed_valid;
+        planner_input.right_speed_valid     = chassis_state.right_speed_valid;
+        planner_input.left_output_permille  = chassis_state.left_output_permille;
+        planner_input.right_output_permille = chassis_state.right_output_permille;
+        planner_input.left_current_limited  = chassis_state.left_current_limited;
+        planner_input.right_current_limited = chassis_state.right_current_limited;
         if (ChassisService_AbsFloat(cmd.angular_z) <= 0.0001f && ChassisService_AbsFloat(cmd.linear_x) > 0.001f)
         {
-            imu_bmi270_state_t           imu_state;
-            uint8_t                      imu_valid;
-            straight_controller_params_t straight_params;
-            straight_controller_input_t  straight_input;
-            straight_controller_result_t straight_result;
+            imu_bmi270_state_t imu_state;
 
             ImuBmi270_GetState(&imu_state);
-            imu_valid       = (imu_state.online != 0U && imu_state.gyro_calibrated != 0U
-                         && (uint32_t)(now_ms - imu_state.last_update_ms) <= 100U
-                         && (imu_state.quality_flags
-                             & (IMU_BMI270_QUALITY_SPI_ERROR | IMU_BMI270_QUALITY_TIMESTAMP_ERROR
-                                | IMU_BMI270_QUALITY_GYRO_SATURATION | IMU_BMI270_QUALITY_INIT_FAILED
-                                | IMU_BMI270_QUALITY_PROFILE_MISMATCH))
-                                == 0U)
-                                  ? 1U
-                                  : 0U;
-            straight_params = (straight_controller_params_t){
-                .trim_forward_015_mps         = runtime_params.straight_trim_forward_015_mps,
-                .trim_forward_030_mps         = runtime_params.straight_trim_forward_030_mps,
-                .trim_reverse_015_mps         = runtime_params.straight_trim_reverse_015_mps,
-                .trim_reverse_030_mps         = runtime_params.straight_trim_reverse_030_mps,
-                .wheel_coupling_gain          = runtime_params.straight_wheel_coupling_gain,
-                .heading_kp                   = runtime_params.straight_heading_kp,
-                .heading_ki                   = runtime_params.straight_heading_ki,
-                .heading_integral_limit_deg_s = runtime_params.straight_heading_integral_limit_deg_s,
-                .max_speed_mps                = runtime_params.straight_max_speed_mps,
-                .heading_enabled              = runtime_params.straight_heading_hold_enabled,
-            };
-            straight_input = (straight_controller_input_t){
-                .now_ms                = now_ms,
-                .source                = cmd.source,
-                .generation            = ControlService_GetMotionRevokeGeneration(),
-                .requested_linear_mps  = ramped_linear_x,
-                .requested_angular_rps = cmd.angular_z,
-                .actual_left_mps       = chassis_state.left_actual_mps,
-                .actual_right_mps      = chassis_state.right_actual_mps,
-                .left_speed_valid      = chassis_state.left_speed_valid,
-                .right_speed_valid     = chassis_state.right_speed_valid,
-                .left_output_permille  = chassis_state.left_output_permille,
-                .right_output_permille = chassis_state.right_output_permille,
-                .left_current_limited  = chassis_state.left_current_limited,
-                .right_current_limited = chassis_state.right_current_limited,
-                .imu_valid             = imu_valid,
-                .gyro_z_dps            = imu_state.gyro_corrected_dps[2],
-            };
-            straight_result = StraightController_Step(&straight_controller, &straight_params, &straight_input);
-            ramp_left       = straight_result.left_target_mps;
-            ramp_right      = straight_result.right_target_mps;
-            chassis_state.straight_active                 = straight_result.active;
-            chassis_state.straight_direction              = straight_result.direction;
-            chassis_state.straight_transition_distance_m  = straight_result.transition_distance_m;
-            chassis_state.straight_in_transition          = straight_result.in_transition;
-            chassis_state.straight_trim_mps               = straight_result.trim_correction_mps;
-            chassis_state.straight_wheel_correction_mps   = straight_result.wheel_correction_mps;
-            chassis_state.straight_heading_error_deg      = straight_result.heading_error_deg;
-            chassis_state.straight_heading_integral_deg_s = straight_result.heading_integral_deg_s;
-            chassis_state.straight_heading_correction_mps = straight_result.heading_correction_mps;
-            chassis_state.straight_total_correction_mps   = straight_result.total_correction_mps;
-            chassis_state.straight_heading_degraded       = straight_result.heading_degraded;
-            chassis_state.straight_derated                = straight_result.derated;
-            chassis_state.straight_out_of_range           = straight_result.out_of_range;
+            planner_input.imu_valid  = (imu_state.online != 0U && imu_state.gyro_calibrated != 0U
+                                       && (uint32_t)(now_ms - imu_state.last_update_ms) <= 100U
+                                       && (imu_state.quality_flags
+                                           & (IMU_BMI270_QUALITY_SPI_ERROR | IMU_BMI270_QUALITY_TIMESTAMP_ERROR
+                                              | IMU_BMI270_QUALITY_GYRO_SATURATION | IMU_BMI270_QUALITY_INIT_FAILED
+                                              | IMU_BMI270_QUALITY_PROFILE_MISMATCH))
+                                              == 0U)
+                                           ? 1U
+                                           : 0U;
+            planner_input.gyro_z_dps = imu_state.gyro_corrected_dps[2];
         }
-        else
-        {
-            StraightController_Reset(&straight_controller);
-            chassis_state.straight_active                 = 0U;
-            chassis_state.straight_direction              = 0;
-            chassis_state.straight_transition_distance_m  = 0.0f;
-            chassis_state.straight_in_transition          = 0U;
-            chassis_state.straight_trim_mps               = 0.0f;
-            chassis_state.straight_wheel_correction_mps   = 0.0f;
-            chassis_state.straight_heading_error_deg      = 0.0f;
-            chassis_state.straight_heading_integral_deg_s = 0.0f;
-            chassis_state.straight_heading_correction_mps = 0.0f;
-            chassis_state.straight_total_correction_mps   = 0.0f;
-            chassis_state.straight_heading_degraded       = 0U;
-            chassis_state.straight_derated                = 0U;
-            chassis_state.straight_out_of_range           = 0U;
-        }
-        chassis_state.control_source = cmd.source;
-        chassis_state.pwm_saturated =
-            (uint8_t)(ChassisService_AbsFloat((float)chassis_state.left_output_permille) >= 850.0f
-                      || ChassisService_AbsFloat((float)chassis_state.right_output_permille) >= 850.0f);
-        ChassisService_ScaleWheelTargets(&ramp_left, &ramp_right);
-        ChassisService_SetSideTargets(ramp_left, ramp_right, 0U);
+        ChassisTargetPlanner_Step(&target_planner, &planner_input, &planner_result);
+        ChassisSnapshot_SetSideTargets(&chassis_state,
+                                       planner_result.requested_left_mps,
+                                       planner_result.requested_right_mps,
+                                       1U);
+
+        ChassisSnapshot_ApplyPlannerResult(&chassis_state, &planner_result, cmd.source);
+        ChassisSnapshot_SetSideTargets(&chassis_state,
+                                       planner_result.target_left_mps,
+                                       planner_result.target_right_mps,
+                                       0U);
 
         MotorDriver_GetState(&motor_state);
-        if (ChassisService_FeedbackFaultDetected(now_ms, &encoder_state, &motor_state) != 0U)
+        if (ChassisFeedbackGuard_DetectFault(&feedback_guard, now_ms, &chassis_state, &encoder_state, &motor_state)
+            != 0U)
         {
             SafetyService_LatchEncoderFeedbackFault();
             ChassisService_EmergencyStop();
             return;
         }
 
-        if (req_left == 0.0f && req_right == 0.0f)
+        if (planner_result.requested_left_mps == 0.0f && planner_result.requested_right_mps == 0.0f)
         {
-            for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-            {
-                PidController_Reset(&pid_motor[i]);
-            }
+            ChassisSpeedLoop_Reset(&speed_loop);
             ChassisService_ResetPidTargets();
             for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
             {
-                ChassisService_SetMotorOutput((motor_id_t)i, 0);
+                ChassisOutputService_SetMotor(&chassis_state, (motor_id_t)i, 0);
             }
-            chassis_state.output_enabled = ChassisService_AnyActiveMotorOutput();
-            ChassisService_SyncSideState();
+            chassis_state.output_enabled = ChassisOutputService_AnyActive(&chassis_state);
+            ChassisSnapshot_SyncSides(&chassis_state);
             return;
         }
 
@@ -872,14 +316,14 @@ static void ChassisService_StepImpl(uint32_t now_ms)
             int8_t  actuator_limit_direction = 0;
             if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
             {
-                PidController_Reset(&pid_motor[i]);
+                ChassisSpeedLoop_ResetMotor(&speed_loop, (motor_id_t)i);
                 chassis_state.motor_pid_active[i]    = 0U;
                 chassis_state.motor_feedback_lost[i] = 0U;
                 chassis_state.motor_error_mps[i]     = 0.0f;
-                ChassisService_SetMotorOutput((motor_id_t)i, 0);
+                ChassisOutputService_SetMotor(&chassis_state, (motor_id_t)i, 0);
                 continue;
             }
-            base_permille = ChassisService_MpsToPermille(chassis_state.motor_target_mps[i]);
+            base_permille = ChassisOutputService_MpsToPermille(chassis_state.motor_target_mps[i]);
             if (chassis_state.motor_current_limited[i] != 0U
                 || ChassisService_AbsFloat((float)motor_state.applied_pwm[i])
                        < ChassisService_AbsFloat((float)motor_state.requested_pwm[i]))
@@ -888,27 +332,26 @@ static void ChassisService_StepImpl(uint32_t now_ms)
             }
             if (CHASSIS_PID_ENABLED != 0U)
             {
-                uint8_t feedback_usable            = ChassisService_CheckFeedbackUsable((motor_id_t)i,
-                                                                             chassis_state.motor_target_mps[i],
-                                                                             chassis_state.motor_actual_mps[i],
-                                                                             encoder_state.speed_valid[i]);
-                chassis_state.motor_speed_valid[i] = feedback_usable;
-                if (ChassisService_ShouldFreezePid(motor_state.phase[i]) != 0U)
-                {
-                    chassis_state.motor_pid_active[i] = 0U;
-                    chassis_state.motor_error_mps[i]  = 0.0f;
-                    permille                          = base_permille;
-                }
-                else
-                {
-                    permille = ChassisService_StepMotorPid((motor_id_t)i,
-                                                           chassis_state.motor_target_mps[i],
-                                                           chassis_state.motor_actual_mps[i],
-                                                           feedback_usable,
-                                                           dt_s,
-                                                           actuator_limit_direction,
-                                                           base_permille);
-                }
+                chassis_speed_loop_result_t speed_result;
+                uint8_t                     feedback_usable = ChassisFeedbackGuard_CheckUsable(&feedback_guard,
+                                                                           &chassis_state,
+                                                                           (motor_id_t)i,
+                                                                           chassis_state.motor_target_mps[i],
+                                                                           chassis_state.motor_actual_mps[i],
+                                                                           encoder_state.speed_valid[i]);
+                chassis_state.motor_speed_valid[i]          = feedback_usable;
+                speed_result                                = ChassisSpeedLoop_StepMotor(&speed_loop,
+                                                          (motor_id_t)i,
+                                                          chassis_state.motor_target_mps[i],
+                                                          chassis_state.motor_actual_mps[i],
+                                                          feedback_usable,
+                                                          dt_s,
+                                                          actuator_limit_direction,
+                                                          base_permille,
+                                                          motor_state.phase[i]);
+                permille                                    = speed_result.permille;
+                chassis_state.motor_pid_active[i]           = speed_result.pid_active;
+                chassis_state.motor_error_mps[i]            = speed_result.error_mps;
             }
             else
             {
@@ -917,10 +360,10 @@ static void ChassisService_StepImpl(uint32_t now_ms)
                 chassis_state.motor_error_mps[i]     = 0.0f;
                 permille                             = base_permille;
             }
-            ChassisService_SetMotorOutput((motor_id_t)i, permille);
+            ChassisOutputService_SetMotor(&chassis_state, (motor_id_t)i, permille);
         }
         chassis_state.output_enabled = 1U;
-        ChassisService_SyncSideState();
+        ChassisSnapshot_SyncSides(&chassis_state);
         chassis_state.pwm_saturated =
             (uint8_t)(ChassisService_AbsFloat((float)chassis_state.left_output_permille) >= 850.0f
                       || ChassisService_AbsFloat((float)chassis_state.right_output_permille) >= 850.0f);
@@ -953,10 +396,7 @@ uint8_t ChassisService_IsStepActive(void)
 
 void ChassisService_EmergencyStop(void)
 {
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        PidController_Reset(&pid_motor[i]);
-    }
+    ChassisSpeedLoop_Reset(&speed_loop);
     ChassisService_CancelTestMode();
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
@@ -972,19 +412,12 @@ void ChassisService_EmergencyStop(void)
     }
     chassis_state.output_enabled = 0U;
     MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
-    ChassisService_SyncSideState();
+    ChassisSnapshot_SyncSides(&chassis_state);
 }
 
 void ChassisService_OpenLoopTest(int16_t left_permille, int16_t right_permille)
 {
-    uint32_t primask                 = PlatformCritical_Enter();
-    open_loop_side[MOTOR_SIDE_LEFT]  = ChassisService_ClampPermille(left_permille);
-    open_loop_side[MOTOR_SIDE_RIGHT] = ChassisService_ClampPermille(right_permille);
-    open_loop_test_enabled           = ((left_permille != 0) || (right_permille != 0)) ? 1U : 0U;
-    raw_input_test_enabled           = 0U;
-    test_mode_lease_active           = open_loop_test_enabled;
-    test_mode_last_refresh_ms        = PlatformTime_TaskNowMs();
-    PlatformCritical_Exit(primask);
+    ChassisTestMode_SetOpenLoop(&test_mode, left_permille, right_permille);
 }
 
 void ChassisService_RawInputTest(int16_t left_forward_permille,
@@ -992,85 +425,16 @@ void ChassisService_RawInputTest(int16_t left_forward_permille,
                                  int16_t right_forward_permille,
                                  int16_t right_reverse_permille)
 {
-    uint32_t primask = PlatformCritical_Enter();
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U
-            && ChassisLayout_MotorSide((motor_id_t)i) == MOTOR_SIDE_LEFT)
-        {
-            raw_forward[i] = ChassisService_ClampPermille(left_forward_permille);
-            raw_reverse[i] = ChassisService_ClampPermille(left_reverse_permille);
-        }
-        else if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
-        {
-            raw_forward[i] = ChassisService_ClampPermille(right_forward_permille);
-            raw_reverse[i] = ChassisService_ClampPermille(right_reverse_permille);
-        }
-        else
-        {
-            raw_forward[i] = 0;
-            raw_reverse[i] = 0;
-        }
-        if (raw_forward[i] < 0)
-        {
-            raw_forward[i] = 0;
-        }
-        if (raw_reverse[i] < 0)
-        {
-            raw_reverse[i] = 0;
-        }
-    }
-    raw_input_test_enabled = 0U;
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        if (raw_forward[i] != 0 || raw_reverse[i] != 0)
-        {
-            raw_input_test_enabled = 1U;
-        }
-    }
-    open_loop_test_enabled    = 0U;
-    test_mode_lease_active    = raw_input_test_enabled;
-    test_mode_last_refresh_ms = PlatformTime_TaskNowMs();
-    PlatformCritical_Exit(primask);
+    ChassisTestMode_SetRawSides(&test_mode,
+                                left_forward_permille,
+                                left_reverse_permille,
+                                right_forward_permille,
+                                right_reverse_permille);
 }
 
 void ChassisService_RawMotorInputTest(motor_id_t motor, int16_t forward_permille, int16_t reverse_permille)
 {
-    uint32_t primask;
-
-    if ((uint32_t)motor >= MOTOR_ID_COUNT)
-    {
-        return;
-    }
-    primask = PlatformCritical_Enter();
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        raw_forward[i] = 0;
-        raw_reverse[i] = 0;
-    }
-    if (ChassisLayout_MotorEnabled(motor) == 0U)
-    {
-        raw_input_test_enabled = 0U;
-        open_loop_test_enabled = 0U;
-        test_mode_lease_active = 0U;
-        PlatformCritical_Exit(primask);
-        return;
-    }
-    raw_forward[motor] = ChassisService_ClampPermille(forward_permille);
-    raw_reverse[motor] = ChassisService_ClampPermille(reverse_permille);
-    if (raw_forward[motor] < 0)
-    {
-        raw_forward[motor] = 0;
-    }
-    if (raw_reverse[motor] < 0)
-    {
-        raw_reverse[motor] = 0;
-    }
-    raw_input_test_enabled    = ((raw_forward[motor] != 0) || (raw_reverse[motor] != 0)) ? 1U : 0U;
-    open_loop_test_enabled    = 0U;
-    test_mode_lease_active    = raw_input_test_enabled;
-    test_mode_last_refresh_ms = PlatformTime_TaskNowMs();
-    PlatformCritical_Exit(primask);
+    ChassisTestMode_SetRawMotor(&test_mode, motor, forward_permille, reverse_permille);
 }
 
 void ChassisService_GetState(chassis_service_snapshot_t *state)

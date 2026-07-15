@@ -9,7 +9,8 @@
 #include "control_service.h"
 #include "encoder_driver.h"
 #include "safety_service.h"
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "param_service.h"
 
 uint32_t ParamService_GetSnapshot(param_model_t *params)

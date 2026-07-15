@@ -1,3 +1,4 @@
+
 # Lab 11: ADC 采样与电池监测
 
 ## 实验目标
@@ -22,7 +23,7 @@ STM32F407 ADC1 由 TIM8 TRGO 以 2kHz 触发，每次扫描 5 个通道，并通
 
 > ADC DMA Rank 仍按 `CH10, CH11, CH12, CH13, CH14` 采样；BSP 层把 `PC1/CH11` 归为逻辑 M2，把 `PC2/CH12` 归为逻辑 M3。
 
-参数（`chassis_config.h`）：
+参数（`control_config.h / bsp_config.h`）：
 
 | 参数 | 默认值 |
 |------|--------|

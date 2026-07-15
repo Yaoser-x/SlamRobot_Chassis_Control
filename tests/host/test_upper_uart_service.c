@@ -13,6 +13,7 @@
 #include "post_service.h"
 #include "reset_reason_service.h"
 #include "safety_service.h"
+#include "system_snapshot_service.h"
 #include "upper_uart_service.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -219,6 +220,46 @@ void ImuBmi270_GetState(imu_bmi270_state_t *state)
     {
         *state = fake_imu_state;
     }
+}
+
+uint32_t SystemSnapshotService_Get(system_snapshot_t *snapshot)
+{
+    if (snapshot == 0)
+    {
+        return 0U;
+    }
+    *snapshot                              = (system_snapshot_t){0};
+    snapshot->post                         = fake_post_result;
+    snapshot->current.invalid_reason_flags = fake_adc_state.invalid_reason_flags;
+    snapshot->control.reset_reason_flags   = 0xA1B2C3D4UL;
+    snapshot->imu.online                   = fake_imu_state.online;
+    snapshot->imu.calibrated               = fake_imu_state.gyro_calibrated;
+    snapshot->imu.sensor_time_valid        = fake_imu_state.sensor_time_valid;
+    snapshot->imu.last_error               = fake_imu_state.last_error;
+    snapshot->imu.sensor_time              = fake_imu_state.sensor_time;
+    snapshot->imu.sample_count             = fake_imu_state.sample_count;
+    snapshot->imu.quality_flags            = fake_imu_state.quality_flags;
+    snapshot->imu.roll_deg                 = fake_imu_state.roll_deg;
+    snapshot->imu.pitch_deg                = fake_imu_state.pitch_deg;
+    snapshot->imu.yaw_deg                  = fake_imu_state.yaw_deg;
+    snapshot->imu.temperature_c            = fake_imu_state.temperature_c;
+    snapshot->imu.quality_counters[0]      = fake_imu_state.spi_error_count;
+    snapshot->imu.quality_counters[1]      = fake_imu_state.init_failure_count;
+    snapshot->imu.quality_counters[2]      = fake_imu_state.fifo_overflow_count;
+    snapshot->imu.quality_counters[3]      = fake_imu_state.timestamp_error_count;
+    snapshot->imu.quality_counters[4]      = fake_imu_state.gyro_saturation_count;
+    snapshot->imu.quality_counters[5]      = fake_imu_state.accel_anomaly_count;
+    snapshot->imu.quality_counters[6]      = fake_imu_state.attitude_invalid_count;
+    for (uint8_t index = 0U; index < 3U; ++index)
+    {
+        snapshot->imu.accel_g[index]  = fake_imu_state.body_accel_g[index];
+        snapshot->imu.gyro_dps[index] = fake_imu_state.body_gyro_dps[index];
+    }
+    for (uint8_t index = 0U; index < 4U; ++index)
+    {
+        snapshot->imu.quaternion[index] = fake_imu_state.quaternion[index];
+    }
+    return 1U;
 }
 
 static void reset_host_uart_state(void)

@@ -83,9 +83,30 @@ set(F407_APP_SOURCES
     App/debug/debug_maintenance_policy.c
     App/debug/debug_log_policy.c
     App/debug/debug_straight_telemetry.c
+    App/debug/debug_console_parser.c
+    App/debug/debug_console_registry.c
+    App/debug/debug_console_writer.c
+    App/debug/commands/debug_cmd_param.c
+    App/debug/commands/debug_cmd_imu.c
+    App/debug/commands/debug_cmd_esp12f.c
+    App/debug/commands/debug_cmd_control.c
+    App/debug/commands/debug_cmd_line.c
+    App/debug/commands/debug_cmd_current.c
+    App/debug/commands/debug_cmd_system.c
+    App/debug/commands/debug_system_status.c
+    App/debug/commands/debug_rtos_report.c
+    App/debug/telemetry/debug_telemetry.c
+    App/debug/telemetry/debug_telemetry_csv.c
+    App/debug/telemetry/debug_telemetry_json.c
     App/debug/usart1_debug_console.c
     App/display/oled_ui.c
-    App/display/oled_selfcheck.c
+    App/display/oled_ui_model.c
+    App/display/oled_text_renderer.c
+    App/display/pages/oled_page_welcome.c
+    App/display/pages/oled_page_selfcheck.c
+    App/display/pages/oled_page_runtime.c
+    App/display/pages/oled_page_calibration.c
+    App/display/pages/oled_page_fault.c
     App/display/oled_calibration_view.c
     App/protocol/uart_callbacks.c
     App/protocol/esp12f_flash_bridge.c
@@ -103,23 +124,38 @@ set(F407_PLATFORM_SOURCES
 set(F407_SERVICE_SOURCES
     Service/chassis/chassis_service.c
     Service/chassis/chassis_maintenance_service.c
+    Service/chassis/chassis_param_sync.c
+    Service/chassis/chassis_target_planner.c
+    Service/chassis/chassis_speed_loop.c
+    Service/chassis/chassis_feedback_guard.c
+    Service/chassis/chassis_output_service.c
+    Service/chassis/chassis_test_mode.c
+    Service/chassis/chassis_snapshot.c
     Service/diagnostics/task_health_service.c
     Service/control/control_service.c
     Service/control/line_control_service.c
     Service/control/ps2_control_service.c
+    Service/safety/battery_guard.c
     Service/safety/current_guard.c
+    Service/safety/safety_fault_policy.c
     Service/safety/safety_service.c
     Service/safety/post_service.c
     Service/diagnostics/reset_reason_service.c
     Service/param/param_service.c
     Service/param/param_persistence.c
     Service/param/flash_param.c
+    Service/param/flash_param_codec.c
+    Service/param/flash_param_migration.c
+    Service/param/flash_param_slots.c
     Service/imu/imu_service.c
     Service/imu/imu_calibration_service.c
     Service/sensing/current_sensor_service.c
     Service/sensing/encoder_service.c
+    Service/telemetry/system_snapshot_service.c
     Service/communication/esp12f_service.c
     Service/communication/upper_uart_service.c
+    Service/communication/communication_command_router.c
+    Service/communication/telemetry_frame_builder.c
 )
 
 set(F407_DOMAIN_SOURCES
@@ -132,53 +168,48 @@ set(F407_DOMAIN_SOURCES
     Domain/imu/imu_calibration.c
     Domain/imu/imu_calibration_gate.c
     Domain/imu/imu_timestamp.c
+    Domain/imu/imu_fusion.c
+    Domain/imu/imu_filter.c
     Domain/line/line_calibration.c
     Domain/motor/motor_output_logic.c
+    Domain/motor/motor_reversal_state.c
+    Domain/protocol/framed_stream_parser.c
     Domain/protocol/upper_protocol.c
 )
 
 set(F407_BSP_SOURCES
     BSP/adc/adc_monitor.c
+    BSP/diagnostics/i2c_bus_diagnostic.c
     BSP/encoder/encoder_driver.c
+    BSP/esp12f/esp12f_boot_control.c
     BSP/flash/flash_storage.c
     BSP/imu/imu_bmi270.c
+    BSP/imu/bmi270_bus.c
+    BSP/imu/bmi270_device.c
     BSP/imu/imu_bmi270_config.c
     BSP/imu/imu_bmi270_fifo.c
-    BSP/imu/imu_bmi270_math.c
     BSP/imu/imu_bmi270_profile.c
     BSP/led/led_status.c
     BSP/line/line_uart.c
     BSP/motor/motor_driver.c
+    BSP/motor/motor_break.c
+    BSP/motor/motor_hw_map.c
     BSP/ps2/ps2_hw.c
     BSP/transport/debug_uart_transport.c
     BSP/transport/esp12f_transport.c
+    BSP/transport/uart_bridge_transport.c
     BSP/transport/upper_uart_transport.c
     BSP/oled/ssd1306.c
     BSP/oled/oled_font_data.c
 )
 
-set(F407_LAYER_INCLUDE_DIRS
-    ${CMAKE_CURRENT_BINARY_DIR}/generated
-    App
-    App/tasks
-    App/chassis
-    App/control
-    App/current
-    App/debug
-    App/display
-    App/imu
-    App/monitor
-    App/param
-    App/protocol
-    Platform
-    Service/chassis
-    Service/communication
-    Service/control
-    Service/diagnostics
-    Service/imu
-    Service/param
-    Service/safety
-    Service/sensing
+add_library(f407_domain STATIC ${F407_DOMAIN_SOURCES})
+add_library(f407_platform STATIC ${F407_PLATFORM_SOURCES})
+add_library(f407_bsp STATIC ${F407_BSP_SOURCES})
+add_library(f407_service STATIC ${F407_SERVICE_SOURCES})
+add_library(f407_app STATIC ${F407_APP_SOURCES})
+
+target_include_directories(f407_domain PUBLIC
     Domain/chassis
     Domain/config
     Domain/control
@@ -189,39 +220,68 @@ set(F407_LAYER_INCLUDE_DIRS
     Domain/motor
     Domain/protocol
     Domain/safety
-    BSP
-    BSP/adc
-    BSP/encoder
-    BSP/esp12f
-    BSP/flash
-    BSP/imu
-    BSP/led
-    BSP/line
-    BSP/motor
-    BSP/ps2
-    BSP/transport
-    BSP/oled
 )
 
-add_library(f407_domain STATIC ${F407_DOMAIN_SOURCES})
-add_library(f407_platform STATIC ${F407_PLATFORM_SOURCES})
-add_library(f407_bsp STATIC ${F407_BSP_SOURCES})
-add_library(f407_service STATIC ${F407_SERVICE_SOURCES})
-add_library(f407_app STATIC ${F407_APP_SOURCES})
+target_include_directories(f407_platform
+    PUBLIC Platform
+    PRIVATE Core/Inc
+)
 
-foreach(layer_target f407_domain f407_platform f407_bsp f407_service f407_app)
-    target_include_directories(${layer_target} PRIVATE ${F407_LAYER_INCLUDE_DIRS})
-endforeach()
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${F407_LAYER_INCLUDE_DIRS})
+target_include_directories(f407_bsp
+    PUBLIC
+        BSP
+        BSP/adc
+        BSP/diagnostics
+        BSP/encoder
+        BSP/esp12f
+        BSP/flash
+        BSP/imu
+        BSP/led
+        BSP/line
+        BSP/motor
+        BSP/oled
+        BSP/ps2
+        BSP/transport
+)
+
+target_include_directories(f407_service PUBLIC
+    Service/chassis
+    Service/communication
+    Service/control
+    Service/diagnostics
+    Service/imu
+    Service/param
+    Service/safety
+    Service/sensing
+    Service/telemetry
+)
+
+target_include_directories(f407_app PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+    App
+    App/tasks
+    App/debug
+    App/debug/commands
+    App/debug/telemetry
+    App/display
+    App/display/pages
+    App/protocol
+)
+
+# CubeMX's freertos.c is the composition root that calls App task entrypoints.
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    App
+    App/tasks
+)
 
 target_link_libraries(f407_domain PUBLIC m)
 target_link_libraries(f407_platform PRIVATE stm32cubemx)
 target_link_libraries(f407_bsp PRIVATE f407_domain f407_platform stm32cubemx)
 target_link_libraries(f407_service PRIVATE f407_domain f407_bsp f407_platform)
-target_link_libraries(f407_app PRIVATE f407_service f407_bsp f407_platform stm32cubemx)
+target_link_libraries(f407_app PRIVATE f407_service f407_domain f407_bsp f407_platform stm32cubemx)
 
-# Add project symbols (macros)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+# Release maintenance authorization is consumed while compiling f407_app.
+target_compile_definitions(f407_app PRIVATE
     $<$<CONFIG:Release>:DEBUG_CONSOLE_RELEASE_REQUIRES_ARM=1>
 )
 
@@ -237,7 +297,9 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    -Wl,--whole-archive
     f407_app
+    -Wl,--no-whole-archive
     f407_service
     f407_domain
     f407_bsp

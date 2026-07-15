@@ -1,6 +1,7 @@
 #include "app_tasks.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "chassis_service.h"
 #include "current_sensor_service.h"
 #include "encoder_service.h"

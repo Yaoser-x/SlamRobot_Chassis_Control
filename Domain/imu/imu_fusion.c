@@ -1,6 +1,4 @@
-#include "imu_bmi270_math.h"
-
-#include "imu_bmi270.h"
+#include "imu_fusion.h"
 
 #include <math.h>
 #include <string.h>

@@ -1,6 +1,7 @@
 #include "app_tasks.h"
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "platform_time.h"
 #include "ps2_control_service.h"
 #include "platform_reset_trace.h"

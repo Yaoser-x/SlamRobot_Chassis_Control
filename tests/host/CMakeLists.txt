@@ -53,13 +53,7 @@ add_executable(test_f407_v2
 
 target_include_directories(test_f407_v2 PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
-    ../../App/param
-    ../../App/param
-    ../../App/chassis
     ../../App/protocol
-    ../../App/monitor
     ../../BSP
     ../../BSP/encoder
     ../../BSP/imu
@@ -75,7 +69,6 @@ add_executable(test_chassis_layout_2wd
 )
 
 target_include_directories(test_chassis_layout_2wd PRIVATE
-    ../../App/chassis
     ../../BSP
     ../../BSP/motor
 )
@@ -90,7 +83,6 @@ add_executable(test_straight_controller
     test_straight_controller.c
     ../../Domain/control/straight_controller.c
 )
-target_include_directories(test_straight_controller PRIVATE ../../App/chassis)
 target_link_libraries(test_straight_controller PRIVATE m)
 add_test(NAME straight_controller COMMAND test_straight_controller)
 
@@ -115,7 +107,6 @@ target_include_directories(test_adc_monitor PRIVATE
     ../../BSP
     ../../BSP/adc
     ../../BSP/motor
-    ../../App/chassis
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -140,8 +131,6 @@ add_executable(test_line_uart
 target_include_directories(test_line_uart PRIVATE
     .
     ../../BSP/line
-    ../../App/param
-    ../../App/chassis
     ../../BSP
     ../../BSP/motor
 )
@@ -156,9 +145,6 @@ add_executable(test_line_control_service
 
 target_include_directories(test_line_control_service PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
-    ../../App/param
     ../../BSP
     ../../BSP/flash
     ../../BSP/imu
@@ -174,7 +160,6 @@ add_executable(test_line_calibration
 )
 
 target_include_directories(test_line_calibration PRIVATE
-    ../../App/control
 )
 
 add_test(NAME line_calibration COMMAND test_line_calibration)
@@ -182,56 +167,119 @@ add_test(NAME line_calibration COMMAND test_line_calibration)
 add_executable(test_upper_uart_service
     test_upper_uart_service.c
     ../../Service/communication/upper_uart_service.c
+    ../../Service/communication/communication_command_router.c
+    ../../Service/communication/telemetry_frame_builder.c
+    ../../Domain/protocol/framed_stream_parser.c
     ../../Domain/protocol/upper_protocol.c
     ../../BSP/transport/upper_uart_transport.c
 )
 
 target_include_directories(test_upper_uart_service PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
     ../../App/protocol
-    ../../App/monitor
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
     ../../BSP/imu
     ../../BSP/line
     ../../BSP/motor
+    ../../Service/telemetry
 )
 
 add_test(NAME upper_uart_service COMMAND test_upper_uart_service)
+
+add_executable(test_uart_bridge_transport
+    test_uart_bridge_transport.c
+    ../../BSP/transport/uart_bridge_transport.c
+)
+target_include_directories(test_uart_bridge_transport PRIVATE
+    .
+    ../../BSP/transport
+)
+add_test(NAME uart_bridge_transport COMMAND test_uart_bridge_transport)
+
+add_executable(test_esp12f_boot_control
+    test_esp12f_boot_control.c
+    ../../BSP/esp12f/esp12f_boot_control.c
+)
+target_include_directories(test_esp12f_boot_control PRIVATE
+    .
+    ../../BSP/esp12f
+)
+add_test(NAME esp12f_boot_control COMMAND test_esp12f_boot_control)
+
+add_executable(test_esp12f_flash_bridge
+    test_esp12f_flash_bridge.c
+    ../../App/protocol/esp12f_flash_bridge.c
+)
+target_include_directories(test_esp12f_flash_bridge PRIVATE
+    ../../App/debug
+    ../../App/protocol
+    ../../BSP/esp12f
+    ../../BSP/motor
+    ../../BSP/transport
+)
+add_test(NAME esp12f_flash_bridge COMMAND test_esp12f_flash_bridge)
+
+add_executable(test_framed_stream_parser
+    test_framed_stream_parser.c
+    ../../Domain/protocol/framed_stream_parser.c
+    ../../Domain/protocol/upper_protocol.c
+)
+add_test(NAME framed_stream_parser COMMAND test_framed_stream_parser)
+
+add_executable(test_communication_command_router
+    test_communication_command_router.c
+    ../../Service/communication/communication_command_router.c
+    ../../Domain/protocol/upper_protocol.c
+)
+add_test(NAME communication_command_router COMMAND test_communication_command_router)
+
+add_executable(test_telemetry_frame_builder
+    test_telemetry_frame_builder.c
+    ../../Service/communication/telemetry_frame_builder.c
+    ../../Domain/protocol/upper_protocol.c
+)
+target_include_directories(test_telemetry_frame_builder PRIVATE
+    ../../Service/telemetry
+)
+add_test(NAME telemetry_frame_builder COMMAND test_telemetry_frame_builder)
 
 add_executable(test_motor_driver_gpio
     test_motor_driver_gpio.c
     ../../Domain/chassis/chassis_layout.c
     ../../BSP/motor/motor_driver.c
+    ../../BSP/motor/motor_break.c
+    ../../BSP/motor/motor_hw_map.c
     ../../Domain/motor/motor_output_logic.c
+    ../../Domain/motor/motor_reversal_state.c
     ../../Service/param/param_service.c
 )
 
 target_include_directories(test_motor_driver_gpio PRIVATE
     .
-    ../../App/chassis
-    ../../App/param
     ../../BSP
     ../../BSP/motor
 )
 
 add_test(NAME motor_driver_gpio COMMAND test_motor_driver_gpio)
 
+add_executable(test_motor_reversal_state
+    test_motor_reversal_state.c
+    ../../Domain/motor/motor_reversal_state.c
+)
+add_test(NAME motor_reversal_state COMMAND test_motor_reversal_state)
+
 add_executable(test_safety_service
     test_safety_service.c
+    ../../Service/safety/battery_guard.c
+    ../../Service/safety/safety_fault_policy.c
     ../../Service/safety/safety_service.c
     ../../Service/diagnostics/task_health_service.c
 )
 
 target_include_directories(test_safety_service PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
-    ../../App/monitor
-    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -242,16 +290,14 @@ add_test(NAME safety_service COMMAND test_safety_service)
 
 add_executable(test_safety_service_fault_enabled
     test_safety_service.c
+    ../../Service/safety/battery_guard.c
+    ../../Service/safety/safety_fault_policy.c
     ../../Service/safety/safety_service.c
     ../../Service/diagnostics/task_health_service.c
 )
 
 target_include_directories(test_safety_service_fault_enabled PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
-    ../../App/monitor
-    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -272,9 +318,6 @@ add_executable(test_current_guard
 
 target_include_directories(test_current_guard PRIVATE
     .
-    ../../App/chassis
-    ../../App/current
-    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/motor
@@ -290,9 +333,6 @@ add_executable(test_current_guard_soft_limit
 
 target_include_directories(test_current_guard_soft_limit PRIVATE
     .
-    ../../App/chassis
-    ../../App/current
-    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/motor
@@ -310,6 +350,13 @@ add_test(NAME current_guard_soft_limit COMMAND test_current_guard_soft_limit)
 add_executable(test_chassis_service_current_limit
     test_chassis_service_current_limit.c
     ../../Service/chassis/chassis_service.c
+    ../../Service/chassis/chassis_param_sync.c
+    ../../Service/chassis/chassis_target_planner.c
+    ../../Service/chassis/chassis_speed_loop.c
+    ../../Service/chassis/chassis_feedback_guard.c
+    ../../Service/chassis/chassis_output_service.c
+    ../../Service/chassis/chassis_test_mode.c
+    ../../Service/chassis/chassis_snapshot.c
     ../../Domain/chassis/chassis_kinematics.c
     ../../Domain/control/straight_controller.c
     ../../Service/safety/current_guard.c
@@ -320,11 +367,6 @@ add_executable(test_chassis_service_current_limit
 
 target_include_directories(test_chassis_service_current_limit PRIVATE
     .
-    ../../App/chassis
-    ../../App/current
-    ../../App/control
-    ../../App/monitor
-    ../../App/param
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -337,6 +379,34 @@ target_link_libraries(test_chassis_service_current_limit PRIVATE m)
 
 add_test(NAME chassis_service_current_limit COMMAND test_chassis_service_current_limit)
 
+add_executable(test_chassis_target_planner
+    test_chassis_target_planner.c
+    ../../Service/chassis/chassis_target_planner.c
+    ../../Domain/chassis/chassis_kinematics.c
+    ../../Domain/control/straight_controller.c
+)
+target_include_directories(test_chassis_target_planner PRIVATE
+    ../../BSP/motor
+)
+target_link_libraries(test_chassis_target_planner PRIVATE m)
+add_test(NAME chassis_target_planner COMMAND test_chassis_target_planner)
+
+add_executable(test_chassis_speed_feedback
+    test_chassis_speed_feedback.c
+    ../../Service/chassis/chassis_speed_loop.c
+    ../../Service/chassis/chassis_feedback_guard.c
+    ../../Domain/chassis/chassis_layout.c
+    ../../Domain/control/pid_controller.c
+)
+target_include_directories(test_chassis_speed_feedback PRIVATE
+    ../../BSP
+    ../../BSP/encoder
+    ../../BSP/motor
+    ../../Service/chassis
+)
+target_link_libraries(test_chassis_speed_feedback PRIVATE m)
+add_test(NAME chassis_speed_feedback COMMAND test_chassis_speed_feedback)
+
 add_executable(test_chassis_maintenance_service
     test_chassis_maintenance_service.c
     ../../Service/chassis/chassis_maintenance_service.c
@@ -344,8 +414,6 @@ add_executable(test_chassis_maintenance_service
 
 target_include_directories(test_chassis_maintenance_service PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
     ../../BSP
     ../../BSP/encoder
     ../../BSP/motor
@@ -376,7 +444,6 @@ add_executable(test_debug_straight_telemetry
     ../../App/debug/debug_straight_telemetry.c
 )
 target_include_directories(test_debug_straight_telemetry PRIVATE
-    ../../App/chassis
     ../../App/debug
     ../../BSP
     ../../BSP/adc
@@ -390,7 +457,6 @@ add_executable(test_relative_yaw_control
 )
 
 target_include_directories(test_relative_yaw_control PRIVATE
-    ../../App/control
 )
 
 target_link_libraries(test_relative_yaw_control PRIVATE m)
@@ -405,8 +471,6 @@ add_executable(test_ps2_control_service
 
 target_include_directories(test_ps2_control_service PRIVATE
     .
-    ../../App/chassis
-    ../../App/control
     ../../BSP
     ../../BSP/imu
     ../../BSP/led
@@ -425,7 +489,6 @@ add_executable(test_oled_ssd1306
 target_include_directories(test_oled_ssd1306 PRIVATE
   .
   ../../BSP
-  ../../App/chassis
   ../../BSP/oled
 )
 
@@ -436,20 +499,29 @@ add_executable(test_imu_pipeline
     ../../Domain/imu/imu_calibration_gate.c
     ../../Domain/imu/imu_calibration.c
     ../../BSP/imu/imu_bmi270_fifo.c
-    ../../BSP/imu/imu_bmi270_math.c
+    ../../Domain/imu/imu_fusion.c
+    ../../Domain/imu/imu_filter.c
     ../../BSP/imu/imu_bmi270_profile.c
     ../../Domain/imu/imu_timestamp.c
 )
 
 target_include_directories(test_imu_pipeline PRIVATE
     .
-    ../../App/imu
     ../../BSP/imu
 )
 
 target_link_libraries(test_imu_pipeline PRIVATE m)
 
 add_test(NAME imu_pipeline COMMAND test_imu_pipeline)
+
+add_executable(test_bmi270_device
+    test_bmi270_device.c
+    ../../BSP/imu/bmi270_device.c
+    ../../BSP/imu/imu_bmi270_config.c
+    ../../BSP/imu/imu_bmi270_profile.c
+)
+target_include_directories(test_bmi270_device PRIVATE . ../../BSP/imu)
+add_test(NAME bmi270_device COMMAND test_bmi270_device)
 
 add_executable(test_param_service
     test_param_service.c
@@ -458,8 +530,6 @@ add_executable(test_param_service
 
 target_include_directories(test_param_service PRIVATE
     .
-    ../../App/chassis
-    ../../App/param
     ../../BSP
     ../../BSP/motor
 )
@@ -475,8 +545,6 @@ add_executable(test_encoder_driver
 
 target_include_directories(test_encoder_driver PRIVATE
     .
-    ../../App/chassis
-    ../../App/param
     ../../BSP
     ../../BSP/encoder
     ../../BSP/motor
@@ -490,13 +558,14 @@ add_executable(test_flash_param
     test_flash_param.c
     ../../Service/param/param_service.c
     ../../Service/param/flash_param.c
+    ../../Service/param/flash_param_codec.c
+    ../../Service/param/flash_param_migration.c
+    ../../Service/param/flash_param_slots.c
     ../../Domain/imu/imu_calibration.c
 )
 
 target_include_directories(test_flash_param PRIVATE
     .
-    ../../App/chassis
-    ../../App/param
     ../../BSP
     ../../BSP/flash
     ../../BSP/imu
@@ -516,8 +585,6 @@ add_executable(test_power_on_self_test
 
 target_include_directories(test_power_on_self_test PRIVATE
     .
-    ../../App/chassis
-    ../../App/monitor
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -538,7 +605,6 @@ add_executable(test_oled_selfcheck
 
 target_include_directories(test_oled_selfcheck PRIVATE
     .
-    ../../App/chassis
     ../../App/display
     ../../BSP
 )
@@ -551,9 +617,26 @@ add_executable(test_oled_calibration_view
 )
 target_include_directories(test_oled_calibration_view PRIVATE
     ../../App/display
-    ../../BSP/imu
+    ../../Domain/model
+    ../../Service/diagnostics
+    ../../Service/safety
+    ../../Service/telemetry
 )
 add_test(NAME oled_calibration_view COMMAND test_oled_calibration_view)
+
+add_executable(test_oled_ui_model
+    test_oled_ui_model.c
+    ../../App/display/oled_ui_model.c
+    ../../App/display/oled_calibration_view.c
+)
+target_include_directories(test_oled_ui_model PRIVATE
+    ../../App/display
+    ../../Domain/model
+    ../../Service/diagnostics
+    ../../Service/safety
+    ../../Service/telemetry
+)
+add_test(NAME oled_ui_model COMMAND test_oled_ui_model)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -576,3 +659,34 @@ add_test(
         $<TARGET_FILE:generate_upper_v2_golden>
         ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/upper_v2_golden.json
 )
+
+add_executable(test_system_snapshot_service
+    test_system_snapshot_service.c
+    ../../Service/telemetry/system_snapshot_service.c
+)
+target_include_directories(test_system_snapshot_service PRIVATE
+    .
+    ../../BSP
+    ../../BSP/adc
+    ../../BSP/encoder
+    ../../BSP/imu
+    ../../BSP/line
+    ../../BSP/motor
+    ../../Domain/config
+    ../../Service/imu
+    ../../Service/sensing
+    ../../Service/telemetry
+)
+add_test(NAME system_snapshot_service COMMAND test_system_snapshot_service)
+
+add_executable(test_debug_console_core
+    test_debug_console_core.c
+    ../../App/debug/debug_console_parser.c
+    ../../App/debug/debug_console_registry.c
+)
+target_include_directories(test_debug_console_core PRIVATE
+    ../../App/debug
+    ../../Domain/model
+)
+target_link_libraries(test_debug_console_core PRIVATE m)
+add_test(NAME debug_console_core COMMAND test_debug_console_core)

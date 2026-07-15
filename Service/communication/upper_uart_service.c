@@ -1,32 +1,13 @@
 #include "upper_uart_service.h"
+#include "communication_command_router.h"
+#include "framed_stream_parser.h"
+#include "system_snapshot_service.h"
+#include "telemetry_frame_builder.h"
 #include "platform_critical.h"
 #include "platform_time.h"
 #include "upper_uart_transport.h"
 
 #include "control_config.h"
-
-#include "adc_monitor.h"
-
-#include "chassis_service.h"
-
-#include "chassis_layout.h"
-
-#include "control_service.h"
-
-#include "encoder_driver.h"
-
-#include "imu_bmi270.h"
-
-#include "line_control_service.h"
-
-#include "motor_driver.h"
-
-#include "post_service.h"
-
-#include "reset_reason_service.h"
-
-#include "safety_service.h"
-
 #include "upper_protocol.h"
 
 #include <string.h>
@@ -34,14 +15,6 @@
 #define UPPER_UART_RX_BUFFER_SIZE    128U
 #define UPPER_UART_TX_QUEUE_CAPACITY 4U
 #define UPPER_UART_TX_SLOT_INVALID   0xFFU
-
-typedef enum
-{
-    UPPER_RX_WAIT_HEAD0 = 0,
-    UPPER_RX_WAIT_HEAD1,
-    UPPER_RX_WAIT_LEN,
-    UPPER_RX_WAIT_BODY
-} upper_rx_state_t;
 
 typedef enum
 {
@@ -61,22 +34,16 @@ typedef struct
 
 static uint8_t                    upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE] __attribute__((aligned(4)));
 static uint16_t                   upper_rx_read_pos;
-static upper_rx_state_t           upper_rx_state;
-static uint8_t                    upper_frame_buf[UPPER_PROTOCOL_MAX_PAYLOAD + 3U];
-static uint8_t                    upper_frame_len;
-static uint8_t                    upper_frame_index;
+static frame_parser_t             upper_parser;
 static uint8_t                    upper_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
-static uint8_t                    upper_status_payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN];
 static uint32_t                   upper_last_status_ms;
 static uint32_t                   upper_last_rx_timestamp_ms;
 static upper_uart_service_state_t upper_state;
 static uint8_t                    upper_parser_idle_cycles;
 static uint16_t                   upper_last_write_pos;
 static uint8_t                    upper_imu_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
-static uint8_t                    upper_imu_payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
 static uint32_t                   upper_last_imu_status_ms;
 static uint8_t                    upper_diagnostic_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
-static uint8_t                    upper_diagnostic_payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN];
 static uint32_t                   upper_last_diagnostic_ms;
 static upper_tx_slot_t            upper_tx_queue[UPPER_UART_TX_QUEUE_CAPACITY];
 static uint8_t                    upper_tx_queue_count;
@@ -87,9 +54,7 @@ static uint32_t                   upper_tx_sequence;
 
 static void UpperUartService_ResetParser(void)
 {
-    upper_rx_state    = UPPER_RX_WAIT_HEAD0;
-    upper_frame_len   = 0U;
-    upper_frame_index = 0U;
+    FrameParser_Reset(&upper_parser);
 }
 
 static uint8_t UpperUartService_SelectNextTxLocked(void)
@@ -222,101 +187,21 @@ static void UpperUartService_RestartRxDma(uint8_t count_restart)
     }
 }
 
-static void UpperUartService_HandleFrame(uint8_t cmd, const uint8_t *payload, uint8_t payload_len)
-{
-    if (cmd == UPPER_CMD_SET_VELOCITY)
-    {
-        upper_velocity_payload_t velocity;
-        if (UpperProtocol_ParseVelocityPayload(payload, payload_len, &velocity) != 0U)
-        {
-            chassis_cmd_t chassis_cmd = {
-                .linear_x     = velocity.linear_x,
-                .angular_z    = velocity.angular_z,
-                .enable       = velocity.enable,
-                .source       = CONTROL_SOURCE_UPPER,
-                .timestamp_ms = PlatformTime_TaskNowMs(),
-            };
-            (void)velocity.mode; /* reserved: control mode byte */
-            ControlService_SetCommand(&chassis_cmd);
-        }
-    }
-    else if (cmd == UPPER_CMD_ESTOP && payload_len == UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN)
-    {
-        if (UpperProtocol_RemoteEstopSetRequested(payload, payload_len) != 0U)
-        {
-            ControlService_SetEmergencyStop(1U);
-        }
-    }
-    else if (cmd == UPPER_CMD_LINE_CTRL && payload_len == UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN)
-    {
-        LineControlService_Enable((payload[0] != 0U) ? 1U : 0U);
-    }
-    else if (cmd == UPPER_CMD_CLEAR_FAULT && payload_len == UPPER_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN)
-    {
-        if (ControlService_IsEmergencyStop() == 0U)
-        {
-            SafetyService_ClearLatchedFaults(0xFFFFFFFFUL);
-        }
-    }
-}
-
 static void UpperUartService_ProcessByte(uint8_t byte)
 {
-    switch (upper_rx_state)
+    protocol_frame_t      frame;
+    frame_parser_result_t result = FrameParser_Push(&upper_parser, byte, &frame);
+
+    if (result == FRAME_PARSER_FRAME)
     {
-        case UPPER_RX_WAIT_HEAD0:
-            if (byte == UPPER_PROTOCOL_HEAD_0)
-            {
-                upper_rx_state = UPPER_RX_WAIT_HEAD1;
-            }
-            break;
-
-        case UPPER_RX_WAIT_HEAD1:
-            upper_rx_state = (byte == UPPER_PROTOCOL_HEAD_1) ? UPPER_RX_WAIT_LEN : UPPER_RX_WAIT_HEAD0;
-            break;
-
-        case UPPER_RX_WAIT_LEN:
-            if (byte == 0U || byte > UPPER_PROTOCOL_CMD_LEN(UPPER_PROTOCOL_MAX_PAYLOAD))
-            {
-                UpperUartService_ResetParser();
-            }
-            else
-            {
-                upper_frame_buf[0] = byte;
-                upper_frame_len    = byte;
-                upper_frame_index  = 0U;
-                upper_rx_state     = UPPER_RX_WAIT_BODY;
-            }
-            break;
-
-        case UPPER_RX_WAIT_BODY:
-            upper_frame_index++;
-            upper_frame_buf[upper_frame_index] = byte;
-            if (upper_frame_index >= (uint8_t)(upper_frame_len + 1U))
-            {
-                uint8_t checksum = upper_frame_buf[upper_frame_index];
-                uint8_t expect   = UpperProtocol_Checksum8(upper_frame_buf, (uint16_t)upper_frame_len + 1U);
-                if (checksum == expect)
-                {
-                    uint8_t        cmd         = upper_frame_buf[1];
-                    const uint8_t *payload     = &upper_frame_buf[2];
-                    uint8_t        payload_len = (uint8_t)(upper_frame_len - 1U);
-                    UpperUartService_HandleFrame(cmd, payload, payload_len);
-                    /* Record RX timestamp for OLED module online detection */
-                    upper_last_rx_timestamp_ms      = PlatformTime_TaskNowMs();
-                    upper_state.last_valid_frame_ms = upper_last_rx_timestamp_ms;
-                }
-                else
-                {
-                    upper_state.rx_checksum_errors++;
-                }
-                UpperUartService_ResetParser();
-            }
-            break;
-
-        default:
-            UpperUartService_ResetParser();
-            break;
+        uint32_t now_ms = PlatformTime_TaskNowMs();
+        CommunicationCommandRouter_Handle(COMMUNICATION_LINK_UPPER, &frame, now_ms);
+        upper_last_rx_timestamp_ms      = now_ms;
+        upper_state.last_valid_frame_ms = now_ms;
+    }
+    else if (result == FRAME_PARSER_CHECKSUM_ERROR)
+    {
+        upper_state.rx_checksum_errors++;
     }
 }
 
@@ -333,7 +218,7 @@ static void UpperUartService_PollRx(void)
     if (upper_rx_read_pos == write_pos)
     {
         /* 无新字节：若解析器处于中间状态，超时后重置 */
-        if (upper_rx_state != UPPER_RX_WAIT_HEAD0)
+        if (FrameParser_IsIdle(&upper_parser) == 0U)
         {
             upper_parser_idle_cycles++;
             if (upper_parser_idle_cycles >= UPPER_PARSER_TIMEOUT_CYCLES)
@@ -372,91 +257,17 @@ static void UpperUartService_PollRx(void)
     }
 }
 
-static void UpperUartService_SendStatus(uint32_t now_ms)
+static void UpperUartService_SendStatus(uint32_t now_ms, const system_snapshot_t *snapshot)
 {
-    upper_status_payload_t     status = {0};
-    chassis_service_snapshot_t chassis_state;
-    encoder_state_t            encoder_state;
-    motor_driver_state_t       motor_state;
-    safety_service_snapshot_t  monitor_state;
-    uint8_t                    payload_len;
-    uint16_t                   frame_len;
+    uint16_t frame_len;
 
     if ((now_ms - upper_last_status_ms) < UPPER_UART_STATUS_PERIOD_MS)
     {
         return;
     }
 
-    ChassisService_GetState(&chassis_state);
-    EncoderDriver_GetState(&encoder_state);
-    MotorDriver_GetState(&motor_state);
-    SafetyService_GetState(&monitor_state);
-
-    status.battery_voltage     = monitor_state.battery_voltage;
-    status.error_flags         = monitor_state.error_flags;
-    status.latched_error_flags = monitor_state.latched_error_flags;
-    status.control_source      = monitor_state.control_mode;
-    if (ControlService_IsEmergencyStop() != 0U)
-    {
-        status.status_flags |= UPPER_STATUS_FLAG_ESTOP;
-    }
-    if (ControlService_IsFaultStop() != 0U)
-    {
-        status.status_flags |= UPPER_STATUS_FLAG_FAULT_STOP;
-    }
-    if (LineControlService_IsEnabled() != 0U)
-    {
-        status.status_flags |= UPPER_STATUS_FLAG_LINE_ENABLED;
-    }
-    if (encoder_state.speed_valid_all != 0U)
-    {
-        status.status_flags |= UPPER_STATUS_FLAG_SPEED_VALID_ALL;
-    }
-    for (uint8_t i = 0U; i < UPPER_PROTOCOL_MOTOR_COUNT; ++i)
-    {
-        motor_id_t motor                = (motor_id_t)i;
-        status.motor_speed_mps[i]       = chassis_state.motor_actual_mps[i];
-        status.encoder_count[i]         = encoder_state.count[i];
-        status.motor_current_a[i]       = monitor_state.motor_current_a[i];
-        status.motor_target_mps[i]      = chassis_state.motor_target_mps[i];
-        status.motor_output_permille[i] = motor_state.effective_pwm[i];
-        if (ChassisLayout_MotorEnabled(motor) != 0U)
-        {
-            status.motor_enabled_mask |= (uint8_t)(1U << i);
-        }
-        if (encoder_state.speed_valid[i] != 0U)
-        {
-            status.motor_speed_valid_mask |= (uint8_t)(1U << i);
-        }
-        if (encoder_state.anomaly_count[i] > 0U)
-        {
-            status.encoder_anomaly_mask |= (uint8_t)(1U << i);
-        }
-    }
-
-    if (upper_state.rx_checksum_errors > 0U)
-    {
-        status.comm_health_flags |= UPPER_COMM_HEALTH_CRC_ERR;
-    }
-    if (upper_state.rx_timeout_resets > 0U)
-    {
-        status.comm_health_flags |= UPPER_COMM_HEALTH_TIMEOUT;
-    }
-    if (upper_state.tx_busy_drops > 0U)
-    {
-        status.comm_health_flags |= UPPER_COMM_HEALTH_TX_DROP;
-    }
-    if (upper_state.rx_overwrite_count > 0U)
-    {
-        status.comm_health_flags |= UPPER_COMM_HEALTH_TIMEOUT;
-    }
-
-    payload_len = UpperProtocol_BuildStatusPayload(&status, upper_status_payload, sizeof(upper_status_payload));
-    frame_len   = UpperProtocol_BuildFrame(UPPER_CMD_STATUS,
-                                         upper_status_payload,
-                                         payload_len,
-                                         upper_tx_frame,
-                                         sizeof(upper_tx_frame));
+    frame_len =
+        TelemetryFrameBuilder_BuildStatus(snapshot, COMMUNICATION_LINK_UPPER, upper_tx_frame, sizeof(upper_tx_frame));
     if (frame_len > 0U)
     {
         if (UpperUartService_EnqueueTx(upper_tx_frame, frame_len, UPPER_TX_PRIORITY_STATUS) != 0U)
@@ -483,56 +294,19 @@ void UpperUartService_Init(void)
     UpperUartTransport_StartRx(upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
 }
 
-static void UpperUartService_SendDiagnostic(uint32_t now_ms)
+static void UpperUartService_SendDiagnostic(uint32_t now_ms, const system_snapshot_t *snapshot)
 {
-    upper_diagnostic_payload_t diagnostic = {0};
-    post_result_t              post;
-    adc_monitor_state_t        adc;
-    safety_service_snapshot_t  monitor;
-    imu_bmi270_state_t         imu;
-    uint8_t                    payload_len;
-    uint16_t                   frame_len;
+    uint16_t frame_len;
 
     if ((now_ms - upper_last_diagnostic_ms) < UPPER_DIAGNOSTIC_PERIOD_MS)
     {
         return;
     }
 
-    POST_GetResult(&post);
-    AdcMonitor_GetState(&adc);
-    SafetyService_GetState(&monitor);
-    ImuBmi270_GetState(&imu);
-    diagnostic.post_done = post.done;
-    if (imu.online != 0U)
-    {
-        diagnostic.imu_status_flags |= UPPER_IMU_FLAG_ONLINE;
-    }
-    if (imu.gyro_calibrated != 0U)
-    {
-        diagnostic.imu_status_flags |= UPPER_IMU_FLAG_CALIBRATED;
-    }
-    if (imu.quality_flags != 0UL || imu.last_error != IMU_BMI270_ERROR_NONE)
-    {
-        diagnostic.imu_status_flags |= UPPER_IMU_FLAG_ERROR;
-    }
-    if (imu.sensor_time_valid != 0U)
-    {
-        diagnostic.imu_status_flags |= UPPER_IMU_FLAG_SENSOR_TIME;
-    }
-    diagnostic.post_error_flags         = post.error_flags;
-    diagnostic.adc_invalid_reason_flags = adc.invalid_reason_flags;
-    diagnostic.task_timeout_mask        = monitor.task_timeout_mask;
-    diagnostic.imu_quality_flags        = imu.quality_flags;
-    diagnostic.reset_reason_flags       = ResetReasonService_GetFlags();
-    diagnostic.uptime_ms                = now_ms;
-
-    payload_len =
-        UpperProtocol_BuildDiagnosticPayload(&diagnostic, upper_diagnostic_payload, sizeof(upper_diagnostic_payload));
-    frame_len = UpperProtocol_BuildFrame(UPPER_CMD_DIAGNOSTIC,
-                                         upper_diagnostic_payload,
-                                         payload_len,
-                                         upper_diagnostic_tx_frame,
-                                         sizeof(upper_diagnostic_tx_frame));
+    frame_len = TelemetryFrameBuilder_BuildDiagnostic(snapshot,
+                                                      now_ms,
+                                                      upper_diagnostic_tx_frame,
+                                                      sizeof(upper_diagnostic_tx_frame));
     if (frame_len > 0U
         && UpperUartService_EnqueueTx(upper_diagnostic_tx_frame, frame_len, UPPER_TX_PRIORITY_DIAGNOSTIC) != 0U)
     {
@@ -540,73 +314,16 @@ static void UpperUartService_SendDiagnostic(uint32_t now_ms)
     }
 }
 
-static void UpperUartService_SendImuStatus(uint32_t now_ms)
+static void UpperUartService_SendImuStatus(uint32_t now_ms, const system_snapshot_t *snapshot)
 {
-    imu_bmi270_state_t         imu_state;
-    upper_imu_status_payload_t imu;
-    uint8_t                    payload_len;
-    uint16_t                   frame_len;
+    uint16_t frame_len;
 
     if ((now_ms - upper_last_imu_status_ms) < UPPER_IMU_STATUS_PERIOD_MS)
     {
         return;
     }
 
-    ImuBmi270_GetState(&imu_state);
-    if (imu_state.online == 0U)
-    {
-        return;
-    }
-
-    imu = (upper_imu_status_payload_t){0};
-    for (uint8_t i = 0U; i < 3U; ++i)
-    {
-        imu.accel_g[i]            = imu_state.body_accel_g[i];
-        imu.gyro_corrected_dps[i] = imu_state.body_gyro_dps[i];
-    }
-    imu.euler_deg[0] = imu_state.roll_deg;
-    imu.euler_deg[1] = imu_state.pitch_deg;
-    imu.euler_deg[2] = imu_state.yaw_deg;
-    for (uint8_t i = 0U; i < 4U; ++i)
-    {
-        imu.quaternion[i] = imu_state.quaternion[i];
-    }
-    imu.timestamp_ms        = now_ms;
-    imu.sensor_time         = imu_state.sensor_time;
-    imu.sample_count        = imu_state.sample_count;
-    imu.quality_flags       = imu_state.quality_flags;
-    imu.quality_counters[0] = imu_state.spi_error_count;
-    imu.quality_counters[1] = imu_state.init_failure_count;
-    imu.quality_counters[2] = imu_state.fifo_overflow_count;
-    imu.quality_counters[3] = imu_state.timestamp_error_count;
-    imu.quality_counters[4] = imu_state.gyro_saturation_count;
-    imu.quality_counters[5] = imu_state.accel_anomaly_count;
-    imu.quality_counters[6] = imu_state.attitude_invalid_count;
-    if (imu_state.online != 0U)
-    {
-        imu.status_flags |= UPPER_IMU_FLAG_ONLINE;
-    }
-    if (imu_state.gyro_calibrated != 0U)
-    {
-        imu.status_flags |= UPPER_IMU_FLAG_CALIBRATED;
-    }
-    if (imu_state.quality_flags != 0UL || imu_state.last_error != IMU_BMI270_ERROR_NONE)
-    {
-        imu.status_flags |= UPPER_IMU_FLAG_ERROR;
-    }
-    if (imu_state.sensor_time_valid != 0U)
-    {
-        imu.status_flags |= UPPER_IMU_FLAG_SENSOR_TIME;
-    }
-    imu.temperature_c = (int8_t)((imu_state.temperature_c >= 0.0f) ? (imu_state.temperature_c + 0.5f)
-                                                                   : (imu_state.temperature_c - 0.5f));
-
-    payload_len = UpperProtocol_BuildImuStatusPayload(&imu, upper_imu_payload, sizeof(upper_imu_payload));
-    frame_len   = UpperProtocol_BuildFrame(UPPER_CMD_IMU_STATUS,
-                                         upper_imu_payload,
-                                         payload_len,
-                                         upper_imu_tx_frame,
-                                         sizeof(upper_imu_tx_frame));
+    frame_len = TelemetryFrameBuilder_BuildImu(snapshot, now_ms, upper_imu_tx_frame, sizeof(upper_imu_tx_frame));
     if (frame_len > 0U)
     {
         if (UpperUartService_EnqueueTx(upper_imu_tx_frame, frame_len, UPPER_TX_PRIORITY_IMU) != 0U)
@@ -618,12 +335,14 @@ static void UpperUartService_SendImuStatus(uint32_t now_ms)
 
 void UpperUartService_Update(void)
 {
-    uint32_t now_ms = PlatformTime_TaskNowMs();
+    system_snapshot_t snapshot = {0};
+    uint32_t          now_ms   = PlatformTime_TaskNowMs();
 
     UpperUartService_PollRx();
-    UpperUartService_SendStatus(now_ms);
-    UpperUartService_SendDiagnostic(now_ms);
-    UpperUartService_SendImuStatus(now_ms);
+    (void)SystemSnapshotService_Get(&snapshot);
+    UpperUartService_SendStatus(now_ms, &snapshot);
+    UpperUartService_SendDiagnostic(now_ms, &snapshot);
+    UpperUartService_SendImuStatus(now_ms, &snapshot);
 }
 
 void UpperUartService_GetState(upper_uart_service_state_t *state)

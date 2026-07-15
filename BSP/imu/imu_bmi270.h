@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "bmi270_bus.h"
 #include "imu_calibration.h"
 #include "imu_bmi270_profile.h"
 
@@ -122,16 +123,6 @@ extern "C"
         float    gyro_cal_max_dps[3];
         float    gyro_cal_span_dps[3];
     } imu_bmi270_state_t;
-
-    typedef struct
-    {
-        uint8_t hal_status[2];
-        uint8_t hal_rx[2][3];
-        uint8_t bitbang_rx[3];
-        uint8_t miso_nopull;
-        uint8_t miso_pullup;
-        uint8_t miso_pulldown;
-    } imu_bmi270_diag_t;
 
     void    ImuBmi270_Init(void);
     uint8_t ImuBmi270_SetEnabled(uint8_t enabled);

@@ -53,6 +53,8 @@ typedef enum
 #define GPIO_PIN_7          ((uint16_t)0x0080)
 #define GPIO_PIN_8          ((uint16_t)0x0100)
 #define GPIO_PIN_9          ((uint16_t)0x0200)
+#define GPIO_PIN_10         ((uint16_t)0x0400)
+#define GPIO_PIN_11         ((uint16_t)0x0800)
 #define GPIO_PIN_14         ((uint16_t)0x4000)
 #define GPIO_PIN_15         ((uint16_t)0x8000)
 
@@ -68,14 +70,23 @@ typedef enum
 #define TIM1_BKIN_GPIO_Port GPIOE
 
 extern GPIO_TypeDef GPIOA_Instance;
+extern GPIO_TypeDef GPIOB_Instance;
 extern GPIO_TypeDef GPIOC_Instance;
 extern GPIO_TypeDef GPIOD_Instance;
 extern GPIO_TypeDef GPIOE_Instance;
 
 #define GPIOA                   (&GPIOA_Instance)
+#define GPIOB                   (&GPIOB_Instance)
 #define GPIOC                   (&GPIOC_Instance)
 #define GPIOD                   (&GPIOD_Instance)
 #define GPIOE                   (&GPIOE_Instance)
+
+#define ESP_EN_Pin              GPIO_PIN_10
+#define ESP_EN_GPIO_Port        GPIOB
+#define ESP_RST_Pin             GPIO_PIN_11
+#define ESP_RST_GPIO_Port       GPIOB
+#define ESP_IO0_Pin             GPIO_PIN_7
+#define ESP_IO0_GPIO_Port       GPIOD
 
 #define M1_FAULT_Pin            GPIO_PIN_2
 #define M1_FAULT_GPIO_Port      GPIOA

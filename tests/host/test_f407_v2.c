@@ -4,7 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "chassis_config.h"
+#include "control_config.h"
+#include "bsp_config.h"
 #include "chassis_layout.h"
 #include "chassis_kinematics.h"
 #include "task_health_service.h"
