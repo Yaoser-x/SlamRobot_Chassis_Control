@@ -1,35 +1,40 @@
 #include "ps2_control_service.h"
 
+#include "command_management_service.h"
 #include "control_config.h"
 #include "bsp_config.h"
 #include "control_service.h"
 #include "imu_bmi270.h"
 #include "led_status.h"
-#include "line_calibration.h"
-#include "line_control_service.h"
+#include "line_sensor_calibration.h"
+#include "line_following_service.h"
 #include "ps2_hw.h"
+#include "relative_heading_controller.h"
+#include "safety_management_service.h"
+#include "state_estimation_service.h"
+#include "teleoperation_service.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-static uint32_t           fake_primask;
-static uint32_t           fake_tick_ms;
-static uint32_t           fake_hal_tick_ms;
-static uint8_t            fake_read_ok;
-static uint8_t            fake_line_enabled;
-static uint8_t            fake_estop;
-static uint8_t            fake_fault_stop;
-static uint8_t            fake_maintenance;
-static ps2_hw_sample_t    fake_sample;
-static imu_bmi270_state_t fake_imu;
-static chassis_cmd_t      last_command;
-static uint32_t           set_command_count;
-static uint32_t           clear_source_count;
-static uint32_t           fake_motion_revoke_generation;
-static uint8_t            fake_maintenance_crosses_on_query;
-static line_calibration_t fake_cal;
-static uint8_t            fake_cal_build_result;
+static uint32_t                  fake_primask;
+static uint32_t                  fake_tick_ms;
+static uint32_t                  fake_hal_tick_ms;
+static uint8_t                   fake_read_ok;
+static uint8_t                   fake_line_enabled;
+static uint8_t                   fake_estop;
+static uint8_t                   fake_fault_stop;
+static uint8_t                   fake_maintenance;
+static ps2_hw_sample_t           fake_sample;
+static imu_bmi270_state_t        fake_imu;
+static chassis_cmd_t             last_command;
+static uint32_t                  set_command_count;
+static uint32_t                  clear_source_count;
+static uint32_t                  fake_motion_revoke_generation;
+static uint8_t                   fake_maintenance_crosses_on_query;
+static line_sensor_calibration_t fake_cal;
+static uint8_t                   fake_cal_build_result;
 
 static void require_int(int condition, const char *message)
 {
@@ -118,43 +123,66 @@ uint32_t ControlService_GetMotionRevokeGeneration(void)
     return fake_motion_revoke_generation;
 }
 
-void LineControlService_Enable(uint8_t enable)
+uint32_t CommandManagement_GetMotionRevokeGeneration(void)
+{
+    return ControlService_GetMotionRevokeGeneration();
+}
+
+uint8_t CommandManagement_IsMotionGateOpen(void)
+{
+    if (fake_maintenance_crosses_on_query != 0U)
+    {
+        fake_maintenance_crosses_on_query = 0U;
+        fake_motion_revoke_generation++;
+    }
+    return (fake_estop == 0U && fake_fault_stop == 0U && fake_maintenance == 0U) ? 1U : 0U;
+}
+
+command_result_t CommandManagement_SetForGeneration(const command_velocity_t *command, uint32_t expected_generation)
+{
+    return ControlService_SetCommandForGeneration(command, expected_generation);
+}
+
+void CommandManagement_ClearSource(command_source_t source)
+{
+    ControlService_ClearSource((uint8_t)source);
+}
+
+uint8_t SafetyManagement_IsMotionAllowed(void)
+{
+    return (ControlService_IsEmergencyStop() == 0U && ControlService_IsFaultStop() == 0U
+            && ControlService_IsMaintenanceLocked() == 0U)
+               ? 1U
+               : 0U;
+}
+
+void LineFollowing_Enable(uint8_t enable)
 {
     fake_line_enabled = (enable != 0U) ? 1U : 0U;
 }
-uint8_t LineControlService_IsEnabled(void)
+uint8_t LineFollowing_IsEnabled(void)
 {
     return fake_line_enabled;
 }
-void LineControlService_CalibrationGet(line_calibration_t *cal)
+void LineFollowing_CalibrationGet(line_sensor_calibration_t *cal)
 {
     if (cal)
         *cal = fake_cal;
 }
-uint8_t LineControlService_CalibrationBegin(line_calibration_surface_t s, uint16_t n)
+uint8_t LineFollowing_RequestCalibration(line_sensor_calibration_surface_t surface, uint16_t samples)
 {
-    (void)s;
-    (void)n;
+    (void)surface;
+    (void)samples;
     fake_cal.collecting = 1U;
     return 1U;
 }
-uint8_t LineControlService_CalibrationBuild(uint16_t thresh[8], uint8_t *al)
+void LineFollowing_CalibrationCancel(void)
 {
-    (void)thresh;
-    (void)al;
-    return fake_cal_build_result;
+    fake_cal = (line_sensor_calibration_t){0};
 }
-void LineControlService_CalibrationCancel(void)
-{
-    fake_cal = (line_calibration_t){0};
-}
-uint8_t LineControlService_CalibrationApplyToRam(void)
+uint8_t LineFollowing_CalibrationApplyToRam(void)
 {
     return fake_cal_build_result;
-}
-uint8_t LineControlService_CalibrationCommitToFlash(void)
-{
-    return 1U;
 }
 void LedStatus_SetMode(led_status_mode_t mode)
 {
@@ -163,6 +191,12 @@ void LedStatus_SetMode(led_status_mode_t mode)
 void ImuBmi270_GetState(imu_bmi270_state_t *state)
 {
     *state = fake_imu;
+}
+
+uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
+{
+    ImuBmi270_GetState(state);
+    return 1UL;
 }
 
 static void reset_fake(void)
@@ -196,7 +230,7 @@ static void reset_fake(void)
     clear_source_count                = 0UL;
     fake_motion_revoke_generation     = 0UL;
     fake_maintenance_crosses_on_query = 0U;
-    fake_cal                          = (line_calibration_t){0};
+    fake_cal                          = (line_sensor_calibration_t){0};
     fake_cal_build_result             = 0U;
     Ps2ControlService_Init();
 }
@@ -401,6 +435,20 @@ static void test_heading_uses_generation_from_input_sample(void)
     require_int(state.heading_active == 0U, "maintenance crossing after input sample invalidates macro edge");
 }
 
+static void test_status_generation_is_monotonic_on_whole_publish(void)
+{
+    teleoperation_status_t before;
+    teleoperation_status_t after;
+
+    reset_fake();
+    (void)Teleoperation_GetStatus(&before);
+    Teleoperation_Update();
+    (void)Teleoperation_GetStatus(&after);
+    require_int(after.generation > before.generation, "teleoperation status generation advances on update");
+    require_int(after.online != 0U && after.left_x == fake_sample.left_x && after.right_x == fake_sample.right_x,
+                "teleoperation status publishes one complete PS2 frame");
+}
+
 int main(void)
 {
     test_center_submits_zero_or_yields_to_line();
@@ -413,6 +461,7 @@ int main(void)
     test_revoke_generation_cancels_heading_after_short_safety_event();
     test_maintenance_rejects_new_heading_macro();
     test_heading_uses_generation_from_input_sample();
+    test_status_generation_is_monotonic_on_whole_publish();
     (void)printf("PASS: PS2 control host tests\n");
     return 0;
 }

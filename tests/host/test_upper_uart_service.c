@@ -8,12 +8,11 @@
 #include "control_service.h"
 #include "encoder_driver.h"
 #include "imu_bmi270.h"
-#include "line_control_service.h"
+#include "line_following_service.h"
 #include "motor_driver.h"
 #include "post_service.h"
-#include "reset_reason_service.h"
-#include "safety_service.h"
-#include "system_snapshot_service.h"
+#include "safety_management_service.h"
+#include "communication_publish_model_types.h"
 #include "upper_uart_service.h"
 #include "upper_protocol.h"
 #include "usart.h"
@@ -23,22 +22,33 @@ static DMA_Stream_TypeDef usart3_rx_stream = {0};
 static DMA_HandleTypeDef  hdma_usart3_rx   = {.Instance = &usart3_rx_stream};
 UART_HandleTypeDef huart3 = {.Instance = &usart3_instance, .hdmarx = &hdma_usart3_rx, .gState = HAL_UART_STATE_READY};
 
-static uint8_t            *rx_buffer;
-static uint16_t            rx_size;
-static uint32_t            rx_start_count;
-static uint32_t            dma_stop_count;
-static uint32_t            tx_dma_count;
-static uint32_t            tx_it_count;
-static uint8_t             tx_last_frame[UPPER_PROTOCOL_MAX_FRAME];
-static uint16_t            tx_last_size;
-static UART_HandleTypeDef *tx_last_uart;
-static uint32_t            fake_tick;
-static imu_bmi270_state_t  fake_imu_state;
-static adc_monitor_state_t fake_adc_state;
-static post_result_t       fake_post_result;
-static uint32_t            fake_primask;
-static uint32_t            estop_set_count;
-static uint8_t             estop_last_value;
+static uint8_t                      *rx_buffer;
+static uint16_t                      rx_size;
+static uint32_t                      rx_start_count;
+static uint32_t                      dma_stop_count;
+static uint32_t                      tx_dma_count;
+static uint32_t                      tx_it_count;
+static uint8_t                       tx_last_frame[UPPER_PROTOCOL_MAX_FRAME];
+static uint16_t                      tx_last_size;
+static UART_HandleTypeDef           *tx_last_uart;
+static uint32_t                      fake_tick;
+static imu_bmi270_state_t            fake_imu_state;
+static adc_monitor_state_t           fake_adc_state;
+static post_result_t                 fake_post_result;
+static uint32_t                      fake_primask;
+static uint32_t                      estop_set_count;
+static uint8_t                       estop_last_value;
+static communication_publish_model_t fake_publish_model;
+static const communication_config_t  fake_communication_config = {
+     .host_status_period_ms     = 50U,
+     .host_imu_status_period_ms = 20U,
+     .host_diagnostic_period_ms = 200U,
+     .esp12f_status_period_ms   = 100U,
+};
+
+static void RefreshFakePublishModel(void);
+#define UpperUartService_Init()   UpperUartService_Init(&fake_communication_config)
+#define UpperUartService_Update() (RefreshFakePublishModel(), UpperUartService_Update(&fake_publish_model))
 
 uint32_t __get_PRIMASK(void)
 {
@@ -131,10 +141,27 @@ control_command_result_t ControlService_SetCommand(const chassis_cmd_t *cmd)
     return CONTROL_COMMAND_ACCEPTED;
 }
 
+command_result_t CommandManagement_Set(const command_velocity_t *command)
+{
+    chassis_cmd_t legacy = {
+        .linear_x     = command->linear_x,
+        .angular_z    = command->angular_z,
+        .enable       = command->enable,
+        .source       = (uint8_t)command->source,
+        .timestamp_ms = command->timestamp_ms,
+    };
+    return (command_result_t)ControlService_SetCommand(&legacy);
+}
+
 void ControlService_SetEmergencyStop(uint8_t enable)
 {
     estop_set_count++;
     estop_last_value = enable;
+}
+
+void SafetyManagement_SetEmergencyStop(uint8_t enable)
+{
+    ControlService_SetEmergencyStop(enable);
 }
 
 uint8_t ControlService_IsEmergencyStop(void)
@@ -142,22 +169,22 @@ uint8_t ControlService_IsEmergencyStop(void)
     return 0U;
 }
 
+uint8_t SafetyManagement_IsEmergencyStop(void)
+{
+    return ControlService_IsEmergencyStop();
+}
+
 uint8_t ControlService_IsFaultStop(void)
 {
     return 0U;
 }
 
-void LineControlService_Enable(uint8_t enable)
+void LineFollowing_Enable(uint8_t enable)
 {
     (void)enable;
 }
 
-uint8_t LineControlService_IsEnabled(void)
-{
-    return 0U;
-}
-
-void SafetyService_ClearLatchedFaults(uint32_t mask)
+void SafetyManagement_ClearLatchedFaults(uint32_t mask)
 {
     (void)mask;
 }
@@ -186,14 +213,6 @@ void MotorDriver_GetState(motor_driver_state_t *state)
     }
 }
 
-void SafetyService_GetState(safety_service_snapshot_t *state)
-{
-    if (state != 0)
-    {
-        *state = (safety_service_snapshot_t){0};
-    }
-}
-
 void AdcMonitor_GetState(adc_monitor_state_t *state)
 {
     *state = fake_adc_state;
@@ -202,11 +221,6 @@ void AdcMonitor_GetState(adc_monitor_state_t *state)
 void POST_GetResult(post_result_t *result)
 {
     *result = fake_post_result;
-}
-
-uint32_t ResetReasonService_GetFlags(void)
-{
-    return 0xA1B2C3D4UL;
 }
 
 uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
@@ -222,44 +236,40 @@ void ImuBmi270_GetState(imu_bmi270_state_t *state)
     }
 }
 
-uint32_t SystemSnapshotService_Get(system_snapshot_t *snapshot)
+static void RefreshFakePublishModel(void)
 {
-    if (snapshot == 0)
-    {
-        return 0U;
-    }
-    *snapshot                              = (system_snapshot_t){0};
-    snapshot->post                         = fake_post_result;
-    snapshot->current.invalid_reason_flags = fake_adc_state.invalid_reason_flags;
-    snapshot->control.reset_reason_flags   = 0xA1B2C3D4UL;
-    snapshot->imu.online                   = fake_imu_state.online;
-    snapshot->imu.calibrated               = fake_imu_state.gyro_calibrated;
-    snapshot->imu.sensor_time_valid        = fake_imu_state.sensor_time_valid;
-    snapshot->imu.last_error               = fake_imu_state.last_error;
-    snapshot->imu.sensor_time              = fake_imu_state.sensor_time;
-    snapshot->imu.sample_count             = fake_imu_state.sample_count;
-    snapshot->imu.quality_flags            = fake_imu_state.quality_flags;
-    snapshot->imu.roll_deg                 = fake_imu_state.roll_deg;
-    snapshot->imu.pitch_deg                = fake_imu_state.pitch_deg;
-    snapshot->imu.yaw_deg                  = fake_imu_state.yaw_deg;
-    snapshot->imu.temperature_c            = fake_imu_state.temperature_c;
-    snapshot->imu.quality_counters[0]      = fake_imu_state.spi_error_count;
-    snapshot->imu.quality_counters[1]      = fake_imu_state.init_failure_count;
-    snapshot->imu.quality_counters[2]      = fake_imu_state.fifo_overflow_count;
-    snapshot->imu.quality_counters[3]      = fake_imu_state.timestamp_error_count;
-    snapshot->imu.quality_counters[4]      = fake_imu_state.gyro_saturation_count;
-    snapshot->imu.quality_counters[5]      = fake_imu_state.accel_anomaly_count;
-    snapshot->imu.quality_counters[6]      = fake_imu_state.attitude_invalid_count;
+    fake_publish_model                              = (communication_publish_model_t){0};
+    fake_publish_model.post.done                    = fake_post_result.done;
+    fake_publish_model.post.error_flags             = fake_post_result.error_flags;
+    fake_publish_model.current.invalid_reason_flags = fake_adc_state.invalid_reason_flags;
+    fake_publish_model.control.reset_reason_flags   = 0xA1B2C3D4UL;
+    fake_publish_model.imu.online                   = fake_imu_state.online;
+    fake_publish_model.imu.calibrated               = fake_imu_state.gyro_calibrated;
+    fake_publish_model.imu.sensor_time_valid        = fake_imu_state.sensor_time_valid;
+    fake_publish_model.imu.last_error               = fake_imu_state.last_error;
+    fake_publish_model.imu.sensor_time              = fake_imu_state.sensor_time;
+    fake_publish_model.imu.sample_count             = fake_imu_state.sample_count;
+    fake_publish_model.imu.quality_flags            = fake_imu_state.quality_flags;
+    fake_publish_model.imu.roll_deg                 = fake_imu_state.roll_deg;
+    fake_publish_model.imu.pitch_deg                = fake_imu_state.pitch_deg;
+    fake_publish_model.imu.yaw_deg                  = fake_imu_state.yaw_deg;
+    fake_publish_model.imu.temperature_c            = fake_imu_state.temperature_c;
+    fake_publish_model.imu.quality_counters[0]      = fake_imu_state.spi_error_count;
+    fake_publish_model.imu.quality_counters[1]      = fake_imu_state.init_failure_count;
+    fake_publish_model.imu.quality_counters[2]      = fake_imu_state.fifo_overflow_count;
+    fake_publish_model.imu.quality_counters[3]      = fake_imu_state.timestamp_error_count;
+    fake_publish_model.imu.quality_counters[4]      = fake_imu_state.gyro_saturation_count;
+    fake_publish_model.imu.quality_counters[5]      = fake_imu_state.accel_anomaly_count;
+    fake_publish_model.imu.quality_counters[6]      = fake_imu_state.attitude_invalid_count;
     for (uint8_t index = 0U; index < 3U; ++index)
     {
-        snapshot->imu.accel_g[index]  = fake_imu_state.body_accel_g[index];
-        snapshot->imu.gyro_dps[index] = fake_imu_state.body_gyro_dps[index];
+        fake_publish_model.imu.accel_g[index]  = fake_imu_state.body_accel_g[index];
+        fake_publish_model.imu.gyro_dps[index] = fake_imu_state.body_gyro_dps[index];
     }
     for (uint8_t index = 0U; index < 4U; ++index)
     {
-        snapshot->imu.quaternion[index] = fake_imu_state.quaternion[index];
+        fake_publish_model.imu.quaternion[index] = fake_imu_state.quaternion[index];
     }
-    return 1U;
 }
 
 static void reset_host_uart_state(void)

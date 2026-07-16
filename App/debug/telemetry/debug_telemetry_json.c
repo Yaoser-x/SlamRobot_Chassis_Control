@@ -9,19 +9,19 @@
 
 void DebugTelemetryJson_Print(uint32_t now_ms, const debug_full_log_snapshot_t *snapshot)
 {
-    char                       tx[DEBUG_TELEMETRY_JSON_TX_SIZE];
-    chassis_service_snapshot_t chassis = snapshot->chassis;
-    imu_bmi270_state_t         imu     = snapshot->imu;
-    adc_monitor_state_t        adc     = snapshot->adc;
-    size_t                     pos     = (size_t)snprintf(tx,
+    char                    tx[DEBUG_TELEMETRY_JSON_TX_SIZE];
+    motion_control_status_t chassis = snapshot->chassis;
+    imu_bmi270_state_t      imu     = snapshot->imu;
+    adc_monitor_state_t     adc     = snapshot->adc;
+    size_t                  pos     = (size_t)snprintf(tx,
                                   sizeof(tx),
                                   "{\"t_ms\":%lu,\"pid_error_mps\":[%.5f,%.5f,%.5f,%.5f],"
-                                                          "\"pid_output_permille\":[%d,%d,%d,%d],\"actual_mps\":[%.5f,%.5f,%.5f,%.5f],"
-                                                          "\"current_a\":[%.4f,%.4f,%.4f,%.4f],"
-                                                          "\"imu_raw_acc\":[%d,%d,%d],\"imu_raw_gyro\":[%d,%d,%d],"
-                                                          "\"imu_body_acc_g\":[%.5f,%.5f,%.5f],\"imu_filter_gyro_dps\":[%.5f,%.5f,%.5f],"
-                                                          "\"euler_deg\":[%.4f,%.4f,%.4f],\"temperature_c\":%.3f,"
-                                                          "\"imu_cal_state\":%u,\"imu_quality\":%lu",
+                                                       "\"pid_output_permille\":[%d,%d,%d,%d],\"actual_mps\":[%.5f,%.5f,%.5f,%.5f],"
+                                                       "\"current_a\":[%.4f,%.4f,%.4f,%.4f],"
+                                                       "\"imu_raw_acc\":[%d,%d,%d],\"imu_raw_gyro\":[%d,%d,%d],"
+                                                       "\"imu_body_acc_g\":[%.5f,%.5f,%.5f],\"imu_signal_filter_gyro_dps\":[%.5f,%.5f,%.5f],"
+                                                       "\"euler_deg\":[%.4f,%.4f,%.4f],\"temperature_c\":%.3f,"
+                                                       "\"imu_cal_state\":%u,\"imu_quality\":%lu",
                                   (unsigned long)now_ms,
                                   chassis.motor_error_mps[0],
                                   chassis.motor_error_mps[1],

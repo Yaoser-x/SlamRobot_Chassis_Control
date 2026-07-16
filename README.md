@@ -67,6 +67,11 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | 文档 | 内容 |
 | --- | --- |
 | [五层架构](docs/architecture.md) | 层职责、依赖方向、状态所有权、CubeMX 边界与验收命令 |
+| [Beta5 行为契约](docs/beta5-behavior-contract.md) | Beta1/Beta2 行为仲裁、兼容边界、固定测试向量与实板证据入口 |
+| [Beta5 能力所有权](docs/service_ownership.md) | 十项 Service 能力、唯一决策所有者、依赖 DAG 与电机输出边界 |
+| [Beta5 数据流](docs/data_flow.md) | 控制/状态流、generation、一致快照与临界区规则 |
+| [Beta5 配置边界](docs/configuration.md) | App 聚合、Service 配置、调度/BSP 配置和参数优先级 |
+| [Beta5 命名规范](docs/naming_conventions.md) | 最终能力目录、公开契约、internal 和兼容包装命名 |
 | [外设资源](docs/peripherals.md) | 电机 PWM/编码器/ADC/通信接口/BMI270/ESP12F GPIO/PS2/巡线传感器 — 完整硬件规格 |
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
 | [Upper Protocol v2](docs/upper-protocol-v2.md) | USART3/ESP12F 帧格式、兼容旧帧的 28B DIAGNOSTIC、温度编码与黄金测试向量 |

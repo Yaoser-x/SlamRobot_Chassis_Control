@@ -3,7 +3,7 @@
 #include "debug_console_writer.h"
 #include "debug_uart_transport.h"
 #include "esp12f_service.h"
-#include "task_health_service.h"
+#include "system_monitoring_service.h"
 #include "upper_uart_service.h"
 
 #include "FreeRTOS.h"
@@ -26,17 +26,17 @@ extern osThreadId_t oledTaskHandle;
 extern osThreadId_t ledTaskHandle;
 
 static void
-DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t missed, task_health_service_id_t task)
+DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t missed, system_monitoring_task_id_t task)
 {
-    char                  tx[DEBUG_RTOS_REPORT_TX_SIZE];
-    chassis_task_health_t health         = {0};
-    uint32_t              last_heartbeat = 0U;
-    uint32_t              timeout_count  = 0U;
-    uint8_t               timed_out      = 0U;
+    char                            tx[DEBUG_RTOS_REPORT_TX_SIZE];
+    system_monitoring_task_health_t health         = {0};
+    uint32_t                        last_heartbeat = 0U;
+    uint32_t                        timeout_count  = 0U;
+    uint8_t                         timed_out      = 0U;
 
-    if ((uint32_t)task < (uint32_t)TASK_HEALTH_SERVICE_COUNT)
+    if ((uint32_t)task < (uint32_t)SYSTEM_MONITORING_TASK_ID_COUNT)
     {
-        TaskHealthService_GetHealth(&health);
+        (void)SystemMonitoring_GetTaskHealth(&health);
         last_heartbeat = health.last_heartbeat_ms[task];
         timeout_count  = health.timeout_count[task];
         timed_out      = health.timed_out[task];
@@ -84,41 +84,41 @@ void DebugRtosReport_Print(void)
 
     DebugConsole_PrintTaskStatus("safety",
                                  safetyTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_SAFETY),
-                                 TASK_HEALTH_SERVICE_SAFETY);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_SAFETY),
+                                 SYSTEM_MONITORING_TASK_SAFETY);
     DebugConsole_PrintTaskStatus("motor",
                                  motorTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_MOTOR),
-                                 TASK_HEALTH_SERVICE_MOTOR);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_MOTOR),
+                                 SYSTEM_MONITORING_TASK_MOTOR);
     DebugConsole_PrintTaskStatus("rpi",
                                  rpiCommTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_RPI),
-                                 TASK_HEALTH_SERVICE_RPI);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_HOST),
+                                 SYSTEM_MONITORING_TASK_HOST);
     DebugConsole_PrintTaskStatus("imu",
                                  imuTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_IMU),
-                                 TASK_HEALTH_SERVICE_IMU);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_IMU),
+                                 SYSTEM_MONITORING_TASK_IMU);
     DebugConsole_PrintTaskStatus("line",
                                  lineTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_LINE),
-                                 TASK_HEALTH_SERVICE_LINE);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_LINE),
+                                 SYSTEM_MONITORING_TASK_LINE);
     DebugConsole_PrintTaskStatus("esp",
                                  espTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_ESP),
-                                 TASK_HEALTH_SERVICE_ESP);
-    DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U, TASK_HEALTH_SERVICE_COUNT);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_ESP),
+                                 SYSTEM_MONITORING_TASK_ESP);
+    DebugConsole_PrintTaskStatus("debug", usart1DebugTaskHandle, 0U, SYSTEM_MONITORING_TASK_ID_COUNT);
     DebugConsole_PrintTaskStatus("ps2",
                                  ps2TaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_PS2),
-                                 TASK_HEALTH_SERVICE_PS2);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_PS2),
+                                 SYSTEM_MONITORING_TASK_PS2);
     DebugConsole_PrintTaskStatus("led",
                                  ledTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_LED),
-                                 TASK_HEALTH_SERVICE_LED);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_LED),
+                                 SYSTEM_MONITORING_TASK_LED);
     DebugConsole_PrintTaskStatus("oled",
                                  oledTaskHandle,
-                                 TaskHealthService_GetMissedCount(TASK_HEALTH_SERVICE_OLED),
-                                 TASK_HEALTH_SERVICE_OLED);
+                                 SystemMonitoring_GetMissedCount(SYSTEM_MONITORING_TASK_OLED),
+                                 SYSTEM_MONITORING_TASK_OLED);
 
     (void)snprintf(tx,
                    sizeof(tx),

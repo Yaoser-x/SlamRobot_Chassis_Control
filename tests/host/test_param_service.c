@@ -1,4 +1,5 @@
 #include "param_service.h"
+#include "motor_types.h"
 
 #include <math.h>
 #include <stdio.h>

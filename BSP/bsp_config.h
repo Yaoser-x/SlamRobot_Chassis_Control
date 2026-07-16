@@ -63,7 +63,6 @@ extern "C"
 /* 轮子物理参数 */
 #define CHASSIS_WHEEL_RADIUS_M                    0.035f
 #define CHASSIS_TRACK_WIDTH_M                     0.176f /* 有效轮距 (m)，机械测量 181.5mm，有效值 ~176mm 补偿轮胎变形 */
-#define CHASSIS_WHEEL_BASE_M                      CHASSIS_TRACK_WIDTH_M /* 向后兼容别名 */
 
 /* 编码器采样时序 */
 #define CHASSIS_MIN_ENCODER_DT_MS                 1U

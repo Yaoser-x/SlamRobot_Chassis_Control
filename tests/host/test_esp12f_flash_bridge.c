@@ -1,37 +1,37 @@
 #include "esp12f_flash_bridge.h"
 
-#include "chassis_maintenance_service.h"
+#include "motion_control_service.h"
 #include "uart_bridge_transport.h"
 
 #include <assert.h>
 #include <stdio.h>
 
-static chassis_maintenance_service_result_t maintenance_result;
-static uart_bridge_transport_state_t        transport_state;
-static uint8_t                              transport_start_ok;
-static uint32_t                             transport_idle_ms;
-static uint32_t                             maintenance_end_count;
-static uint32_t                             normal_boot_count;
-static uint32_t                             download_boot_count;
-static uint32_t                             debug_restart_count;
-static uint32_t                             esp_restart_count;
-static uint32_t                             fake_now_ms;
+static motion_control_maintenance_result_t maintenance_result;
+static uart_bridge_transport_state_t       transport_state;
+static uint8_t                             transport_start_ok;
+static uint32_t                            transport_idle_ms;
+static uint32_t                            maintenance_end_count;
+static uint32_t                            normal_boot_count;
+static uint32_t                            download_boot_count;
+static uint32_t                            debug_restart_count;
+static uint32_t                            esp_restart_count;
+static uint32_t                            fake_now_ms;
 
-chassis_maintenance_service_result_t ChassisMaintenanceService_Begin(void)
+motion_control_maintenance_result_t MotionControl_BeginMaintenance(void)
 {
     return maintenance_result;
 }
-void ChassisMaintenanceService_End(void)
+void MotionControl_EndMaintenance(void)
 {
     maintenance_end_count++;
 }
-void ControlService_ClearCommand(void)
+void CommandManagement_ClearAll(void)
 {
 }
 void Usart1DebugConsole_RevokeMaintenanceAuthorization(void)
 {
 }
-void ChassisService_CancelTestMode(void)
+void MotionControl_CancelTestMode(void)
 {
 }
 void Usart1DebugConsole_ClearRxBuffer(void)
@@ -93,7 +93,7 @@ void UartBridgeTransport_GetState(uart_bridge_transport_state_t *state)
 
 static void ResetFakes(void)
 {
-    maintenance_result    = CHASSIS_MAINTENANCE_SERVICE_OK;
+    maintenance_result    = MOTION_CONTROL_MAINTENANCE_OK;
     transport_start_ok    = 1U;
     transport_idle_ms     = 0U;
     maintenance_end_count = 0U;
@@ -134,7 +134,7 @@ static void TestStartFailureAndMaintenanceRejection(void)
     assert(maintenance_end_count == 1U);
 
     ResetFakes();
-    maintenance_result = CHASSIS_MAINTENANCE_SERVICE_BUSY;
+    maintenance_result = MOTION_CONTROL_MAINTENANCE_BUSY;
     assert(Esp12fFlashBridge_Enable(0U) == 0U);
     assert(normal_boot_count == 0U && maintenance_end_count == 0U);
 }

@@ -3,8 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "ssd1306.h"
-#include "bsp_config.h"
-#include "control_config.h"
+#include "oled_config.h"
 #include "i2c.h"
 #include <string.h>
 

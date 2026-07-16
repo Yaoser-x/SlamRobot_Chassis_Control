@@ -3,9 +3,8 @@
 #include <stdlib.h>
 
 #include "adc_monitor.h"
+#include "adc_monitor_config.h"
 #include "adc.h"
-#include "control_config.h"
-#include "bsp_config.h"
 #include "tim.h"
 
 ADC_HandleTypeDef  hadc1;
@@ -324,6 +323,7 @@ static void test_battery_voltage_is_filtered(void)
 
 int main(void)
 {
+    AdcMonitor_SetUpdatePeriodMs(20U);
     test_current_zero_requires_startup_samples();
     test_current_rezero_requires_fresh_stable_window();
     test_current_validity_tracks_missing_windows();

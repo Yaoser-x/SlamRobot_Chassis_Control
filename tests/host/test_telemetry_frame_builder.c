@@ -7,7 +7,7 @@
 #include <string.h>
 
 static uint16_t
-ExpectedStatus(const system_snapshot_t *snapshot, uint8_t comm_health_flags, uint8_t *out, uint16_t out_len)
+ExpectedStatus(const communication_publish_model_t *snapshot, uint8_t comm_health_flags, uint8_t *out, uint16_t out_len)
 {
     upper_status_payload_t status = {0};
     uint8_t                payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN];
@@ -35,9 +35,9 @@ ExpectedStatus(const system_snapshot_t *snapshot, uint8_t comm_health_flags, uin
     return UpperProtocol_BuildFrame(UPPER_CMD_STATUS, payload, payload_len, out, out_len);
 }
 
-static void SeedSnapshot(system_snapshot_t *snapshot)
+static void SeedSnapshot(communication_publish_model_t *snapshot)
 {
-    *snapshot                              = (system_snapshot_t){0};
+    *snapshot                              = (communication_publish_model_t){0};
     snapshot->safety.battery_voltage       = 12.6f;
     snapshot->safety.error_flags           = 0x12345678UL;
     snapshot->safety.latched_error_flags   = 0x87654321UL;
@@ -87,15 +87,15 @@ static void SeedSnapshot(system_snapshot_t *snapshot)
 
 int main(void)
 {
-    system_snapshot_t          snapshot;
-    upper_diagnostic_payload_t diagnostic = {0};
-    upper_imu_status_payload_t imu        = {0};
-    uint8_t                    payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
-    uint8_t                    payload_len;
-    uint8_t                    actual[UPPER_PROTOCOL_MAX_FRAME];
-    uint8_t                    expected[UPPER_PROTOCOL_MAX_FRAME];
-    uint16_t                   actual_len;
-    uint16_t                   expected_len;
+    communication_publish_model_t snapshot;
+    upper_diagnostic_payload_t    diagnostic = {0};
+    upper_imu_status_payload_t    imu        = {0};
+    uint8_t                       payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN];
+    uint8_t                       payload_len;
+    uint8_t                       actual[UPPER_PROTOCOL_MAX_FRAME];
+    uint8_t                       expected[UPPER_PROTOCOL_MAX_FRAME];
+    uint16_t                      actual_len;
+    uint16_t                      expected_len;
 
     SeedSnapshot(&snapshot);
     snapshot.communication.upper.checksum_errors = 1U;

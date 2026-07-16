@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+#include "communication_publish_model_types.h"
+#include "communication_config.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -22,8 +25,10 @@ extern "C"
         uint32_t last_valid_frame_ms;
     } upper_uart_service_state_t;
 
-    void     UpperUartService_Init(void);
-    void     UpperUartService_Update(void);
+    /** Initialize Host communication with injected publication periods. */
+    uint8_t UpperUartService_Init(const communication_config_t *config);
+    /** Poll Host RX and publish frames from one App-provided coherent model. */
+    void     UpperUartService_Update(const communication_publish_model_t *publish_model);
     void     UpperUartService_GetState(upper_uart_service_state_t *state);
     uint32_t UpperUartService_GetLastRxTimestamp(void);
     void     UpperUartService_OnUartError(void);

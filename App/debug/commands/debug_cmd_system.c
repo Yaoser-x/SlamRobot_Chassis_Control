@@ -1,6 +1,7 @@
 #include "debug_cmd_system.h"
 
 #include "build_identity.h"
+#include "communication_protocol_types.h"
 #include "debug_console_parser.h"
 #include "debug_console_registry.h"
 #include "debug_console_writer.h"
@@ -8,8 +9,7 @@
 #include "debug_system_status.h"
 #include "debug_telemetry.h"
 #include "i2c_bus_diagnostic.h"
-#include "param_service.h"
-#include "upper_protocol.h"
+#include "parameter_management_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -210,9 +210,9 @@ static void DebugConsole_PrintVersion(void)
                    F407_GIT_SHA,
                    F407_BUILD_DIRTY ? "-dirty" : "",
                    F407_BUILD_TYPE,
-                   UPPER_PROTOCOL_VERSION,
-                   (unsigned long)PARAM_SERVICE_VERSION,
-                   UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION);
+                   COMMUNICATION_PROTOCOL_VERSION,
+                   (unsigned long)PARAMETER_MANAGEMENT_VERSION,
+                   COMMUNICATION_DIAGNOSTIC_SCHEMA_VERSION);
     DebugConsoleWriter_Write(tx);
 }
 
@@ -221,7 +221,7 @@ static void DebugConsole_PrintConfigExport(void)
     char          tx[DEBUG_CMD_SYSTEM_TX_SIZE];
     param_model_t params;
 
-    ParamService_Get(&params);
+    (void)ParameterManagement_GetSnapshot(&params);
     (void)snprintf(tx,
                    sizeof(tx),
                    "{\"param_version\":%lu,\"wheel_radius_m\":%.6f,\"track_width_m\":%.6f,"

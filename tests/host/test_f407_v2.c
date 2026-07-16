@@ -7,19 +7,25 @@
 #include "control_config.h"
 #include "bsp_config.h"
 #include "chassis_layout.h"
-#include "chassis_kinematics.h"
-#include "task_health_service.h"
+#include "differential_drive_kinematics.h"
+#include "command_management_service.h"
+#include "system_monitoring_service.h"
 #include "control_service.h"
-#include "encoder_math.h"
+#include "wheel_speed_estimator.h"
 #include "imu_bmi270.h"
 #include "motor_output_logic.h"
 #include "param_service.h"
-#include "pid_controller.h"
-#include "reset_reason_service.h"
+#include "wheel_speed_pid_controller.h"
+#include "safety_management_service.h"
 #include "upper_protocol.h"
 
 static uint32_t fake_primask;
 static uint32_t fake_tick;
+static uint8_t  fake_safety_initialized;
+static uint8_t  fake_emergency_stop;
+static uint8_t  fake_fault_stop;
+static uint8_t  fake_maintenance_lock;
+static uint32_t fake_safety_generation;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -45,6 +51,79 @@ int32_t osDelayUntil(uint32_t ticks)
 {
     fake_tick = ticks;
     return 0;
+}
+
+static uint8_t fake_motion_allowed(void)
+{
+    return (fake_emergency_stop == 0U && fake_fault_stop == 0U && fake_maintenance_lock == 0U) ? 1U : 0U;
+}
+
+uint8_t SafetyManagement_Init(const safety_management_config_t *config)
+{
+    if (config == NULL)
+    {
+        return 0U;
+    }
+    fake_safety_initialized = 1U;
+    fake_emergency_stop     = 0U;
+    fake_fault_stop         = 0U;
+    fake_maintenance_lock   = 0U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(1U, fake_safety_generation);
+    return 1U;
+}
+
+uint8_t SafetyManagement_IsInitialized(void)
+{
+    return fake_safety_initialized;
+}
+
+void SafetyManagement_SetEmergencyStop(uint8_t enabled)
+{
+    fake_emergency_stop = (enabled != 0U) ? 1U : 0U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(fake_motion_allowed(), fake_safety_generation);
+}
+
+void SafetyManagement_SetFaultStop(uint8_t enabled)
+{
+    fake_fault_stop = (enabled != 0U) ? 1U : 0U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(fake_motion_allowed(), fake_safety_generation);
+}
+
+uint8_t SafetyManagement_BeginMaintenance(void)
+{
+    if (fake_maintenance_lock != 0U)
+    {
+        return 0U;
+    }
+    fake_maintenance_lock = 1U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(0U, fake_safety_generation);
+    return 1U;
+}
+
+void SafetyManagement_EndMaintenance(void)
+{
+    fake_maintenance_lock = 0U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(fake_motion_allowed(), fake_safety_generation);
+}
+
+uint8_t SafetyManagement_IsEmergencyStop(void)
+{
+    return fake_emergency_stop;
+}
+
+uint8_t SafetyManagement_IsFaultStop(void)
+{
+    return fake_fault_stop;
+}
+
+uint8_t SafetyManagement_IsMaintenanceLocked(void)
+{
+    return fake_maintenance_lock;
 }
 
 static void require_int(int condition, const char *message)
@@ -289,7 +368,7 @@ static void test_diagnostic_payload_layout(void)
     diagnostic.imu_status_flags         = UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_CALIBRATED;
     diagnostic.post_error_flags         = 0x01020304UL;
     diagnostic.adc_invalid_reason_flags = 0x11223344UL;
-    diagnostic.task_timeout_mask        = (uint16_t)(1U << TASK_HEALTH_SERVICE_IMU);
+    diagnostic.task_timeout_mask        = (uint16_t)(1U << SYSTEM_MONITORING_TASK_IMU);
     diagnostic.imu_quality_flags        = 0x55667788UL;
     diagnostic.reset_reason_flags       = 0xA1B2C3D4UL;
     diagnostic.uptime_ms                = 0x10203040UL;
@@ -311,8 +390,8 @@ static void test_diagnostic_payload_layout(void)
 
 static void test_reset_reason_captures_boot_flags(void)
 {
-    ResetReasonService_Capture(0xA5A55A5AUL);
-    require_int(ResetReasonService_GetFlags() == 0xA5A55A5AUL, "reset reason preserves startup snapshot");
+    SystemMonitoring_CaptureResetReason(0xA5A55A5AUL);
+    require_int(SystemMonitoring_GetResetReason() == 0xA5A55A5AUL, "reset reason preserves startup snapshot");
 }
 
 static void test_control_priority_timeout_and_reject_stop(void)
@@ -473,9 +552,9 @@ static void test_side_target_distribution(void)
     float left  = 0.0f;
     float right = 0.0f;
 
-    ChassisMath_ResolveDifferentialTargets(0.2f, 2.0f, CHASSIS_WHEEL_BASE_M, &left, &right);
-    require_close(left, 0.2f - CHASSIS_WHEEL_BASE_M, 0.0001f, "left target");
-    require_close(right, 0.2f + CHASSIS_WHEEL_BASE_M, 0.0001f, "right target");
+    DifferentialDriveKinematics_ResolveDifferentialTargets(0.2f, 2.0f, CHASSIS_TRACK_WIDTH_M, &left, &right);
+    require_close(left, 0.2f - CHASSIS_TRACK_WIDTH_M, 0.0001f, "left target");
+    require_close(right, 0.2f + CHASSIS_TRACK_WIDTH_M, 0.0001f, "right target");
 }
 
 static void test_default_motor_layout(void)
@@ -493,30 +572,30 @@ static void test_default_motor_layout(void)
 
 static void test_encoder_wrap_diff(void)
 {
-    require_int(EncoderMath_DiffCount(10U, 65530U, 65535U) == 16, "16-bit forward wrap");
-    require_int(EncoderMath_DiffCount(65530U, 10U, 65535U) == -16, "16-bit reverse wrap");
-    require_int(EncoderMath_DiffCount(5U, 0xFFFFFFF0U, 0xFFFFFFFFU) == 21, "32-bit forward wrap");
+    require_int(WheelSpeedEstimator_DiffCount(10U, 65530U, 65535U) == 16, "16-bit forward wrap");
+    require_int(WheelSpeedEstimator_DiffCount(65530U, 10U, 65535U) == -16, "16-bit reverse wrap");
+    require_int(WheelSpeedEstimator_DiffCount(5U, 0xFFFFFFF0U, 0xFFFFFFFFU) == 21, "32-bit forward wrap");
 }
 
 static void test_encoder_speed_window(void)
 {
     encoder_speed_window_t window;
 
-    EncoderMath_SpeedWindowReset(&window);
-    EncoderMath_SpeedWindowPush(&window, 10, 10U);
-    EncoderMath_SpeedWindowPush(&window, 11, 9U);
-    EncoderMath_SpeedWindowPush(&window, 12, 11U);
-    EncoderMath_SpeedWindowPush(&window, 13, 10U);
-    EncoderMath_SpeedWindowPush(&window, 14, 10U);
+    WheelSpeedEstimator_SpeedWindowReset(&window);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 10, 10U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 11, 9U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 12, 11U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 13, 10U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 14, 10U);
     require_int(window.delta_sum == 60, "speed window sums five deltas");
     require_int(window.dt_sum_ms == 50U, "speed window sums actual dt");
     require_int(window.sample_count == CHASSIS_ENCODER_SPEED_WINDOW_SAMPLES, "speed window reaches capacity");
 
-    EncoderMath_SpeedWindowPush(&window, -15, 12U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, -15, 12U);
     require_int(window.delta_sum == 35, "speed window removes oldest delta");
     require_int(window.dt_sum_ms == 52U, "speed window removes oldest dt");
 
-    EncoderMath_SpeedWindowReset(&window);
+    WheelSpeedEstimator_SpeedWindowReset(&window);
     require_int(window.delta_sum == 0, "speed window reset clears delta");
     require_int(window.dt_sum_ms == 0U, "speed window reset clears dt");
     require_int(window.sample_count == 0U, "speed window reset clears count");
@@ -524,15 +603,15 @@ static void test_encoder_speed_window(void)
 
 static void test_encoder_interval_average_speed(void)
 {
-    require_close(EncoderMath_CountDeltaSpeedMps(800, 500U, 2464.0f, 0.035f),
+    require_close(WheelSpeedEstimator_CountDeltaSpeedMps(800, 500U, 2464.0f, 0.035f),
                   0.142799f,
                   0.00001f,
                   "500ms count interval average speed");
-    require_close(EncoderMath_CountDeltaSpeedMps(-800, 500U, 2464.0f, 0.035f),
+    require_close(WheelSpeedEstimator_CountDeltaSpeedMps(-800, 500U, 2464.0f, 0.035f),
                   -0.142799f,
                   0.00001f,
                   "reverse interval average speed");
-    require_close(EncoderMath_CountDeltaSpeedMps(800, 0U, 2464.0f, 0.035f),
+    require_close(WheelSpeedEstimator_CountDeltaSpeedMps(800, 0U, 2464.0f, 0.035f),
                   0.0f,
                   0.00001f,
                   "zero interval returns zero");
@@ -559,20 +638,20 @@ static void test_encoder_delta_filter(void)
 {
     encoder_speed_window_t window;
 
-    EncoderMath_SpeedWindowReset(&window);
-    require_int(EncoderMath_DeltaAccepted(45, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) != 0U,
+    WheelSpeedEstimator_SpeedWindowReset(&window);
+    require_int(WheelSpeedEstimator_DeltaAccepted(45, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) != 0U,
                 "filter accepts normal cold sample");
-    require_int(EncoderMath_DeltaAccepted(400, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) == 0U,
+    require_int(WheelSpeedEstimator_DeltaAccepted(400, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) == 0U,
                 "filter rejects impossible speed");
-    require_int(EncoderMath_DeltaAccepted(-400, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) == 0U,
+    require_int(WheelSpeedEstimator_DeltaAccepted(-400, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) == 0U,
                 "filter rejects impossible reverse speed");
 
-    EncoderMath_SpeedWindowPush(&window, 45, 10U);
-    EncoderMath_SpeedWindowPush(&window, 44, 10U);
-    EncoderMath_SpeedWindowPush(&window, 46, 10U);
-    require_int(EncoderMath_DeltaAccepted(70, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) != 0U,
+    WheelSpeedEstimator_SpeedWindowPush(&window, 45, 10U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 44, 10U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 46, 10U);
+    require_int(WheelSpeedEstimator_DeltaAccepted(70, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) != 0U,
                 "filter accepts plausible change");
-    require_int(EncoderMath_DeltaAccepted(113, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) == 0U,
+    require_int(WheelSpeedEstimator_DeltaAccepted(113, &window, 10U, 2464.0f, 0.035f, 2.5f, 0.45f, 3U) == 0U,
                 "filter rejects isolated spike");
 }
 
@@ -582,52 +661,52 @@ static void test_encoder_reject_streak_rebuilds_window(void)
     uint8_t                reject_streak = 0U;
     uint16_t               rebuild_count = 0U;
 
-    EncoderMath_SpeedWindowReset(&window);
-    EncoderMath_SpeedWindowPush(&window, 45, 10U);
-    EncoderMath_SpeedWindowPush(&window, 44, 10U);
-    EncoderMath_SpeedWindowPush(&window, 46, 10U);
+    WheelSpeedEstimator_SpeedWindowReset(&window);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 45, 10U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 44, 10U);
+    WheelSpeedEstimator_SpeedWindowPush(&window, 46, 10U);
 
-    require_int(EncoderMath_RecordDeltaOrRebuild(&window,
-                                                 113,
-                                                 10U,
-                                                 2464.0f,
-                                                 0.035f,
-                                                 2.5f,
-                                                 0.45f,
-                                                 3U,
-                                                 3U,
-                                                 &reject_streak,
-                                                 &rebuild_count)
+    require_int(WheelSpeedEstimator_RecordDeltaOrRebuild(&window,
+                                                         113,
+                                                         10U,
+                                                         2464.0f,
+                                                         0.035f,
+                                                         2.5f,
+                                                         0.45f,
+                                                         3U,
+                                                         3U,
+                                                         &reject_streak,
+                                                         &rebuild_count)
                     == 0U,
                 "first spike rejected");
     require_int(window.sample_count == 3U, "first reject keeps old window");
     require_int(reject_streak == 1U, "first reject streak");
 
-    (void)EncoderMath_RecordDeltaOrRebuild(&window,
-                                           114,
-                                           10U,
-                                           2464.0f,
-                                           0.035f,
-                                           2.5f,
-                                           0.45f,
-                                           3U,
-                                           3U,
-                                           &reject_streak,
-                                           &rebuild_count);
+    (void)WheelSpeedEstimator_RecordDeltaOrRebuild(&window,
+                                                   114,
+                                                   10U,
+                                                   2464.0f,
+                                                   0.035f,
+                                                   2.5f,
+                                                   0.45f,
+                                                   3U,
+                                                   3U,
+                                                   &reject_streak,
+                                                   &rebuild_count);
     require_int(window.sample_count == 3U, "second reject still keeps old window");
     require_int(reject_streak == 2U, "second reject streak");
 
-    require_int(EncoderMath_RecordDeltaOrRebuild(&window,
-                                                 115,
-                                                 10U,
-                                                 2464.0f,
-                                                 0.035f,
-                                                 2.5f,
-                                                 0.45f,
-                                                 3U,
-                                                 3U,
-                                                 &reject_streak,
-                                                 &rebuild_count)
+    require_int(WheelSpeedEstimator_RecordDeltaOrRebuild(&window,
+                                                         115,
+                                                         10U,
+                                                         2464.0f,
+                                                         0.035f,
+                                                         2.5f,
+                                                         0.45f,
+                                                         3U,
+                                                         3U,
+                                                         &reject_streak,
+                                                         &rebuild_count)
                     != 0U,
                 "third reject rebuilds with current delta");
     require_int(window.sample_count == 1U, "rebuild starts new window");
@@ -638,37 +717,40 @@ static void test_encoder_reject_streak_rebuilds_window(void)
 
 static void test_task_timing_next_wake(void)
 {
-    chassis_task_health_t health;
-    uint8_t               missed = 0U;
-    uint32_t              next   = TaskHealthService_NextWake(100U, 105U, 10U, &missed);
+    const system_monitoring_config_t config = {
+        .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 400U},
+    };
+    system_monitoring_task_health_t health;
+    uint8_t                         missed = 0U;
+    uint32_t                        next   = SystemMonitoring_NextWake(100U, 105U, 10U, &missed);
 
     require_int(next == 110U, "periodic next wake");
     require_int(missed == 0U, "periodic no miss");
 
-    next = TaskHealthService_NextWake(110U, 125U, 10U, &missed);
+    next = SystemMonitoring_NextWake(110U, 125U, 10U, &missed);
     require_int(next == 135U, "miss realigns to now plus period");
     require_int(missed == 1U, "miss detected");
 
-    TaskHealthService_Reset();
-    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_RPI, 100U);
-    TaskHealthService_UpdateTimeouts(141U);
-    TaskHealthService_GetHealth(&health);
-    require_int(health.timeout_count[TASK_HEALTH_SERVICE_RPI] == 1U, "rpi heartbeat timeout counted");
-    require_int(health.timed_out[TASK_HEALTH_SERVICE_RPI] != 0U, "rpi timeout state set");
-    TaskHealthService_UpdateTimeouts(160U);
-    TaskHealthService_GetHealth(&health);
-    require_int(health.timeout_count[TASK_HEALTH_SERVICE_RPI] == 1U, "timeout counted once until recovery");
-    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_RPI, 170U);
-    TaskHealthService_GetHealth(&health);
-    require_int(health.timed_out[TASK_HEALTH_SERVICE_RPI] == 0U, "heartbeat clears timeout state");
+    require_int(SystemMonitoring_Init(&config, 0UL) != 0U, "system monitor config accepted");
+    SystemMonitoring_Heartbeat(SYSTEM_MONITORING_TASK_HOST, 100U);
+    SystemMonitoring_UpdateTimeouts(141U);
+    (void)SystemMonitoring_GetTaskHealth(&health);
+    require_int(health.timeout_count[SYSTEM_MONITORING_TASK_HOST] == 1U, "host heartbeat timeout counted");
+    require_int(health.timed_out[SYSTEM_MONITORING_TASK_HOST] != 0U, "host timeout state set");
+    SystemMonitoring_UpdateTimeouts(160U);
+    (void)SystemMonitoring_GetTaskHealth(&health);
+    require_int(health.timeout_count[SYSTEM_MONITORING_TASK_HOST] == 1U, "timeout counted once until recovery");
+    SystemMonitoring_Heartbeat(SYSTEM_MONITORING_TASK_HOST, 170U);
+    (void)SystemMonitoring_GetTaskHealth(&health);
+    require_int(health.timed_out[SYSTEM_MONITORING_TASK_HOST] == 0U, "heartbeat clears timeout state");
 
-    TaskHealthService_Reset();
-    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_IMU, 100U);
-    TaskHealthService_UpdateTimeouts(181U);
-    require_int(TaskHealthService_GetTimeoutMask() == (uint16_t)(1U << TASK_HEALTH_SERVICE_IMU),
+    SystemMonitoring_ResetTaskHealth();
+    SystemMonitoring_Heartbeat(SYSTEM_MONITORING_TASK_IMU, 100U);
+    SystemMonitoring_UpdateTimeouts(181U);
+    require_int(SystemMonitoring_GetTimeoutMask() == (uint16_t)(1U << SYSTEM_MONITORING_TASK_IMU),
                 "only imu timeout bit is reported");
-    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_IMU, 182U);
-    require_int(TaskHealthService_GetTimeoutMask() == 0U, "imu heartbeat clears only timeout mask bit");
+    SystemMonitoring_Heartbeat(SYSTEM_MONITORING_TASK_IMU, 182U);
+    require_int(SystemMonitoring_GetTimeoutMask() == 0U, "imu heartbeat clears only timeout mask bit");
 }
 
 static void test_imu_state_contract(void)
@@ -860,36 +942,42 @@ static void test_control_dt_uses_measured_period_and_rejects_long_gap(void)
     uint8_t  initialized  = 0U;
     float    dt_s         = 0.0f;
 
-    require_int(ChassisMath_ControlDt(100U, &last_step_ms, &initialized, &dt_s) == 1U, "first control step accepted");
+    require_int(DifferentialDriveKinematics_ControlDt(100U, &last_step_ms, &initialized, &dt_s) == 1U,
+                "first control step accepted");
     require_close(dt_s, 0.010f, 0.0001f, "first control step uses 10ms");
-    require_int(ChassisMath_ControlDt(105U, &last_step_ms, &initialized, &dt_s) == 1U, "5ms control step accepted");
+    require_int(DifferentialDriveKinematics_ControlDt(105U, &last_step_ms, &initialized, &dt_s) == 1U,
+                "5ms control step accepted");
     require_close(dt_s, 0.005f, 0.0001f, "5ms measured dt");
-    require_int(ChassisMath_ControlDt(115U, &last_step_ms, &initialized, &dt_s) == 1U, "10ms control step accepted");
+    require_int(DifferentialDriveKinematics_ControlDt(115U, &last_step_ms, &initialized, &dt_s) == 1U,
+                "10ms control step accepted");
     require_close(dt_s, 0.010f, 0.0001f, "10ms measured dt");
-    require_int(ChassisMath_ControlDt(145U, &last_step_ms, &initialized, &dt_s) == 1U, "30ms control step accepted");
+    require_int(DifferentialDriveKinematics_ControlDt(145U, &last_step_ms, &initialized, &dt_s) == 1U,
+                "30ms control step accepted");
     require_close(dt_s, 0.030f, 0.0001f, "30ms measured dt");
-    require_int(ChassisMath_ControlDt(245U, &last_step_ms, &initialized, &dt_s) == 1U, "100ms control step accepted");
+    require_int(DifferentialDriveKinematics_ControlDt(245U, &last_step_ms, &initialized, &dt_s) == 1U,
+                "100ms control step accepted");
     require_close(dt_s, 0.100f, 0.0001f, "100ms measured dt");
-    require_int(ChassisMath_ControlDt(346U, &last_step_ms, &initialized, &dt_s) == 0U, "gap above 100ms is rejected");
+    require_int(DifferentialDriveKinematics_ControlDt(346U, &last_step_ms, &initialized, &dt_s) == 0U,
+                "gap above 100ms is rejected");
 }
 
-/* ────────── L2: ChassisMath 差速模型测试 ────────── */
+/* ────────── L2: differential-drive kinematics tests ────────── */
 
 static void test_chassis_math_differential(void)
 {
     float left, right;
 
     /* 纯直线 */
-    ChassisMath_ResolveDifferentialTargets(0.2f, 0.0f, CHASSIS_WHEEL_BASE_M, &left, &right);
+    DifferentialDriveKinematics_ResolveDifferentialTargets(0.2f, 0.0f, CHASSIS_TRACK_WIDTH_M, &left, &right);
     require_close(left, 0.2f, 0.001f, "straight: left = linear_x");
     require_close(right, 0.2f, 0.001f, "straight: right = linear_x");
 
     /* 原地旋转 */
-    ChassisMath_ResolveDifferentialTargets(0.0f, 2.0f, CHASSIS_WHEEL_BASE_M, &left, &right);
+    DifferentialDriveKinematics_ResolveDifferentialTargets(0.0f, 2.0f, CHASSIS_TRACK_WIDTH_M, &left, &right);
     require_close(left, -right, 0.001f, "spin: left = -right");
 
     /* 混合：正 angular_z = CCW = 右轮更快 */
-    ChassisMath_ResolveDifferentialTargets(0.3f, 1.0f, CHASSIS_WHEEL_BASE_M, &left, &right);
+    DifferentialDriveKinematics_ResolveDifferentialTargets(0.3f, 1.0f, CHASSIS_TRACK_WIDTH_M, &left, &right);
     require_int(right > left, "turn: positive angular_z → right > left");
 }
 

@@ -1,11 +1,11 @@
 #include "imu_calibration.h"
-#include "imu_filter.h"
+#include "imu_signal_filter.h"
 #include "imu_bmi270_fifo.h"
 #include "imu_bmi270.h"
 #include "imu_bmi270_math.h"
 #include "imu_bmi270_profile.h"
-#include "imu_timestamp.h"
-#include "imu_calibration_gate.h"
+#include "imu_timestamp_tracker.h"
+#include "imu_calibration_guard.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -207,38 +207,38 @@ static void test_nonblocking_gyro_calibration_rejects_span(void)
 
 static void test_stationary_gate_requires_continuous_stable_window(void)
 {
-    imu_calibration_gate_t gate;
-    int16_t                pwm[IMU_CALIBRATION_GATE_MOTOR_COUNT]         = {0};
-    float                  speed[IMU_CALIBRATION_GATE_MOTOR_COUNT]       = {0.0f};
-    uint8_t                speed_valid[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {1U, 1U, 1U, 1U};
-    const float            accel_g[3]                                    = {0.0f, 0.0f, 1.0f};
-    const float            gyro_dps[3]                                   = {0.1f, -0.1f, 0.05f};
+    imu_calibration_guard_t gate;
+    int16_t                 pwm[IMU_CALIBRATION_GATE_MOTOR_COUNT]         = {0};
+    float                   speed[IMU_CALIBRATION_GATE_MOTOR_COUNT]       = {0.0f};
+    uint8_t                 speed_valid[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {1U, 1U, 1U, 1U};
+    const float             accel_g[3]                                    = {0.0f, 0.0f, 1.0f};
+    const float             gyro_dps[3]                                   = {0.1f, -0.1f, 0.05f};
 
-    ImuCalibrationGate_Init(&gate);
+    ImuCalibrationGuard_Init(&gate);
     for (uint32_t sample = 1U; sample < IMU_CALIBRATION_GATE_WINDOW_SAMPLES; ++sample)
     {
-        require_int(ImuCalibrationGate_Update(&gate, pwm, speed, speed_valid, 0x0FU, accel_g, gyro_dps, sample) == 0U,
+        require_int(ImuCalibrationGuard_Update(&gate, pwm, speed, speed_valid, 0x0FU, accel_g, gyro_dps, sample) == 0U,
                     "stationary gate waits for full stable window");
     }
-    require_int(ImuCalibrationGate_Update(&gate,
-                                          pwm,
-                                          speed,
-                                          speed_valid,
-                                          0x0FU,
-                                          accel_g,
-                                          gyro_dps,
-                                          IMU_CALIBRATION_GATE_WINDOW_SAMPLES)
+    require_int(ImuCalibrationGuard_Update(&gate,
+                                           pwm,
+                                           speed,
+                                           speed_valid,
+                                           0x0FU,
+                                           accel_g,
+                                           gyro_dps,
+                                           IMU_CALIBRATION_GATE_WINDOW_SAMPLES)
                     == 1U,
                 "stationary gate accepts full stable window");
     pwm[2] = 1;
-    require_int(ImuCalibrationGate_Update(&gate,
-                                          pwm,
-                                          speed,
-                                          speed_valid,
-                                          0x0FU,
-                                          accel_g,
-                                          gyro_dps,
-                                          IMU_CALIBRATION_GATE_WINDOW_SAMPLES)
+    require_int(ImuCalibrationGuard_Update(&gate,
+                                           pwm,
+                                           speed,
+                                           speed_valid,
+                                           0x0FU,
+                                           accel_g,
+                                           gyro_dps,
+                                           IMU_CALIBRATION_GATE_WINDOW_SAMPLES)
                     == 0U,
                 "actual pwm immediately clears stationary evidence");
     require_int(gate.sample_count == 0U, "motion clears stationary sample count");
@@ -246,19 +246,19 @@ static void test_stationary_gate_requires_continuous_stable_window(void)
 
 static void test_stationary_gate_rejects_gyro_variance(void)
 {
-    imu_calibration_gate_t gate;
-    int16_t                pwm[IMU_CALIBRATION_GATE_MOTOR_COUNT]         = {0};
-    float                  speed[IMU_CALIBRATION_GATE_MOTOR_COUNT]       = {0.0f};
-    uint8_t                speed_valid[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {1U, 1U, 1U, 1U};
-    const float            accel_g[3]                                    = {0.0f, 0.0f, 1.0f};
-    float                  gyro_dps[3]                                   = {0.0f, 0.0f, 0.0f};
-    uint8_t                stationary                                    = 0U;
+    imu_calibration_guard_t gate;
+    int16_t                 pwm[IMU_CALIBRATION_GATE_MOTOR_COUNT]         = {0};
+    float                   speed[IMU_CALIBRATION_GATE_MOTOR_COUNT]       = {0.0f};
+    uint8_t                 speed_valid[IMU_CALIBRATION_GATE_MOTOR_COUNT] = {1U, 1U, 1U, 1U};
+    const float             accel_g[3]                                    = {0.0f, 0.0f, 1.0f};
+    float                   gyro_dps[3]                                   = {0.0f, 0.0f, 0.0f};
+    uint8_t                 stationary                                    = 0U;
 
-    ImuCalibrationGate_Init(&gate);
+    ImuCalibrationGuard_Init(&gate);
     for (uint32_t sample = 1U; sample <= IMU_CALIBRATION_GATE_WINDOW_SAMPLES; ++sample)
     {
         gyro_dps[0] = ((sample & 1U) != 0U) ? 1.0f : -1.0f;
-        stationary  = ImuCalibrationGate_Update(&gate, pwm, speed, speed_valid, 0x0FU, accel_g, gyro_dps, sample);
+        stationary  = ImuCalibrationGuard_Update(&gate, pwm, speed, speed_valid, 0x0FU, accel_g, gyro_dps, sample);
     }
     require_int(stationary == 0U, "gyro variance above 0.25 dps squared is rejected");
 }
@@ -347,9 +347,9 @@ static void test_quaternion_initializes_roll_pitch_from_accel(void)
 
 static void test_filter_and_angle_wrap(void)
 {
-    require_close(ImuFilter_LowPass(10.0f, 20.0f, 0.2f), 12.0f, 0.0001f, "low-pass uses established alpha");
-    require_close(ImuFilter_WrapAngleDeg(181.0f), -179.0f, 0.0001f, "positive yaw wraps below 180");
-    require_close(ImuFilter_WrapAngleDeg(-180.0f), 180.0f, 0.0001f, "negative boundary wraps to positive 180");
+    require_close(ImuSignalFilter_LowPass(10.0f, 20.0f, 0.2f), 12.0f, 0.0001f, "low-pass uses established alpha");
+    require_close(ImuSignalFilter_WrapAngleDeg(181.0f), -179.0f, 0.0001f, "positive yaw wraps below 180");
+    require_close(ImuSignalFilter_WrapAngleDeg(-180.0f), 180.0f, 0.0001f, "negative boundary wraps to positive 180");
 }
 
 int main(void)

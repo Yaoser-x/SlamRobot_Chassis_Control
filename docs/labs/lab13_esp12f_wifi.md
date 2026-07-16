@@ -42,7 +42,7 @@ PC (esptool.py) ←──bin── USART1 ←── USART2 ←── ESP12F
 
 ### 3. ESP12F 控制协议
 
-正常模式下 ESP12F 发送的 `SET_VELOCITY` 帧复用 `upper_protocol` 格式（`App/protocol/upper_protocol.c`），与上位机 USART3 协议帧完全兼容：
+正常模式下 ESP12F 发送的 `SET_VELOCITY` 帧复用 `upper_protocol` 格式（`Service/communication/internal/upper_protocol.c`），与上位机 USART3 协议帧完全兼容：
 
 | 帧类型 | 方向 | 作用 |
 |--------|------|------|

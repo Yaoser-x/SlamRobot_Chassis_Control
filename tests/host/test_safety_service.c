@@ -5,15 +5,17 @@
 #include "adc_monitor.h"
 #include "bsp_config.h"
 #include "chassis_layout.h"
-#include "task_health_service.h"
-#include "control_service.h"
+#include "command_management_service.h"
 #include "encoder_driver.h"
-#include "safety_service.h"
+#include "motor_driver.h"
 #include "control_config.h"
-#include "bsp_config.h"
-#include "param_service.h"
+#include "parameter_management_service.h"
+#include "power_management_service.h"
+#include "safety_management_service.h"
+#include "state_estimation_service.h"
+#include "system_monitoring_service.h"
 
-uint32_t ParamService_GetSnapshot(param_model_t *params)
+uint32_t ParameterManagement_GetSnapshot(param_model_t *params)
 {
     *params = (param_model_t){0};
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
@@ -30,10 +32,9 @@ static uint32_t             fake_tick_ms;
 static adc_monitor_state_t  fake_adc_state;
 static encoder_state_t      fake_encoder_state;
 static motor_driver_state_t fake_motor_state;
-static uint8_t              fake_estop;
-static uint8_t              fake_fault_stop;
-static uint8_t              fake_active_source;
-static uint8_t              fake_set_fault_stop_count;
+static command_source_t     fake_active_source;
+static uint8_t              fake_gate_allowed;
+static uint8_t              fake_gate_closed_count;
 static uint8_t              fake_break_clear_allowed;
 
 uint32_t __get_PRIMASK(void)
@@ -71,9 +72,25 @@ void AdcMonitor_GetState(adc_monitor_state_t *state)
     *state = fake_adc_state;
 }
 
+void PowerManagement_Update(void)
+{
+}
+
+uint32_t PowerManagement_GetStatus(power_management_status_t *status)
+{
+    *status = fake_adc_state;
+    return 1UL;
+}
+
 void EncoderDriver_GetState(encoder_state_t *state)
 {
     *state = fake_encoder_state;
+}
+
+uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status)
+{
+    *status = fake_encoder_state;
+    return 1UL;
 }
 
 void MotorDriver_UpdateFaults(void)
@@ -95,25 +112,20 @@ uint8_t MotorDriver_ClearBreakLatch(void)
     return 1U;
 }
 
-uint8_t ControlService_IsEmergencyStop(void)
+command_source_t CommandManagement_GetActiveSource(uint32_t now_ms)
 {
-    return fake_estop;
-}
-
-uint8_t ControlService_IsFaultStop(void)
-{
-    return fake_fault_stop;
-}
-
-uint8_t ControlService_GetActiveSource(void)
-{
+    (void)now_ms;
     return fake_active_source;
 }
 
-void ControlService_SetFaultStop(uint8_t enabled)
+void CommandManagement_SetMotionGate(uint8_t allowed, uint32_t decision_generation)
 {
-    fake_fault_stop = (enabled != 0U) ? 1U : 0U;
-    fake_set_fault_stop_count++;
+    (void)decision_generation;
+    fake_gate_allowed = (allowed != 0U) ? 1U : 0U;
+    if (fake_gate_allowed == 0U)
+    {
+        fake_gate_closed_count++;
+    }
 }
 
 uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
@@ -132,54 +144,72 @@ static void require_int(int condition, const char *message)
 
 static void reset_fake_monitor(void)
 {
-    fake_primask                                = 0U;
-    fake_tick_ms                                = 1000U;
-    fake_adc_state                              = (adc_monitor_state_t){0};
-    fake_encoder_state                          = (encoder_state_t){0};
-    fake_motor_state                            = (motor_driver_state_t){0};
-    fake_estop                                  = 0U;
-    fake_fault_stop                             = 0U;
-    fake_active_source                          = CONTROL_SOURCE_DEBUG;
-    fake_set_fault_stop_count                   = 0U;
-    fake_break_clear_allowed                    = 0U;
-    fake_adc_state.current_valid                = 1U;
-    fake_adc_state.current_control_valid        = 1U;
-    fake_adc_state.current_control_valid_mask   = (uint8_t)((1U << MOTOR_ID_M2) | (1U << MOTOR_ID_M3));
-    fake_adc_state.battery_voltage              = 12.0f;
-    fake_adc_state.samples_ready                = 1U;
-    fake_adc_state.raw_sample_count             = 1U;
-    fake_adc_state.valid_flags                  = ADC_MONITOR_VALID_SAMPLES_READY;
-    fake_encoder_state.speed_valid_all          = 1U;
-    fake_encoder_state.speed_valid[MOTOR_ID_M2] = 1U;
-    fake_encoder_state.speed_valid[MOTOR_ID_M3] = 1U;
-    TaskHealthService_Reset();
-    SafetyService_Init();
+    const safety_management_config_t safety_config = {
+        .battery_low_warn_v           = BATTERY_LOW_WARN_V,
+        .battery_low_clear_v          = BATTERY_LOW_CLEAR_V,
+        .battery_critical_v           = BATTERY_CRITICAL_V,
+        .battery_recover_v            = BATTERY_RECOVER_V,
+        .battery_critical_debounce_ms = BATTERY_CRITICAL_DEBOUNCE_MS,
+        .battery_recover_debounce_ms  = BATTERY_RECOVER_DEBOUNCE_MS,
+        .update_period_ms             = CHASSIS_ADC_PERIOD_MS,
+        .overcurrent_startup_blank_ms = MOTOR_OVERCURRENT_STARTUP_BLANK_MS,
+        .overcurrent_startup_rearm_ms = MOTOR_OVERCURRENT_STARTUP_REARM_MS,
+        .battery_low_monitor_enabled  = BATTERY_LOW_MONITOR_ENABLED,
+        .overcurrent_fault_enabled    = MOTOR_ADC_OVERCURRENT_FAULT_ENABLED,
+        .current_observe_a            = {1.5f, 1.5f, 1.5f, 1.5f},
+        .current_fault_a              = {2.5f, 2.5f, 2.5f, 2.5f},
+        .current_fault_debounce_ms    = 100U,
+    };
+    fake_primask                                   = 0U;
+    fake_tick_ms                                   = 1000U;
+    fake_adc_state                                 = (adc_monitor_state_t){0};
+    fake_encoder_state                             = (encoder_state_t){0};
+    fake_motor_state                               = (motor_driver_state_t){0};
+    fake_active_source                             = COMMAND_SOURCE_DEBUG;
+    fake_gate_allowed                              = 1U;
+    fake_gate_closed_count                         = 0U;
+    fake_break_clear_allowed                       = 0U;
+    fake_adc_state.current_valid                   = 1U;
+    fake_adc_state.current_control_valid           = 1U;
+    fake_adc_state.current_control_valid_mask      = (uint8_t)((1U << MOTOR_ID_M2) | (1U << MOTOR_ID_M3));
+    fake_adc_state.battery_voltage                 = 12.0f;
+    fake_adc_state.samples_ready                   = 1U;
+    fake_adc_state.raw_sample_count                = 1U;
+    fake_adc_state.valid_flags                     = ADC_MONITOR_VALID_SAMPLES_READY;
+    fake_encoder_state.speed_valid_all             = 1U;
+    fake_encoder_state.speed_valid[MOTOR_ID_M2]    = 1U;
+    fake_encoder_state.speed_valid[MOTOR_ID_M3]    = 1U;
+    const system_monitoring_config_t system_config = {
+        .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 400U},
+    };
+    require_int(SystemMonitoring_Init(&system_config, 0UL) != 0U, "system monitor config accepted");
+    require_int(SafetyManagement_Init(&safety_config) != 0U, "safety config accepted");
 }
 
 static void test_task_timeout_mask_aggregates_only_timed_out_task(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
-    TaskHealthService_Heartbeat(TASK_HEALTH_SERVICE_IMU, 100U);
+    SystemMonitoring_Heartbeat(SYSTEM_MONITORING_TASK_IMU, 100U);
     fake_tick_ms = 181U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
 
-    require_int(state.task_timeout_mask == (uint16_t)(1U << TASK_HEALTH_SERVICE_IMU),
+    require_int(state.task_timeout_mask == (uint16_t)(1U << SYSTEM_MONITORING_TASK_IMU),
                 "system monitor exposes only imu timeout bit");
 }
 
 static void update_and_advance(uint32_t step_ms)
 {
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms += step_ms;
 }
 
 static void test_adc_overcurrent_does_not_fault_stop_when_software_fault_disabled(void)
 {
 #if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_motor_state.output_permille[MOTOR_ID_M2] = 50;
@@ -190,20 +220,21 @@ static void test_adc_overcurrent_does_not_fault_stop_when_software_fault_disable
     {
         update_and_advance(20U);
     }
-    SafetyService_GetState(&state);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) == 0U,
                 "disabled ADC software overcurrent does not latch M2 fault");
-    require_int(fake_set_fault_stop_count == 0U, "disabled ADC software overcurrent does not request fault stop");
+    require_int(fake_gate_closed_count == 0U, "disabled ADC software overcurrent does not close motion gate");
 
     fake_tick_ms = 1300U;
     for (uint8_t i = 0U; i < MOTOR_OVERCURRENT_DEBOUNCE_COUNT; ++i)
     {
         update_and_advance(20U);
     }
-    SafetyService_GetState(&state);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) == 0U,
                 "disabled ADC software overcurrent stays clear after startup blank");
-    require_int(fake_fault_stop == 0U, "disabled ADC software overcurrent keeps fault stop clear after blank");
+    require_int(SafetyManagement_IsFaultStop() == 0U,
+                "disabled ADC software overcurrent keeps fault stop clear after blank");
     require_int(state.current_observe_over_limit_count[MOTOR_ID_M2] > 0UL,
                 "disabled ADC software overcurrent records dry-run observations");
     require_int(state.current_fault_would_latch_count[MOTOR_ID_M2] > 0UL,
@@ -214,7 +245,7 @@ static void test_adc_overcurrent_does_not_fault_stop_when_software_fault_disable
 static void test_adc_overcurrent_faults_when_enabled_and_control_valid(void)
 {
 #if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED != 0U
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_motor_state.output_permille[MOTOR_ID_M2] = 50;
@@ -229,19 +260,19 @@ static void test_adc_overcurrent_faults_when_enabled_and_control_valid(void)
     {
         update_and_advance(20U);
     }
-    SafetyService_GetState(&state);
+    (void)SafetyManagement_GetStatus(&state);
 
     require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) != 0U,
                 "enabled ADC software overcurrent latches M2 fault");
-    require_int(fake_fault_stop != 0U, "enabled ADC software overcurrent requests fault stop");
+    require_int(SafetyManagement_IsFaultStop() != 0U, "enabled ADC software overcurrent requests fault stop");
     require_int(state.current_observe_over_limit_count[MOTOR_ID_M2] > 0UL,
                 "enabled ADC software overcurrent records observations");
 
     fake_adc_state.current_control_valid_mask = 0U;
     fake_adc_state.current_a[MOTOR_ID_M2]     = 0.0f;
-    SafetyService_Update();
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_M2_OVERCURRENT);
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_M2_OVERCURRENT);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) != 0U,
                 "invalid current sample cannot clear overcurrent latch");
 #endif
@@ -249,39 +280,39 @@ static void test_adc_overcurrent_faults_when_enabled_and_control_valid(void)
 
 static void test_drv_fault_is_not_suppressed_by_startup_blanking(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_motor_state.output_permille[MOTOR_ID_M2] = 50;
     fake_motor_state.effective_pwm[MOTOR_ID_M2]   = 50;
     fake_motor_state.fault_active[MOTOR_ID_M2]    = 1U;
 
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
 
     require_int((state.latched_error_flags & SYSTEM_ERROR_DRV_FAULT) != 0U, "DRV fault latches during startup blank");
-    require_int(fake_fault_stop != 0U, "DRV fault requests fault stop during startup blank");
+    require_int(SafetyManagement_IsFaultStop() != 0U, "DRV fault requests fault stop during startup blank");
 }
 
 static void test_tim1_break_latches_fault_stop_and_requires_driver_clear(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_motor_state.tim1_break_latched = 1U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_TIM_BREAK) != 0U, "TIM1 break latches a system fault");
-    require_int(fake_fault_stop != 0U, "TIM1 break requests fault stop");
+    require_int(SafetyManagement_IsFaultStop() != 0U, "TIM1 break requests fault stop");
 
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_TIM_BREAK);
-    SafetyService_GetState(&state);
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_TIM_BREAK);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_TIM_BREAK) != 0U,
                 "driver-rejected clear preserves system break fault");
 
     fake_break_clear_allowed = 1U;
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_TIM_BREAK);
-    SafetyService_GetState(&state);
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_TIM_BREAK);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_TIM_BREAK) == 0U,
                 "safe driver clear removes system break fault");
 }
@@ -289,7 +320,7 @@ static void test_tim1_break_latches_fault_stop_and_requires_driver_clear(void)
 static void test_adc_overcurrent_output_chatter_does_not_fault_when_software_fault_disabled(void)
 {
 #if MOTOR_ADC_OVERCURRENT_FAULT_ENABLED == 0U
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_adc_state.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
@@ -300,141 +331,142 @@ static void test_adc_overcurrent_output_chatter_does_not_fault_when_software_fau
         fake_motor_state.effective_pwm[MOTOR_ID_M2]   = fake_motor_state.output_permille[MOTOR_ID_M2];
         update_and_advance(20U);
     }
-    SafetyService_GetState(&state);
+    (void)SafetyManagement_GetStatus(&state);
 
     require_int((state.latched_error_flags & SYSTEM_ERROR_M2_OVERCURRENT) == 0U,
                 "disabled ADC software overcurrent ignores output chatter");
-    require_int(fake_fault_stop == 0U, "disabled ADC software overcurrent chatter keeps fault stop clear");
+    require_int(SafetyManagement_IsFaultStop() == 0U,
+                "disabled ADC software overcurrent chatter keeps fault stop clear");
 #endif
 }
 
 static void test_encoder_feedback_latch_and_safe_clear(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
-    SafetyService_LatchEncoderFeedbackFault();
-    SafetyService_GetState(&state);
+    SafetyManagement_LatchEncoderFeedbackFault();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U,
                 "encoder feedback latch records dedicated bit");
-    require_int(fake_fault_stop != 0U, "encoder feedback latch immediately requests fault stop");
+    require_int(SafetyManagement_IsFaultStop() != 0U, "encoder feedback latch immediately requests fault stop");
 
     fake_encoder_state.speed_valid[MOTOR_ID_M2] = 0U;
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
-    SafetyService_GetState(&state);
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U,
                 "invalid enabled encoder rejects clear");
 
     fake_encoder_state.speed_valid[MOTOR_ID_M2] = 1U;
     fake_motor_state.requested_pwm[MOTOR_ID_M2] = 1;
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
-    SafetyService_GetState(&state);
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U,
                 "nonzero requested pwm rejects clear");
 
     fake_motor_state.requested_pwm[MOTOR_ID_M2] = 0;
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
-    SafetyService_GetState(&state);
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) == 0U,
                 "valid stationary feedback fault clears");
-    require_int(fake_fault_stop == 0U, "safe clear releases fault stop when no other cause remains");
+    require_int(SafetyManagement_IsFaultStop() == 0U, "safe clear releases fault stop when no other cause remains");
 }
 
 static void test_battery_warning_hysteresis(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_adc_state.battery_voltage = 10.49f;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.error_flags & SYSTEM_ERROR_LOW_BATTERY) != 0U, "10.49V sets low battery warning");
 
     fake_adc_state.battery_voltage = 10.70f;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.error_flags & SYSTEM_ERROR_LOW_BATTERY) != 0U, "warning remains inside hysteresis band");
 
     fake_adc_state.battery_voltage = 11.01f;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.error_flags & SYSTEM_ERROR_LOW_BATTERY) == 0U, "11.01V clears low battery warning");
 }
 
 static void test_battery_critical_timing_and_recovery(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_adc_state.battery_voltage = 8.99f;
     fake_tick_ms                   = 1000U;
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms = 1499U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) == 0U,
                 "critical battery does not latch at 499ms");
     fake_tick_ms = 1500U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) != 0U, "critical battery latches at 500ms");
-    require_int(fake_fault_stop != 0U, "critical battery requests fault stop");
+    require_int(SafetyManagement_IsFaultStop() != 0U, "critical battery requests fault stop");
 
-    SafetyService_ClearLatchedFaults(SYSTEM_ERROR_BATTERY_CRITICAL);
-    SafetyService_GetState(&state);
+    SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_BATTERY_CRITICAL);
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) != 0U,
                 "manual clear cannot remove battery critical");
 
     fake_adc_state.battery_voltage = 9.61f;
     fake_tick_ms                   = 1600U;
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms = 3599U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) != 0U,
                 "battery critical remains at 1999ms recovery");
     fake_tick_ms = 3600U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) == 0U,
                 "battery critical auto clears at 2000ms recovery");
-    require_int(fake_fault_stop == 0U, "battery-only recovery releases fault stop");
+    require_int(SafetyManagement_IsFaultStop() == 0U, "battery-only recovery releases fault stop");
 }
 
 static void test_invalid_battery_sample_resets_debounce_and_other_fault_survives_recovery(void)
 {
-    safety_service_snapshot_t state;
+    safety_management_status_t state;
 
     reset_fake_monitor();
     fake_adc_state.battery_voltage = 8.9f;
     fake_tick_ms                   = 1000U;
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms                        = 1400U;
     fake_adc_state.invalid_reason_flags = ADC_MONITOR_INVALID_NO_NEW_SAMPLE;
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms                        = 1500U;
     fake_adc_state.invalid_reason_flags = 0UL;
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms = 1900U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) == 0U,
                 "invalid sample resets critical debounce");
 
     fake_tick_ms = 2000U;
-    SafetyService_Update();
-    SafetyService_LatchEncoderFeedbackFault();
+    SafetyManagement_Update();
+    SafetyManagement_LatchEncoderFeedbackFault();
     fake_adc_state.battery_voltage = 9.7f;
     fake_tick_ms                   = 2100U;
-    SafetyService_Update();
+    SafetyManagement_Update();
     fake_tick_ms = 4100U;
-    SafetyService_Update();
-    SafetyService_GetState(&state);
+    SafetyManagement_Update();
+    (void)SafetyManagement_GetStatus(&state);
     require_int((state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) == 0U,
                 "battery recovery clears its own critical bit");
     require_int((state.latched_error_flags & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U,
                 "battery recovery preserves encoder fault");
-    require_int(fake_fault_stop != 0U, "other fault keeps fault stop active after battery recovery");
+    require_int(SafetyManagement_IsFaultStop() != 0U, "other fault keeps fault stop active after battery recovery");
 }
 
 int main(void)

@@ -1,5 +1,5 @@
 #include "oled_calibration_view.h"
-#include "system_snapshot_service.h"
+#include "communication_publish_model_types.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -15,13 +15,13 @@ static void check(int condition, const char *message)
 
 int main(void)
 {
-    chassis_service_snapshot_t chassis = {0};
-    adc_monitor_state_t        adc     = {0};
-    char                       json[768];
-    char                       csv[768];
-    char                       header[768];
-    size_t                     json_len;
-    size_t                     csv_len;
+    motion_control_status_t chassis = {0};
+    adc_monitor_state_t     adc     = {0};
+    char                    json[768];
+    char                    csv[768];
+    char                    header[768];
+    size_t                  json_len;
+    size_t                  csv_len;
 
     chassis.left_requested_mps              = 0.12345f;
     chassis.right_requested_mps             = 0.12345f;

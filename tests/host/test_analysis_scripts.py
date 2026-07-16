@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,11 +29,105 @@ architecture = load(
     "check_architecture_dependencies",
     ROOT / "scripts" / "check_architecture_dependencies.py",
 )
+naming = load(
+    "check_naming_conventions",
+    ROOT / "scripts" / "check_naming_conventions.py",
+)
+ownership = load(
+    "check_service_ownership",
+    ROOT / "scripts" / "check_service_ownership.py",
+)
 
 
 class AnalysisTests(unittest.TestCase):
     def test_five_layer_architecture_dependencies(self):
-        self.assertEqual(architecture.main(), 0)
+        self.assertEqual(architecture.analyze(ROOT), [])
+        self.assertEqual(naming.analyze(ROOT), [])
+        self.assertEqual(ownership.analyze(ROOT), [])
+
+    @staticmethod
+    def write_fixture(root: Path, relative: str, source: str) -> None:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    def test_architecture_rejects_private_service_internal_include(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "Service/motion/internal/private.h", "#pragma once\n")
+            self.write_fixture(root, "App/bad.c", '#include "private.h"\n')
+            errors = architecture.analyze(root)
+            self.assertTrue(any("private Service internal header" in error for error in errors), errors)
+
+    def test_architecture_rejects_public_service_dependency_leak(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "BSP/adc/adc_monitor.h", "#pragma once\n")
+            self.write_fixture(root, "Service/power/power_service.h", '#include "adc_monitor.h"\n')
+            errors = architecture.analyze(root)
+            self.assertTrue(any("public Service header leaks BSP" in error for error in errors), errors)
+
+    def test_architecture_rejects_new_mixed_configuration_consumer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "Domain/config/control_config.h", "#pragma once\n")
+            self.write_fixture(root, "Service/power/power_service.c", '#include "control_config.h"\n')
+            errors = architecture.analyze(root)
+            self.assertTrue(any("legacy mixed configuration" in error for error in errors), errors)
+
+    def test_architecture_rejects_unlisted_app_bsp_include(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "BSP/motor/motor_driver.h", "#pragma once\n")
+            self.write_fixture(root, "App/tasks/task_motor.c", '#include "motor_driver.h"\n')
+            errors = architecture.analyze(root)
+            self.assertTrue(any("App BSP include" in error for error in errors), errors)
+
+    def test_final_architecture_rejects_service_cycle_and_forbidden_edge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for capability in architecture.FINAL_SERVICE_DEPENDENCIES:
+                self.write_fixture(root, f"Service/{capability}/{capability}_service.h", "#pragma once\n")
+            self.write_fixture(root, "Algorithm/pid.c", "void pid(void) {}\n")
+            self.write_fixture(
+                root,
+                "Service/command_management/command_management_service.c",
+                '#include "safety_management_service.h"\n',
+            )
+            self.write_fixture(
+                root,
+                "Service/safety_management/safety_management_service.c",
+                '#include "command_management_service.h"\n',
+            )
+            errors = architecture.analyze(root, final=True)
+            self.assertIn(
+                "Service dependency not allowed: command_management -> safety_management",
+                errors,
+            )
+            self.assertIn(
+                "Service dependency cycle: command_management -> safety_management -> command_management",
+                errors,
+            )
+
+    def test_naming_rejects_non_snake_case_and_final_legacy_layer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "Algorithm/BadName.c", "void bad(void) {}\n")
+            self.write_fixture(root, "Domain/legacy.c", "void legacy(void) {}\n")
+            errors = naming.analyze(root, final=True)
+            self.assertTrue(any("source name must be lower_snake_case" in error for error in errors), errors)
+            self.assertIn("Domain/: legacy layer name is forbidden in Beta5 final", errors)
+
+    def test_ownership_rejects_motor_output_outside_motion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "Service/safety_management/safety_management_service.c",
+                "void stop(void) { MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE); }\n",
+            )
+            errors = ownership.analyze(root)
+            self.assertTrue(any("owned only by Motion Control" in error for error in errors), errors)
 
     def test_straight_hil_excludes_caster_transition_and_emits_ram_only_commands(self):
         telemetry = [

@@ -2,25 +2,22 @@
 
 #include "adc_monitor.h"
 #include "chassis_layout.h"
-#include "chassis_service.h"
-#include "control_config.h"
-#include "bsp_config.h"
-#include "control_service.h"
+#include "motion_control_service.h"
+#include "adc_monitor_config.h"
 #include "debug_cmd_current.h"
 #include "debug_console_writer.h"
 #include "encoder_driver.h"
 #include "esp12f_service.h"
-#include "flash_param.h"
 #include "imu_bmi270.h"
 #include "line_uart.h"
 #include "motor_driver.h"
-#include "param_service.h"
+#include "parameter_management_service.h"
 #include "platform_reset.h"
 #include "platform_reset_trace.h"
 #include "post_service.h"
-#include "ps2_control_service.h"
-#include "reset_reason_service.h"
-#include "safety_service.h"
+#include "teleoperation_service.h"
+#include "safety_management_service.h"
+#include "system_monitoring_service.h"
 #include "upper_uart_service.h"
 
 #include <stdio.h>
@@ -34,7 +31,7 @@ static int32_t DebugConsole_Milli(float value)
 
 static uint8_t DebugSystemStatus_ResetFlag(platform_reset_reason_t reason)
 {
-    return PlatformReset_ReasonFlagSet(ResetReasonService_GetFlags(), reason);
+    return PlatformReset_ReasonFlagSet(SystemMonitoring_GetResetReason(), reason);
 }
 
 void DebugSystemStatus_PrintResetFlags(void)
@@ -44,7 +41,7 @@ void DebugSystemStatus_PrintResetFlags(void)
     (void)snprintf(tx,
                    sizeof(tx),
                    "RESET csr=0x%08lX bor=%u por=%u pin=%u sftr=%u iwdg=%u wwdg=%u lpwr=%u\r\n",
-                   (unsigned long)ResetReasonService_GetFlags(),
+                   (unsigned long)SystemMonitoring_GetResetReason(),
                    DebugSystemStatus_ResetFlag(PLATFORM_RESET_REASON_BROWNOUT),
                    DebugSystemStatus_ResetFlag(PLATFORM_RESET_REASON_POWER_ON),
                    DebugSystemStatus_ResetFlag(PLATFORM_RESET_REASON_PIN),
@@ -109,31 +106,31 @@ void DebugSystemStatus_PrintResetTrace(void)
 
 void DebugSystemStatus_Print(void)
 {
-    char                        tx[DEBUG_SYSTEM_STATUS_TX_SIZE];
-    adc_monitor_state_t         adc_state;
-    encoder_state_t             encoder_state;
-    chassis_service_snapshot_t  chassis_state;
-    safety_service_snapshot_t   monitor_state;
-    imu_bmi270_state_t          imu_state;
-    ps2_control_service_state_t ps2_state;
-    line_uart_state_t           line_state;
-    esp12f_service_state_t      esp_state;
-    motor_driver_state_t        motor_state;
-    post_result_t               post_result;
-    param_model_t               params;
-    uint32_t                    encoder_hw_count[MOTOR_ID_COUNT];
+    char                       tx[DEBUG_SYSTEM_STATUS_TX_SIZE];
+    adc_monitor_state_t        adc_state;
+    encoder_state_t            encoder_state;
+    motion_control_status_t    chassis_state;
+    safety_management_status_t monitor_state;
+    imu_bmi270_state_t         imu_state;
+    teleoperation_status_t     ps2_state;
+    line_uart_state_t          line_state;
+    esp12f_service_state_t     esp_state;
+    motor_driver_state_t       motor_state;
+    post_result_t              post_result;
+    param_model_t              params;
+    uint32_t                   encoder_hw_count[MOTOR_ID_COUNT];
 
     AdcMonitor_GetState(&adc_state);
     EncoderDriver_GetState(&encoder_state);
-    ChassisService_GetState(&chassis_state);
-    SafetyService_GetState(&monitor_state);
+    (void)MotionControl_GetStatus(&chassis_state);
+    (void)SafetyManagement_GetStatus(&monitor_state);
     ImuBmi270_GetState(&imu_state);
-    Ps2ControlService_GetState(&ps2_state);
+    (void)Teleoperation_GetStatus(&ps2_state);
     LineUart_GetState(&line_state);
     Esp12fService_GetState(&esp_state);
     MotorDriver_GetState(&motor_state);
     POST_GetResult(&post_result);
-    ParamService_Get(&params);
+    (void)ParameterManagement_GetSnapshot(&params);
     EncoderDriver_GetHardwareCounts(encoder_hw_count);
 
     (void)snprintf(tx,
@@ -203,8 +200,8 @@ void DebugSystemStatus_Print(void)
         motor_state.effective_pwm[MOTOR_ID_M3],
         motor_state.effective_pwm[MOTOR_ID_M4],
         chassis_state.output_enabled,
-        ControlService_IsEmergencyStop(),
-        ControlService_IsFaultStop());
+        SafetyManagement_IsEmergencyStop(),
+        SafetyManagement_IsFaultStop());
     DebugConsoleWriter_Write(tx);
 
     (void)snprintf(tx,
@@ -349,7 +346,7 @@ void DebugSystemStatus_Print(void)
                    monitor_state.control_mode,
                    (unsigned long)monitor_state.error_flags,
                    (unsigned long)monitor_state.latched_error_flags,
-                   (unsigned long)ResetReasonService_GetFlags(),
+                   (unsigned long)SystemMonitoring_GetResetReason(),
                    DebugSystemStatus_ResetFlag(PLATFORM_RESET_REASON_BROWNOUT),
                    DebugSystemStatus_ResetFlag(PLATFORM_RESET_REASON_POWER_ON),
                    DebugSystemStatus_ResetFlag(PLATFORM_RESET_REASON_INDEPENDENT_WATCHDOG),

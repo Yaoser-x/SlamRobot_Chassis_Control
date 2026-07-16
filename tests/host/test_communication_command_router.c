@@ -1,41 +1,41 @@
 #include "communication_command_router.h"
 
-#include "control_service.h"
+#include "command_management_service.h"
 #include "upper_protocol.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
-static chassis_cmd_t last_command;
-static uint8_t       command_count;
-static uint8_t       emergency_stop;
-static uint8_t       line_enabled;
-static uint32_t      cleared_fault_mask;
+static command_velocity_t last_command;
+static uint8_t            command_count;
+static uint8_t            emergency_stop;
+static uint8_t            line_enabled;
+static uint32_t           cleared_fault_mask;
 
-control_command_result_t ControlService_SetCommand(const chassis_cmd_t *command)
+command_result_t CommandManagement_Set(const command_velocity_t *command)
 {
     last_command = *command;
     command_count++;
-    return CONTROL_COMMAND_ACCEPTED;
+    return COMMAND_RESULT_ACCEPTED;
 }
 
-void ControlService_SetEmergencyStop(uint8_t enabled)
+void SafetyManagement_SetEmergencyStop(uint8_t enabled)
 {
     emergency_stop = enabled;
 }
 
-uint8_t ControlService_IsEmergencyStop(void)
+uint8_t SafetyManagement_IsEmergencyStop(void)
 {
     return emergency_stop;
 }
 
-void LineControlService_Enable(uint8_t enabled)
+void LineFollowing_Enable(uint8_t enabled)
 {
     line_enabled = enabled;
 }
 
-void SafetyService_ClearLatchedFaults(uint32_t mask)
+void SafetyManagement_ClearLatchedFaults(uint32_t mask)
 {
     cleared_fault_mask = mask;
 }
@@ -57,14 +57,14 @@ int main(void)
 
     CommunicationCommandRouter_Handle(COMMUNICATION_LINK_UPPER, &frame, 123U);
     assert(command_count == 1U);
-    assert(last_command.source == CONTROL_SOURCE_UPPER);
+    assert(last_command.source == COMMAND_SOURCE_HOST);
     assert(last_command.timestamp_ms == 123U);
     assert(last_command.linear_x == 0.5f);
     assert(last_command.angular_z == -0.25f);
 
     CommunicationCommandRouter_Handle(COMMUNICATION_LINK_ESP12F, &frame, 456U);
     assert(command_count == 2U);
-    assert(last_command.source == CONTROL_SOURCE_ESP12F);
+    assert(last_command.source == COMMAND_SOURCE_ESP12F);
     assert(last_command.timestamp_ms == 456U);
 
     frame            = (protocol_frame_t){.cmd = UPPER_CMD_ESTOP, .payload_len = UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN};

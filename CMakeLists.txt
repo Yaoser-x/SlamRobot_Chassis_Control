@@ -68,8 +68,12 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Five-layer user-maintained sources
 set(F407_APP_SOURCES
+    App/app_imu_calibration.c
+    App/app_line_sensor_calibration.c
+    App/config/robot_config.c
     App/app_init.c
     App/app_isr.c
+    App/app_publish_model.c
     App/tasks/task_debug.c
     App/tasks/task_esp12f.c
     App/tasks/task_imu.c
@@ -108,8 +112,8 @@ set(F407_APP_SOURCES
     App/display/pages/oled_page_calibration.c
     App/display/pages/oled_page_fault.c
     App/display/oled_calibration_view.c
-    App/protocol/uart_callbacks.c
-    App/protocol/esp12f_flash_bridge.c
+    App/adapters/uart_callbacks.c
+    App/adapters/esp12f_flash_bridge.c
 )
 
 set(F407_PLATFORM_SOURCES
@@ -122,59 +126,53 @@ set(F407_PLATFORM_SOURCES
 )
 
 set(F407_SERVICE_SOURCES
-    Service/chassis/chassis_service.c
-    Service/chassis/chassis_maintenance_service.c
-    Service/chassis/chassis_param_sync.c
-    Service/chassis/chassis_target_planner.c
-    Service/chassis/chassis_speed_loop.c
-    Service/chassis/chassis_feedback_guard.c
-    Service/chassis/chassis_output_service.c
-    Service/chassis/chassis_test_mode.c
-    Service/chassis/chassis_snapshot.c
-    Service/diagnostics/task_health_service.c
-    Service/control/control_service.c
-    Service/control/line_control_service.c
-    Service/control/ps2_control_service.c
-    Service/safety/battery_guard.c
-    Service/safety/current_guard.c
-    Service/safety/safety_fault_policy.c
-    Service/safety/safety_service.c
-    Service/safety/post_service.c
-    Service/diagnostics/reset_reason_service.c
-    Service/param/param_service.c
-    Service/param/param_persistence.c
-    Service/param/flash_param.c
-    Service/param/flash_param_codec.c
-    Service/param/flash_param_migration.c
-    Service/param/flash_param_slots.c
-    Service/imu/imu_service.c
-    Service/imu/imu_calibration_service.c
-    Service/sensing/current_sensor_service.c
-    Service/sensing/encoder_service.c
-    Service/telemetry/system_snapshot_service.c
+    Service/motion_control/motion_control_service.c
+    Service/motion_control/internal/motion_maintenance_service.c
+    Service/motion_control/internal/motion_parameter_sync.c
+    Service/motion_control/internal/wheel_target_planner.c
+    Service/motion_control/internal/wheel_speed_control_loop.c
+    Service/motion_control/internal/wheel_feedback_monitor.c
+    Service/motion_control/internal/motor_output_coordinator.c
+    Service/motion_control/internal/motion_test_mode.c
+    Service/motion_control/internal/motion_status_builder.c
+    Service/motion_control/internal/motor_current_limiter.c
+    Service/command_management/command_management_service.c
+    Service/line_following/line_following_service.c
+    Service/teleoperation/teleoperation_service.c
+    Service/safety_management/internal/battery_guard.c
+    Service/safety_management/internal/safety_fault_policy.c
+    Service/safety_management/safety_management_service.c
+    Service/safety_management/post_service.c
+    Service/parameter_management/parameter_management_service.c
+    Service/parameter_management/internal/parameter_management_persistence.c
+    Service/parameter_management/internal/param_persistence.c
+    Service/parameter_management/internal/flash_param.c
+    Service/parameter_management/internal/flash_param_codec.c
+    Service/parameter_management/internal/flash_param_migration.c
+    Service/parameter_management/internal/flash_param_slots.c
+    Service/power_management/power_management_service.c
+    Service/state_estimation/state_estimation_service.c
+    Service/system_monitoring/system_monitoring_service.c
     Service/communication/esp12f_service.c
     Service/communication/upper_uart_service.c
-    Service/communication/communication_command_router.c
-    Service/communication/telemetry_frame_builder.c
+    Service/communication/internal/communication_command_router.c
+    Service/communication/internal/telemetry_frame_builder.c
+    Service/communication/internal/framed_stream_parser.c
+    Service/communication/internal/upper_protocol.c
 )
 
-set(F407_DOMAIN_SOURCES
-    Domain/chassis/chassis_kinematics.c
-    Domain/chassis/chassis_layout.c
-    Domain/control/pid_controller.c
-    Domain/control/relative_yaw_controller.c
-    Domain/control/straight_controller.c
-    Domain/encoder/encoder_math.c
-    Domain/imu/imu_calibration.c
-    Domain/imu/imu_calibration_gate.c
-    Domain/imu/imu_timestamp.c
-    Domain/imu/imu_fusion.c
-    Domain/imu/imu_filter.c
-    Domain/line/line_calibration.c
-    Domain/motor/motor_output_logic.c
-    Domain/motor/motor_reversal_state.c
-    Domain/protocol/framed_stream_parser.c
-    Domain/protocol/upper_protocol.c
+set(F407_ALGORITHM_SOURCES
+    Algorithm/control/wheel_speed_pid_controller.c
+    Algorithm/control/relative_heading_controller.c
+    Algorithm/control/straight_line_controller.c
+    Algorithm/calibration/imu_calibration.c
+    Algorithm/calibration/imu_calibration_guard.c
+    Algorithm/filtering/imu_signal_filter.c
+    Algorithm/estimation/attitude_estimator.c
+    Algorithm/estimation/imu_timestamp_tracker.c
+    Algorithm/calibration/line_sensor_calibration.c
+    Algorithm/kinematics/differential_drive_kinematics.c
+    Algorithm/estimation/wheel_speed_estimator.c
 )
 
 set(F407_BSP_SOURCES
@@ -194,6 +192,9 @@ set(F407_BSP_SOURCES
     BSP/motor/motor_driver.c
     BSP/motor/motor_break.c
     BSP/motor/motor_hw_map.c
+    BSP/motor/internal/chassis_layout.c
+    BSP/motor/internal/motor_output_logic.c
+    BSP/motor/internal/motor_reversal_state.c
     BSP/ps2/ps2_hw.c
     BSP/transport/debug_uart_transport.c
     BSP/transport/esp12f_transport.c
@@ -203,23 +204,18 @@ set(F407_BSP_SOURCES
     BSP/oled/oled_font_data.c
 )
 
-add_library(f407_domain STATIC ${F407_DOMAIN_SOURCES})
+add_library(f407_algorithm STATIC ${F407_ALGORITHM_SOURCES})
 add_library(f407_platform STATIC ${F407_PLATFORM_SOURCES})
 add_library(f407_bsp STATIC ${F407_BSP_SOURCES})
 add_library(f407_service STATIC ${F407_SERVICE_SOURCES})
 add_library(f407_app STATIC ${F407_APP_SOURCES})
 
-target_include_directories(f407_domain PUBLIC
-    Domain/chassis
-    Domain/config
-    Domain/control
-    Domain/encoder
-    Domain/imu
-    Domain/line
-    Domain/model
-    Domain/motor
-    Domain/protocol
-    Domain/safety
+target_include_directories(f407_algorithm PUBLIC
+    Algorithm/control
+    Algorithm/estimation
+    Algorithm/calibration
+    Algorithm/kinematics
+    Algorithm/filtering
 )
 
 target_include_directories(f407_platform
@@ -242,43 +238,55 @@ target_include_directories(f407_bsp
         BSP/oled
         BSP/ps2
         BSP/transport
+    PRIVATE
+        BSP/motor/internal
 )
 
 target_include_directories(f407_service PUBLIC
-    Service/chassis
+    Service/command_management
     Service/communication
-    Service/control
-    Service/diagnostics
-    Service/imu
-    Service/param
-    Service/safety
-    Service/sensing
-    Service/telemetry
+    Service/line_following
+    Service/motion_control
+    Service/parameter_management
+    Service/power_management
+    Service/safety_management
+    Service/state_estimation
+    Service/system_monitoring
+    Service/teleoperation
 )
+target_include_directories(f407_service PRIVATE
+    Service/motion_control/internal
+    Service/parameter_management/internal
+    Service/safety_management/internal
+)
+target_include_directories(f407_service PRIVATE Service/communication/internal)
 
 target_include_directories(f407_app PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     App
+    App/config
     App/tasks
     App/debug
     App/debug/commands
     App/debug/telemetry
     App/display
     App/display/pages
-    App/protocol
+    App/adapters
 )
 
 # CubeMX's freertos.c is the composition root that calls App task entrypoints.
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
+    App/config
     App/tasks
+    Service/communication/internal
 )
 
-target_link_libraries(f407_domain PUBLIC m)
+target_link_libraries(f407_algorithm PUBLIC m)
 target_link_libraries(f407_platform PRIVATE stm32cubemx)
-target_link_libraries(f407_bsp PRIVATE f407_domain f407_platform stm32cubemx)
-target_link_libraries(f407_service PRIVATE f407_domain f407_bsp f407_platform)
-target_link_libraries(f407_app PRIVATE f407_service f407_domain f407_bsp f407_platform stm32cubemx)
+target_link_libraries(f407_bsp PRIVATE f407_algorithm f407_platform stm32cubemx)
+target_link_libraries(f407_service PRIVATE f407_algorithm f407_bsp f407_platform)
+target_link_libraries(f407_app PRIVATE f407_service f407_algorithm f407_bsp f407_platform stm32cubemx)
 
 # Release maintenance authorization is consumed while compiling f407_app.
 target_compile_definitions(f407_app PRIVATE
@@ -286,7 +294,7 @@ target_compile_definitions(f407_app PRIVATE
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    foreach(layer_target f407_domain f407_platform f407_bsp f407_service f407_app)
+    foreach(layer_target f407_algorithm f407_platform f407_bsp f407_service f407_app)
         target_compile_options(${layer_target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endforeach()
 endif()
@@ -301,10 +309,10 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     f407_app
     -Wl,--no-whole-archive
     f407_service
-    f407_domain
+    f407_algorithm
     f407_bsp
     f407_platform
-    f407_domain
+    f407_algorithm
 )
 
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD

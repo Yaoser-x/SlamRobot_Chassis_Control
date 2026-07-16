@@ -1,8 +1,12 @@
 #include "flash_param.h"
+#include "motor_types.h"
 #include "param_service.h"
 
 #include <stdio.h>
 #include <string.h>
+
+_Static_assert(sizeof(flash_param_bundle_t) == 340U, "Beta4 bundle layout changed");
+_Static_assert(FLASH_PARAM_IMAGE_SIZE == 364U, "Beta4 image layout changed");
 
 static uint32_t fake_primask;
 
@@ -32,9 +36,45 @@ static void require_int(int condition, const char *message)
 
 static void make_bundle(flash_param_bundle_t *bundle, float max_linear_mps)
 {
+    memset(bundle, 0, sizeof(*bundle));
     ParamService_Defaults(&bundle->params);
     bundle->params.max_linear_mps = max_linear_mps;
     ImuBmi270Calibration_Default(&bundle->imu_calibration);
+}
+
+static void load_hex_fixture(const char *path, uint8_t *image, size_t image_size)
+{
+    FILE *fixture = fopen(path, "rb");
+    require_int(fixture != NULL, "schema4 golden fixture opens");
+    for (size_t index = 0U; index < image_size; ++index)
+    {
+        unsigned int byte = 0U;
+        require_int(fscanf(fixture, "%2x", &byte) == 1, "schema4 golden has every byte");
+        image[index] = (uint8_t)byte;
+    }
+    require_int(fscanf(fixture, " %*c") == EOF, "schema4 golden has exact image length");
+    (void)fclose(fixture);
+}
+
+static void test_schema4_matches_beta4_golden(const char *fixture_path)
+{
+    uint8_t              encoded[FLASH_PARAM_IMAGE_SIZE];
+    uint8_t              golden[FLASH_PARAM_IMAGE_SIZE];
+    flash_param_bundle_t bundle;
+    flash_param_bundle_t decoded;
+    uint32_t             sequence = 0U;
+
+    make_bundle(&bundle, 0.375f);
+    require_int(FlashParam_EncodeBundle(&bundle, 0x10203040UL, encoded, sizeof(encoded)) == FLASH_PARAM_STATUS_OK,
+                "schema4 fixed-sequence image encodes");
+    load_hex_fixture(fixture_path, golden, sizeof(golden));
+    require_int(memcmp(encoded, golden, sizeof(encoded)) == 0, "schema4 bytes match Beta4 golden");
+
+    memset(&decoded, 0, sizeof(decoded));
+    require_int(FlashParam_DecodeBundle(golden, sizeof(golden), &decoded, &sequence) == FLASH_PARAM_STATUS_OK,
+                "Beta4 golden image decodes");
+    require_int(sequence == 0x10203040UL, "Beta4 golden sequence is preserved");
+    require_int(memcmp(&decoded, &bundle, sizeof(bundle)) == 0, "Beta4 golden payload is preserved");
 }
 
 static void test_codec_roundtrips_valid_params(void)
@@ -236,8 +276,10 @@ static void test_flash_maintenance_brackets_watchdog_on_all_paths(void)
     require_int(FlashParamHost_GetWatchdogMaintenanceExitCount() == 3U, "erase restores normal watchdog window");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    require_int(argc == 2, "schema4 golden fixture path is provided");
+    test_schema4_matches_beta4_golden(argv[1]);
     test_codec_roundtrips_valid_params();
     test_empty_and_corrupt_images_fall_back();
     test_schema2_migrates_bias_to_calibration_once();

@@ -7,12 +7,15 @@
 #include "control_config.h"
 #include "bsp_config.h"
 #include "chassis_service.h"
+#include "command_management_service.h"
 #include "control_service.h"
 #include "encoder_driver.h"
 #include "imu_bmi270.h"
 #include "param_service.h"
-#include "pid_controller.h"
-#include "safety_service.h"
+#include "wheel_speed_pid_controller.h"
+#include "safety_management_service.h"
+#include "state_estimation_service.h"
+#include "power_management_service.h"
 
 static adc_monitor_state_t  fake_adc_state;
 static encoder_state_t      fake_encoder_state;
@@ -56,6 +59,12 @@ uint32_t osKernelGetTickCount(void)
 void ImuBmi270_GetState(imu_bmi270_state_t *state)
 {
     *state = fake_imu_state;
+}
+
+uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
+{
+    *state = fake_imu_state;
+    return 1U;
 }
 
 void MotorDriver_Init(void)
@@ -119,6 +128,11 @@ void ControlService_SetFaultStop(uint8_t enabled)
     fake_fault_stop = (enabled != 0U) ? 1U : 0U;
 }
 
+void SafetyManagement_SetFaultStop(uint8_t enabled)
+{
+    ControlService_SetFaultStop(enabled);
+}
+
 uint8_t ControlService_IsEmergencyStop(void)
 {
     return 0U;
@@ -132,6 +146,26 @@ uint8_t ControlService_IsFaultStop(void)
 uint8_t ControlService_IsMaintenanceLocked(void)
 {
     return fake_maintenance_lock;
+}
+
+uint8_t SafetyManagement_IsMotionAllowed(void)
+{
+    return (fake_fault_stop == 0U && fake_maintenance_lock == 0U) ? 1U : 0U;
+}
+
+uint8_t SafetyManagement_BeginMaintenance(void)
+{
+    if (fake_maintenance_lock != 0U)
+    {
+        return 0U;
+    }
+    fake_maintenance_lock = 1U;
+    return 1U;
+}
+
+void SafetyManagement_EndMaintenance(void)
+{
+    fake_maintenance_lock = 0U;
 }
 
 uint8_t ControlService_GetCommand(chassis_cmd_t *cmd, uint32_t now_ms)
@@ -150,12 +184,40 @@ void ControlService_ClearCommand(void)
     fake_command_valid = 0U;
 }
 
+void CommandManagement_ClearAll(void)
+{
+    ControlService_ClearCommand();
+}
+
+uint8_t CommandManagement_GetActive(command_velocity_t *command, uint32_t now_ms)
+{
+    chassis_cmd_t legacy;
+
+    if (ControlService_GetCommand(&legacy, now_ms) == 0U)
+    {
+        return 0U;
+    }
+    *command = (command_velocity_t){
+        .linear_x     = legacy.linear_x,
+        .angular_z    = legacy.angular_z,
+        .enable       = legacy.enable,
+        .source       = (command_source_t)legacy.source,
+        .timestamp_ms = legacy.timestamp_ms,
+    };
+    return 1U;
+}
+
 uint32_t ControlService_GetMotionRevokeGeneration(void)
 {
     return fake_motion_generation;
 }
 
-void SafetyService_LatchEncoderFeedbackFault(void)
+uint32_t CommandManagement_GetMotionRevokeGeneration(void)
+{
+    return ControlService_GetMotionRevokeGeneration();
+}
+
+void SafetyManagement_LatchEncoderFeedbackFault(void)
 {
     fake_encoder_fault_latch_count++;
     fake_fault_stop = 1U;
@@ -164,6 +226,12 @@ void SafetyService_LatchEncoderFeedbackFault(void)
 void EncoderDriver_GetState(encoder_state_t *state)
 {
     *state = fake_encoder_state;
+}
+
+uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *state)
+{
+    *state = fake_encoder_state;
+    return 1U;
 }
 
 float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
@@ -178,6 +246,12 @@ float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
 void AdcMonitor_GetState(adc_monitor_state_t *state)
 {
     *state = fake_adc_state;
+}
+
+uint32_t PowerManagement_GetStatus(power_management_status_t *state)
+{
+    *state = fake_adc_state;
+    return 1U;
 }
 
 static void require_int(int condition, const char *message)
@@ -366,7 +440,7 @@ static void test_disabled_encoder_invalid_is_ignored(void)
     require_int(fake_encoder_fault_latch_count == 0UL, "disabled encoder invalid is ignored");
 }
 
-static void test_all_remote_sources_share_straight_controller_and_imu_degrade(void)
+static void test_all_remote_sources_share_straight_line_controller_and_imu_degrade(void)
 {
     static const uint8_t sources[] = {
         CONTROL_SOURCE_UPPER,
@@ -486,7 +560,7 @@ int main(void)
     test_zero_motion_feedback_fault_after_150ms_run();
     test_non_run_motor_phase_does_not_false_latch_feedback();
     test_disabled_encoder_invalid_is_ignored();
-    test_all_remote_sources_share_straight_controller_and_imu_degrade();
+    test_all_remote_sources_share_straight_line_controller_and_imu_degrade();
     test_straight_heading_gate_distinguishes_imu_failures();
     test_straight_integrates_gyro_without_settle_delay();
     return 0;

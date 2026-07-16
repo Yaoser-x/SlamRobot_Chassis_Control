@@ -4,19 +4,19 @@
 #include "debug_telemetry_model.h"
 
 #include "adc_monitor.h"
-#include "chassis_service.h"
+#include "motion_control_service.h"
 #include "debug_console_writer.h"
 #include "debug_log_policy.h"
 #include "debug_straight_telemetry.h"
 #include "encoder_driver.h"
-#include "encoder_math.h"
+#include "wheel_speed_estimator.h"
 #include "esp12f_service.h"
 #include "imu_bmi270.h"
 #include "line_uart.h"
 #include "motor_driver.h"
-#include "param_service.h"
-#include "ps2_control_service.h"
-#include "safety_service.h"
+#include "parameter_management_service.h"
+#include "teleoperation_service.h"
+#include "safety_management_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,16 +83,16 @@ static void DebugTelemetry_GetMotorSpeed(uint32_t now_ms, const encoder_state_t 
     float         counts_per_rev = EncoderDriver_GetCountsPerRev();
     param_model_t params;
 
-    (void)ParamService_GetSnapshot(&params);
+    (void)ParameterManagement_GetSnapshot(&params);
 
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         if (motor_log_baseline_valid != 0U)
         {
-            speed_mps[i] = EncoderMath_CountDeltaSpeedMps(state->count[i] - motor_log_last_count[i],
-                                                          dt_ms,
-                                                          counts_per_rev,
-                                                          params.wheel_radius_m);
+            speed_mps[i] = WheelSpeedEstimator_CountDeltaSpeedMps(state->count[i] - motor_log_last_count[i],
+                                                                  dt_ms,
+                                                                  counts_per_rev,
+                                                                  params.wheel_radius_m);
         }
         else
         {
@@ -122,23 +122,23 @@ static void DebugTelemetry_PrintFilteredHeader(void)
 
 static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t field, uint32_t now_ms)
 {
-    adc_monitor_state_t         adc;
-    encoder_state_t             enc;
-    chassis_service_snapshot_t  cs;
-    motor_driver_state_t        motor_state;
-    safety_service_snapshot_t   mon;
-    imu_bmi270_state_t          imu;
-    ps2_control_service_state_t ps2;
-    line_uart_state_t           line;
-    esp12f_service_state_t      esp;
-    float                       motor_log_speed_mps[MOTOR_ID_COUNT];
+    adc_monitor_state_t        adc;
+    encoder_state_t            enc;
+    motion_control_status_t    cs;
+    motor_driver_state_t       motor_state;
+    safety_management_status_t mon;
+    imu_bmi270_state_t         imu;
+    teleoperation_status_t     ps2;
+    line_uart_state_t          line;
+    esp12f_service_state_t     esp;
+    float                      motor_log_speed_mps[MOTOR_ID_COUNT];
 
     /* 惰性获取：仅需要的字段才获取状态快照 */
     switch (field)
     {
         case LOG_FLD_MOTOR:
             EncoderDriver_GetState(&enc);
-            ChassisService_GetState(&cs);
+            (void)MotionControl_GetStatus(&cs);
             MotorDriver_GetState(&motor_state);
             DebugTelemetry_GetMotorSpeed(now_ms, &enc, motor_log_speed_mps);
             pos += (size_t)snprintf(tx + pos,
@@ -218,17 +218,17 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
             break;
 
         case LOG_FLD_ERRORS:
-            SafetyService_GetState(&mon);
+            (void)SafetyManagement_GetStatus(&mon);
             pos += (size_t)snprintf(tx + pos, DEBUG_TELEMETRY_TX_SIZE - pos, "%lu", (unsigned long)mon.error_flags);
             break;
 
         case LOG_FLD_SOURCE:
-            SafetyService_GetState(&mon);
+            (void)SafetyManagement_GetStatus(&mon);
             pos += (size_t)snprintf(tx + pos, DEBUG_TELEMETRY_TX_SIZE - pos, "%u", mon.control_mode);
             break;
 
         case LOG_FLD_PS2:
-            Ps2ControlService_GetState(&ps2);
+            (void)Teleoperation_GetStatus(&ps2);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_TELEMETRY_TX_SIZE - pos,
                                     "%lu,%lu",
@@ -299,11 +299,11 @@ static void DebugTelemetry_CaptureFullSnapshot(uint32_t now_ms, debug_full_log_s
     AdcMonitor_GetState(&snapshot->adc);
     EncoderDriver_GetState(&snapshot->encoder);
     DebugTelemetry_GetMotorSpeed(now_ms, &snapshot->encoder, snapshot->motor_log_speed_mps);
-    ChassisService_GetState(&snapshot->chassis);
+    (void)MotionControl_GetStatus(&snapshot->chassis);
     MotorDriver_GetState(&snapshot->motor);
-    SafetyService_GetState(&snapshot->monitor);
+    (void)SafetyManagement_GetStatus(&snapshot->monitor);
     ImuBmi270_GetState(&snapshot->imu);
-    Ps2ControlService_GetState(&snapshot->ps2);
+    (void)Teleoperation_GetStatus(&snapshot->ps2);
     LineUart_GetState(&snapshot->line);
     Esp12fService_GetState(&snapshot->esp);
 }

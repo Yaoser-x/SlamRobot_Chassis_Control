@@ -1,8 +1,9 @@
 #include "debug_cmd_line.h"
 
-#include "chassis_maintenance_service.h"
+#include "app_line_sensor_calibration.h"
+#include "motion_control_service.h"
 #include "debug_console_writer.h"
-#include "line_control_service.h"
+#include "line_following_service.h"
 #include "line_uart.h"
 
 #include <stdio.h>
@@ -20,13 +21,13 @@
 
 static void DebugCmdLine_PrintStatus(void)
 {
-    static char                  tx[DEBUG_CMD_LINE_TX_SIZE];
-    line_sensor_data_t           sensor;
-    line_control_service_state_t control_state;
-    line_uart_state_t            line_state;
+    static char             tx[DEBUG_CMD_LINE_TX_SIZE];
+    line_sensor_data_t      sensor;
+    line_following_status_t control_state;
+    line_uart_state_t       line_state;
 
     LineUart_GetSensorData(&sensor);
-    LineControlService_GetState(&control_state);
+    (void)LineFollowing_GetStatus(&control_state);
     LineUart_GetState(&line_state);
 
     (void)snprintf(
@@ -71,9 +72,9 @@ static void DebugCmdLine_PrintStatus(void)
 
 static void DebugCmdLine_PrintCalibration(void)
 {
-    line_calibration_t calibration;
+    line_sensor_calibration_t calibration;
 
-    LineControlService_CalibrationGet(&calibration);
+    LineFollowing_CalibrationGet(&calibration);
     LINE_LOG("INFO",
              "linecal ready=0x%02X collecting=%u surface=%u n=%u/%u fail=0x%02X",
              calibration.ready_mask,
@@ -106,12 +107,12 @@ static void DebugCmdLine_PrintCalibration(void)
 
 static void DebugCmdLine_ApplyCalibration(void)
 {
-    if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
+    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
     {
         LINE_LOG("WARN", "linecal apply rejected: chassis not stationary");
         return;
     }
-    if (LineControlService_CalibrationApplyToRam() != 0U)
+    if (LineFollowing_CalibrationApplyToRam() != 0U)
     {
         LINE_LOG("INFO", "linecal applied to RAM; run set save to persist");
     }
@@ -119,7 +120,7 @@ static void DebugCmdLine_ApplyCalibration(void)
     {
         LINE_LOG("WARN", "linecal apply rejected: incomplete or low separation");
     }
-    ChassisMaintenanceService_End();
+    MotionControl_EndMaintenance();
 }
 
 static void DebugCmdLine_HandleCalibration(const char *line)
@@ -133,9 +134,9 @@ static void DebugCmdLine_HandleCalibration(const char *line)
     }
     if ((strcmp(action, "floor") == 0 || strcmp(action, "line") == 0) && samples >= 4U && samples <= 2000U)
     {
-        line_calibration_surface_t surface =
+        line_sensor_calibration_surface_t surface =
             (strcmp(action, "floor") == 0) ? LINE_CALIBRATION_SURFACE_FLOOR : LINE_CALIBRATION_SURFACE_LINE;
-        if (LineControlService_CalibrationBegin(surface, (uint16_t)samples) != 0U)
+        if (AppLineSensorCalibration_Begin(surface, (uint16_t)samples) != 0U)
         {
             LINE_LOG("INFO", "linecal %s collecting %u samples", action, samples);
         }
@@ -150,7 +151,7 @@ static void DebugCmdLine_HandleCalibration(const char *line)
     }
     else if (strcmp(action, "cancel") == 0)
     {
-        LineControlService_CalibrationCancel();
+        LineFollowing_CalibrationCancel();
         LINE_LOG("INFO", "linecal cancelled");
     }
     else
@@ -171,12 +172,12 @@ uint8_t DebugCmdLine_TryHandle(const char *line)
     }
     else if (strcmp(line, "line on") == 0)
     {
-        LineControlService_Enable(1U);
+        LineFollowing_Enable(1U);
         LINE_LOG("INFO", "line tracking enabled");
     }
     else if (strcmp(line, "line off") == 0)
     {
-        LineControlService_Enable(0U);
+        LineFollowing_Enable(0U);
         LINE_LOG("INFO", "line tracking disabled");
     }
     else if (strncmp(line, "linecal ", 8U) == 0)

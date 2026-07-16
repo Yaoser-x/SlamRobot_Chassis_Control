@@ -1,12 +1,11 @@
 #include "debug_cmd_current.h"
 
 #include "adc_monitor.h"
-#include "control_config.h"
-#include "bsp_config.h"
+#include "adc_monitor_config.h"
 #include "chassis_layout.h"
 #include "debug_console_writer.h"
 #include "motor_driver.h"
-#include "safety_service.h"
+#include "safety_management_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,12 +69,12 @@ static uint8_t DebugCmdCurrent_AllEnabledMotorsStopped(void)
 
 void DebugCmdCurrent_PrintCalibrationStatus(void)
 {
-    char                      tx[DEBUG_CMD_CURRENT_TX_SIZE];
-    adc_monitor_state_t       adc_state;
-    safety_service_snapshot_t monitor_state;
+    char                       tx[DEBUG_CMD_CURRENT_TX_SIZE];
+    adc_monitor_state_t        adc_state;
+    safety_management_status_t monitor_state;
 
     AdcMonitor_GetState(&adc_state);
-    SafetyService_GetState(&monitor_state);
+    (void)SafetyManagement_GetStatus(&monitor_state);
     (void)snprintf(tx,
                    sizeof(tx),
                    "ADCCAL cal=%u/%u valid=%u cvalid=%u cmask=0x%02X invalid=0x%08lX raw_n=%u rate_mHz=%lu "

@@ -1,13 +1,12 @@
 #include "app_tasks.h"
 
-#include "control_config.h"
-#include "bsp_config.h"
-#include "chassis_service.h"
-#include "current_sensor_service.h"
-#include "encoder_service.h"
+#include "robot_config.h"
+#include "motion_control_service.h"
+#include "power_management_service.h"
 #include "platform_time.h"
 #include "platform_reset_trace.h"
-#include "task_health_service.h"
+#include "state_estimation_service.h"
+#include "system_monitoring_service.h"
 
 void Task_MotorControl(void *argument)
 {
@@ -18,9 +17,11 @@ void Task_MotorControl(void *argument)
         uint32_t now_ms = PlatformTime_TaskNowMs();
 
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_MOTOR, now_ms);
-        EncoderService_Update(now_ms);
-        CurrentSensorService_UpdateStationary();
-        ChassisService_Step(now_ms);
-        TaskHealthService_DelayUntil(TASK_HEALTH_SERVICE_MOTOR, &next_wake, CHASSIS_CONTROL_PERIOD_MS);
+        StateEstimation_UpdateWheel(now_ms);
+        PowerManagement_UpdateStationary();
+        MotionControl_Step(now_ms);
+        SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_MOTOR,
+                                    &next_wake,
+                                    RobotConfig_GetDefault()->tasks[APP_TASK_MOTOR].period_ms);
     }
 }

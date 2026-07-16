@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+#include "communication_publish_model_types.h"
+#include "communication_config.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -22,9 +25,11 @@ extern "C"
         uint8_t  boot_mode_download;
     } esp12f_service_state_t;
 
-    void Esp12fService_Init(void);
-    void Esp12fService_RestartRx(void);
-    void Esp12fService_Update(void);
+    /** Initialize wireless communication with injected publication periods. */
+    uint8_t Esp12fService_Init(const communication_config_t *config);
+    void    Esp12fService_RestartRx(void);
+    /** Poll wireless RX and publish frames from one App-provided coherent model. */
+    void Esp12fService_Update(const communication_publish_model_t *publish_model);
     void Esp12fService_ResetModule(void);
     void Esp12fService_Isolate(void);
     void Esp12fService_SetDownloadMode(uint8_t enabled);

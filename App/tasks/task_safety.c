@@ -1,16 +1,16 @@
 #include "app_tasks.h"
 
-#include "control_config.h"
-#include "bsp_config.h"
-#include "control_service.h"
-#include "imu_calibration_service.h"
+#include "robot_config.h"
+#include "app_imu_calibration.h"
+#include "app_publish_model.h"
+#include "command_management_service.h"
 #include "platform_time.h"
 #include "platform_watchdog.h"
 #include "post_service.h"
+#include "parameter_management_service.h"
 #include "platform_reset_trace.h"
-#include "safety_service.h"
-#include "task_health_service.h"
-#include "system_snapshot_service.h"
+#include "safety_management_service.h"
+#include "system_monitoring_service.h"
 
 void Task_Safety(void *argument)
 {
@@ -18,22 +18,29 @@ void Task_Safety(void *argument)
     (void)argument;
     for (;;)
     {
-        uint32_t now_ms = PlatformTime_TaskNowMs();
-        uint32_t motor_hb;
+        uint32_t      now_ms = PlatformTime_TaskNowMs();
+        uint32_t      motor_hb;
+        param_model_t params;
 
-        SafetyService_Update();
+        (void)ParameterManagement_GetSnapshot(&params);
+        SafetyManagement_SetCurrentThresholds(params.current_observe_a,
+                                              params.current_fault_a,
+                                              params.current_fault_debounce_ms);
+        SafetyManagement_Update();
         PostService_UpdateRuntime(now_ms);
-        SystemSnapshotService_Update(now_ms);
-        PlatformResetTrace_UpdateControl(ControlService_GetActiveSource(),
-                                         ControlService_IsEmergencyStop(),
-                                         ControlService_IsFaultStop());
+        AppPublishModel_Update(now_ms);
+        PlatformResetTrace_UpdateControl((uint8_t)CommandManagement_GetActiveSource(now_ms),
+                                         SafetyManagement_IsEmergencyStop(),
+                                         SafetyManagement_IsFaultStop());
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_SAFETY, now_ms);
         motor_hb = PlatformResetTrace_GetTaskHeartbeat(RESET_TRACE_TASK_MOTOR);
         if (motor_hb != 0U && (now_ms - motor_hb) <= 200U)
         {
             PlatformWatchdog_Feed();
         }
-        ImuCalibrationService_ProcessPersistence(now_ms);
-        TaskHealthService_DelayUntil(TASK_HEALTH_SERVICE_SAFETY, &next_wake, CHASSIS_ADC_PERIOD_MS);
+        AppImuCalibration_ProcessPersistence(now_ms);
+        SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_SAFETY,
+                                    &next_wake,
+                                    RobotConfig_GetDefault()->tasks[APP_TASK_SAFETY].period_ms);
     }
 }

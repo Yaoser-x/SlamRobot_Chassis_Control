@@ -1,11 +1,11 @@
 #include "app_tasks.h"
 
-#include "control_config.h"
-#include "bsp_config.h"
-#include "line_control_service.h"
+#include "robot_config.h"
+#include "app_line_sensor_calibration.h"
+#include "line_following_service.h"
 #include "line_uart.h"
 #include "platform_time.h"
-#include "task_health_service.h"
+#include "system_monitoring_service.h"
 
 void Task_Line(void *argument)
 {
@@ -15,7 +15,10 @@ void Task_Line(void *argument)
     {
         LineUart_Update();
         LineUart_RequestAnalog();
-        LineControlService_Update();
-        TaskHealthService_DelayUntil(TASK_HEALTH_SERVICE_LINE, &next_wake, CHASSIS_LINE_PERIOD_MS);
+        AppLineSensorCalibration_ProcessRequest();
+        LineFollowing_Update();
+        SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_LINE,
+                                    &next_wake,
+                                    RobotConfig_GetDefault()->tasks[APP_TASK_LINE].period_ms);
     }
 }

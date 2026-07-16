@@ -4,16 +4,15 @@
  */
 #include "oled_ui.h"
 
+#include "robot_config.h"
+#include "app_publish_model.h"
 #include "oled_page_runtime.h"
 #include "oled_page_selfcheck.h"
 #include "oled_page_welcome.h"
 #include "oled_selfcheck.h"
 #include "oled_ui_model.h"
 #include "ssd1306.h"
-#include "system_snapshot_service.h"
 #include "cmsis_os2.h"
-#include "control_config.h"
-#include "bsp_config.h"
 
 /* ================================================================
  *  Self-Check Item Definitions
@@ -118,12 +117,13 @@ void OLED_UI_Init(void)
 
 void OLED_UI_Update(void)
 {
-    system_snapshot_t snapshot;
-    oled_ui_model_t   model;
-    uint32_t          now     = osKernelGetTickCount();
-    uint32_t          elapsed = now - phase_start_tick;
+    communication_publish_model_t snapshot;
+    const app_display_config_t   *display = &RobotConfig_GetDefault()->display;
+    oled_ui_model_t               model;
+    uint32_t                      now     = osKernelGetTickCount();
+    uint32_t                      elapsed = now - phase_start_tick;
 
-    (void)SystemSnapshotService_Get(&snapshot);
+    (void)AppPublishModel_Get(&snapshot);
     if (snapshot.imu.calibration_state != last_calibration_state)
     {
         last_calibration_state        = snapshot.imu.calibration_state;
@@ -141,7 +141,7 @@ void OLED_UI_Update(void)
         case OLED_PHASE_WELCOME:
         {
             OLED_PageWelcome_Draw();
-            if (elapsed >= OLED_WELCOME_DURATION_MS)
+            if (elapsed >= display->welcome_duration_ms)
             {
                 ui_phase            = OLED_PHASE_SELFCHECK;
                 phase_start_tick    = now;
@@ -159,8 +159,7 @@ void OLED_UI_Update(void)
 
         case OLED_PHASE_SELFCHECK:
         {
-            /* Run one self-check item every OLED_SELFCHECK_ITEM_MS */
-            if ((now - selfcheck_item_tick) >= OLED_SELFCHECK_ITEM_MS)
+            if ((now - selfcheck_item_tick) >= display->selfcheck_item_ms)
             {
                 uint8_t result = OLED_UI_RunSelfCheck((selfcheck_item_t)selfcheck_current, &model);
                 selfcheck_results[selfcheck_current] = result;
@@ -185,8 +184,7 @@ void OLED_UI_Update(void)
 
         case OLED_PHASE_NORMAL:
         {
-            /* Error code blink: 500ms period */
-            if ((now - blink_tick) >= OLED_ERROR_BLINK_PERIOD_MS)
+            if ((now - blink_tick) >= display->error_blink_period_ms)
             {
                 blink_tick    = now;
                 blink_visible = (blink_visible == 0U) ? 1U : 0U;

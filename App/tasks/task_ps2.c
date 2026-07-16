@@ -1,11 +1,10 @@
 #include "app_tasks.h"
 
-#include "control_config.h"
-#include "bsp_config.h"
+#include "robot_config.h"
 #include "platform_time.h"
-#include "ps2_control_service.h"
+#include "teleoperation_service.h"
 #include "platform_reset_trace.h"
-#include "task_health_service.h"
+#include "system_monitoring_service.h"
 
 void Task_Ps2(void *argument)
 {
@@ -14,7 +13,9 @@ void Task_Ps2(void *argument)
     for (;;)
     {
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_PS2, PlatformTime_TaskNowMs());
-        Ps2ControlService_Update();
-        TaskHealthService_DelayUntil(TASK_HEALTH_SERVICE_PS2, &next_wake, CHASSIS_PS2_PERIOD_MS);
+        Teleoperation_Update();
+        SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_PS2,
+                                    &next_wake,
+                                    RobotConfig_GetDefault()->tasks[APP_TASK_PS2].period_ms);
     }
 }

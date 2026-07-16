@@ -1,12 +1,11 @@
 #include "debug_cmd_param.h"
 
-#include "adc_monitor.h"
-#include "chassis_maintenance_service.h"
+#include "motion_control_service.h"
 #include "debug_console_parser.h"
 #include "debug_console_writer.h"
-#include "flash_param.h"
-#include "imu_bmi270.h"
-#include "param_service.h"
+#include "parameter_management_service.h"
+#include "power_management_service.h"
+#include "state_estimation_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -33,12 +32,12 @@ static uint8_t DebugCmdParam_SetDirection(const char *line, uint8_t encoder)
     {
         return 0U;
     }
-    if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
+    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "direction change rejected: chassis not stationary");
         return 1U;
     }
-    ParamService_Get(&params);
+    (void)ParameterManagement_GetSnapshot(&params);
     if (encoder != 0U)
     {
         params.encoder_dir[motor] = (int8_t)direction;
@@ -47,11 +46,11 @@ static uint8_t DebugCmdParam_SetDirection(const char *line, uint8_t encoder)
     {
         params.motor_dir[motor] = (int8_t)direction;
     }
-    if (ParamService_Set(&params) != 0U)
+    if (ParameterManagement_Set(&params) != 0U)
     {
         PARAM_LOG("INFO", "%s_dir %s=%d applied in RAM", encoder ? "encoder" : "motor", motor_name, direction);
     }
-    ChassisMaintenanceService_End();
+    MotionControl_EndMaintenance();
     return 1U;
 }
 
@@ -66,12 +65,12 @@ static uint8_t DebugCmdParam_Get(const char *line)
     {
         return 0U;
     }
-    ParamService_Get(&params);
-    if (ParamService_GetFloat(&params, param_name, &float_value) != 0U)
+    (void)ParameterManagement_GetSnapshot(&params);
+    if (ParameterManagement_GetFloat(&params, param_name, &float_value) != 0U)
     {
         PARAM_LOG("INFO", "param %s=%.6f", param_name, float_value);
     }
-    else if (ParamService_GetInt(&params, param_name, &int_value) != 0U)
+    else if (ParameterManagement_GetInt(&params, param_name, &int_value) != 0U)
     {
         PARAM_LOG("INFO", "param %s=%ld", param_name, (long)int_value);
     }
@@ -84,76 +83,70 @@ static uint8_t DebugCmdParam_Get(const char *line)
 
 static uint8_t DebugCmdParam_Save(const char *line)
 {
-    flash_param_bundle_t bundle;
-    param_model_t        params;
-    adc_monitor_state_t  adc_state;
-    flash_param_status_t status;
+    param_model_t             params;
+    power_management_status_t power;
+    imu_bmi270_calibration_t  calibration;
 
     if (strcmp(line, "set save") != 0)
     {
         return 0U;
     }
-    if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
+    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "param save rejected: chassis not stationary");
         return 1U;
     }
-    ParamService_Get(&params);
-    AdcMonitor_GetState(&adc_state);
-    if (adc_state.current_zero_valid != 0U)
+    (void)ParameterManagement_GetSnapshot(&params);
+    (void)PowerManagement_GetStatus(&power);
+    if (power.current_zero_valid != 0U)
     {
         for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
         {
-            params.current_zero_raw[index] = adc_state.current_zero_raw[index];
+            params.current_zero_raw[index] = power.current_zero_raw[index];
         }
         params.current_zero_valid = 1U;
     }
-    (void)ParamService_Set(&params);
-    bundle.params = params;
-    ImuBmi270_GetCalibration(&bundle.imu_calibration);
-    status = FlashParam_SaveBundle(&bundle);
-    if (status == FLASH_PARAM_STATUS_OK)
+    (void)ParameterManagement_Set(&params);
+    StateEstimation_GetImuCalibration(&calibration);
+    ParameterManagement_SetImuCalibration(&calibration);
+    if (ParameterManagement_Save() != 0U)
     {
         PARAM_LOG("INFO", "param saved to flash");
     }
     else
     {
-        PARAM_LOG("ERR", "param save failed: %s", FlashParam_StatusString(status));
+        PARAM_LOG("ERR", "param save failed");
     }
-    ChassisMaintenanceService_End();
+    MotionControl_EndMaintenance();
     return 1U;
 }
 
 static uint8_t DebugCmdParam_Reset(const char *line)
 {
-    flash_param_bundle_t bundle;
-    flash_param_status_t status;
+    imu_bmi270_calibration_t calibration;
 
     if (strcmp(line, "set reset") != 0)
     {
         return 0U;
     }
-    if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
+    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "param reset rejected: chassis not stationary");
         return 1U;
     }
-    ParamService_Defaults(&bundle.params);
-    ImuBmi270Calibration_Default(&bundle.imu_calibration);
-    status = FlashParam_SaveBundle(&bundle);
-    if (status == FLASH_PARAM_STATUS_OK)
+    if (ParameterManagement_ResetAndSaveDefaults() != 0U)
     {
-        ParamService_SetDefaults();
-        (void)ImuBmi270_ApplyCalibration(&bundle.imu_calibration);
-        ImuBmi270_ClearCalibration();
-        AdcMonitor_RequestCurrentZeroCalibration();
+        ImuBmi270Calibration_Default(&calibration);
+        (void)StateEstimation_ApplyImuCalibration(&calibration);
+        StateEstimation_ClearImuCalibration();
+        PowerManagement_RequestCurrentZeroCalibration();
         PARAM_LOG("INFO", "param reset defaults saved safely");
     }
     else
     {
-        PARAM_LOG("ERR", "param reset failed: %s", FlashParam_StatusString(status));
+        PARAM_LOG("ERR", "param reset failed");
     }
-    ChassisMaintenanceService_End();
+    MotionControl_EndMaintenance();
     return 1U;
 }
 
@@ -167,17 +160,18 @@ static uint8_t DebugCmdParam_Set(const char *line)
     {
         return 0U;
     }
-    if (ChassisMaintenanceService_Begin() != CHASSIS_MAINTENANCE_SERVICE_OK)
+    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "param set rejected: chassis not stationary");
         return 1U;
     }
-    ParamService_Get(&params);
-    if (ParamService_SetFloat(&params, param_name, param_value) != 0U && ParamService_Set(&params) != 0U)
+    (void)ParameterManagement_GetSnapshot(&params);
+    if (ParameterManagement_SetFloat(&params, param_name, param_value) != 0U && ParameterManagement_Set(&params) != 0U)
     {
         PARAM_LOG("INFO", "param %s=%.6f", param_name, param_value);
     }
-    else if (ParamService_SetInt(&params, param_name, (int32_t)param_value) != 0U && ParamService_Set(&params) != 0U)
+    else if (ParameterManagement_SetInt(&params, param_name, (int32_t)param_value) != 0U
+             && ParameterManagement_Set(&params) != 0U)
     {
         PARAM_LOG("INFO", "param %s=%ld", param_name, (long)(int32_t)param_value);
     }
@@ -185,7 +179,7 @@ static uint8_t DebugCmdParam_Set(const char *line)
     {
         PARAM_LOG("ERR", "param set rejected");
     }
-    ChassisMaintenanceService_End();
+    MotionControl_EndMaintenance();
     return 1U;
 }
 

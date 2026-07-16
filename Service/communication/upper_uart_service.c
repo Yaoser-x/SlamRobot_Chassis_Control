@@ -1,13 +1,11 @@
 #include "upper_uart_service.h"
 #include "communication_command_router.h"
 #include "framed_stream_parser.h"
-#include "system_snapshot_service.h"
 #include "telemetry_frame_builder.h"
 #include "platform_critical.h"
 #include "platform_time.h"
 #include "upper_uart_transport.h"
 
-#include "control_config.h"
 #include "upper_protocol.h"
 
 #include <string.h>
@@ -38,6 +36,7 @@ static frame_parser_t             upper_parser;
 static uint8_t                    upper_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint32_t                   upper_last_status_ms;
 static uint32_t                   upper_last_rx_timestamp_ms;
+static communication_config_t     upper_config;
 static upper_uart_service_state_t upper_state;
 static uint8_t                    upper_parser_idle_cycles;
 static uint16_t                   upper_last_write_pos;
@@ -257,11 +256,11 @@ static void UpperUartService_PollRx(void)
     }
 }
 
-static void UpperUartService_SendStatus(uint32_t now_ms, const system_snapshot_t *snapshot)
+static void UpperUartService_SendStatus(uint32_t now_ms, const communication_publish_model_t *snapshot)
 {
     uint16_t frame_len;
 
-    if ((now_ms - upper_last_status_ms) < UPPER_UART_STATUS_PERIOD_MS)
+    if ((now_ms - upper_last_status_ms) < upper_config.host_status_period_ms)
     {
         return;
     }
@@ -277,8 +276,14 @@ static void UpperUartService_SendStatus(uint32_t now_ms, const system_snapshot_t
     }
 }
 
-void UpperUartService_Init(void)
+uint8_t UpperUartService_Init(const communication_config_t *config)
 {
+    if (config == 0 || config->host_status_period_ms == 0U || config->host_imu_status_period_ms == 0U
+        || config->host_diagnostic_period_ms == 0U)
+    {
+        return 0U;
+    }
+    upper_config             = *config;
     upper_rx_read_pos        = 0U;
     upper_last_write_pos     = 0U;
     upper_last_status_ms     = 0U;
@@ -292,13 +297,14 @@ void UpperUartService_Init(void)
     upper_last_rx_timestamp_ms = 0U;
     UpperUartService_ResetParser();
     UpperUartTransport_StartRx(upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
+    return 1U;
 }
 
-static void UpperUartService_SendDiagnostic(uint32_t now_ms, const system_snapshot_t *snapshot)
+static void UpperUartService_SendDiagnostic(uint32_t now_ms, const communication_publish_model_t *snapshot)
 {
     uint16_t frame_len;
 
-    if ((now_ms - upper_last_diagnostic_ms) < UPPER_DIAGNOSTIC_PERIOD_MS)
+    if ((now_ms - upper_last_diagnostic_ms) < upper_config.host_diagnostic_period_ms)
     {
         return;
     }
@@ -314,11 +320,11 @@ static void UpperUartService_SendDiagnostic(uint32_t now_ms, const system_snapsh
     }
 }
 
-static void UpperUartService_SendImuStatus(uint32_t now_ms, const system_snapshot_t *snapshot)
+static void UpperUartService_SendImuStatus(uint32_t now_ms, const communication_publish_model_t *snapshot)
 {
     uint16_t frame_len;
 
-    if ((now_ms - upper_last_imu_status_ms) < UPPER_IMU_STATUS_PERIOD_MS)
+    if ((now_ms - upper_last_imu_status_ms) < upper_config.host_imu_status_period_ms)
     {
         return;
     }
@@ -333,16 +339,17 @@ static void UpperUartService_SendImuStatus(uint32_t now_ms, const system_snapsho
     }
 }
 
-void UpperUartService_Update(void)
+void UpperUartService_Update(const communication_publish_model_t *publish_model)
 {
-    system_snapshot_t snapshot = {0};
-    uint32_t          now_ms   = PlatformTime_TaskNowMs();
+    uint32_t now_ms = PlatformTime_TaskNowMs();
 
     UpperUartService_PollRx();
-    (void)SystemSnapshotService_Get(&snapshot);
-    UpperUartService_SendStatus(now_ms, &snapshot);
-    UpperUartService_SendDiagnostic(now_ms, &snapshot);
-    UpperUartService_SendImuStatus(now_ms, &snapshot);
+    if (publish_model != 0)
+    {
+        UpperUartService_SendStatus(now_ms, publish_model);
+        UpperUartService_SendDiagnostic(now_ms, publish_model);
+        UpperUartService_SendImuStatus(now_ms, publish_model);
+    }
 }
 
 void UpperUartService_GetState(upper_uart_service_state_t *state)

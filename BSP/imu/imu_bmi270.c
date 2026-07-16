@@ -4,10 +4,10 @@
 #include "bmi270_device.h"
 #include "bmi270_registers.h"
 #include "imu_calibration.h"
-#include "imu_filter.h"
+#include "imu_signal_filter.h"
 #include "imu_bmi270_fifo.h"
 #include "imu_bmi270_math.h"
-#include "imu_timestamp.h"
+#include "imu_timestamp_tracker.h"
 #include "main.h"
 
 #include <math.h>
@@ -43,8 +43,8 @@ static uint32_t                          imu_next_init_retry_ms;
 static uint32_t                          imu_gyro_auto_cal_next_ms;
 static imu_bmi270_profile_id_t           imu_selected_profile = IMU_BMI270_PROFILE_PERFORMANCE;
 static imu_bmi270_calibration_t          imu_calibration;
-static imu_bmi270_mahony_t               imu_fusion;
-static imu_bmi270_mahony_params_t        imu_fusion_params;
+static imu_bmi270_mahony_t               attitude_estimator;
+static imu_bmi270_mahony_params_t        attitude_estimator_params;
 static volatile uint8_t                  imu_gyro_calibration_active;
 static imu_bmi270_gyro_cal_accumulator_t imu_gyro_cal_accumulator;
 static uint8_t                           imu_gyro_calibration_is_auto;
@@ -360,8 +360,8 @@ void ImuBmi270_Init(void)
     imu_gyro_cal_last_imu_sample_count = 0UL;
     ImuBmi270GyroCalAccumulator_Init(&imu_gyro_cal_accumulator);
     ImuBmi270Calibration_Default(&imu_calibration);
-    imu_fusion_params = ImuBmi270Mahony_DefaultParams();
-    ImuBmi270Mahony_Init(&imu_fusion);
+    attitude_estimator_params = ImuBmi270Mahony_DefaultParams();
+    ImuBmi270Mahony_Init(&attitude_estimator);
     Bmi270Bus_Deselect();
 }
 
@@ -461,7 +461,7 @@ uint8_t ImuBmi270_ConfigNow(void)
     imu_state.filter_initialized = 0U;
     imu_state.profile            = (uint8_t)imu_selected_profile;
     imu_state.init_state         = IMU_BMI270_INIT_STATE_SAMPLING;
-    ImuBmi270Mahony_Init(&imu_fusion);
+    ImuBmi270Mahony_Init(&attitude_estimator);
     if (imu_state.gyro_calibrated == 0U)
     {
         imu_state.gyro_auto_cal_attempts = 0U;
@@ -544,17 +544,17 @@ static void ImuBmi270_ProcessMeasurement(const int16_t accel_raw[3],
 
     if (dt_valid != 0U)
     {
-        ImuBmi270Mahony_Update(&imu_fusion, body_gyro_dps, body_accel_g, dt_s, &imu_fusion_params);
-        if ((imu_fusion.status_flags & IMU_BMI270_FUSION_ACCEL_DEGRADED) != 0UL)
+        ImuBmi270Mahony_Update(&attitude_estimator, body_gyro_dps, body_accel_g, dt_s, &attitude_estimator_params);
+        if ((attitude_estimator.status_flags & IMU_BMI270_FUSION_ACCEL_DEGRADED) != 0UL)
         {
             ImuBmi270_SetQuality(IMU_BMI270_QUALITY_ACCEL_ANOMALY);
         }
-        if ((imu_fusion.status_flags & IMU_BMI270_FUSION_INVALID_DT) != 0UL)
+        if ((attitude_estimator.status_flags & IMU_BMI270_FUSION_INVALID_DT) != 0UL)
         {
             ImuBmi270_SetQuality(IMU_BMI270_QUALITY_ATTITUDE_INVALID);
         }
     }
-    ImuBmi270Quaternion_ToEulerDeg(&imu_fusion.q, euler_deg);
+    ImuBmi270Quaternion_ToEulerDeg(&attitude_estimator.q, euler_deg);
 
     primask = __get_PRIMASK();
     __disable_irq();
@@ -583,27 +583,27 @@ static void ImuBmi270_ProcessMeasurement(const int16_t accel_raw[3],
         for (uint8_t i = 0U; i < 3U; ++i)
         {
             imu_state.accel_g[i] =
-                ImuFilter_LowPass(imu_state.accel_g[i], sensor_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+                ImuSignalFilter_LowPass(imu_state.accel_g[i], sensor_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
             imu_state.body_accel_g[i] =
-                ImuFilter_LowPass(imu_state.body_accel_g[i], body_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+                ImuSignalFilter_LowPass(imu_state.body_accel_g[i], body_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
             imu_state.ros_accel_g[i] =
-                ImuFilter_LowPass(imu_state.ros_accel_g[i], ros_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
+                ImuSignalFilter_LowPass(imu_state.ros_accel_g[i], ros_accel_g[i], BMI270_ACCEL_FILTER_ALPHA);
             imu_state.gyro_filtered_dps[i] =
-                ImuFilter_LowPass(imu_state.gyro_filtered_dps[i], body_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
+                ImuSignalFilter_LowPass(imu_state.gyro_filtered_dps[i], body_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
             imu_state.gyro_dps[i]      = imu_state.gyro_filtered_dps[i];
             imu_state.body_gyro_dps[i] = imu_state.gyro_filtered_dps[i];
             imu_state.ros_gyro_dps[i] =
-                ImuFilter_LowPass(imu_state.ros_gyro_dps[i], ros_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
+                ImuSignalFilter_LowPass(imu_state.ros_gyro_dps[i], ros_gyro_dps[i], BMI270_GYRO_FILTER_ALPHA);
         }
     }
-    imu_state.quaternion[0]           = imu_fusion.q.w;
-    imu_state.quaternion[1]           = imu_fusion.q.x;
-    imu_state.quaternion[2]           = imu_fusion.q.y;
-    imu_state.quaternion[3]           = imu_fusion.q.z;
+    imu_state.quaternion[0]           = attitude_estimator.q.w;
+    imu_state.quaternion[1]           = attitude_estimator.q.x;
+    imu_state.quaternion[2]           = attitude_estimator.q.y;
+    imu_state.quaternion[3]           = attitude_estimator.q.z;
     imu_state.roll_deg                = euler_deg[0];
     imu_state.pitch_deg               = euler_deg[1];
-    imu_state.yaw_deg                 = ImuFilter_WrapAngleDeg(euler_deg[2]);
-    imu_state.accel_correction_weight = imu_fusion.accel_weight;
+    imu_state.yaw_deg                 = ImuSignalFilter_WrapAngleDeg(euler_deg[2]);
+    imu_state.accel_correction_weight = attitude_estimator.accel_weight;
     imu_state.sensor_time             = sensor_time & IMU_BMI270_SENSOR_TIME_MASK;
     imu_state.sensor_time_valid       = sensor_time_valid;
     imu_state.sample_count++;
@@ -941,17 +941,17 @@ void ImuBmi270_ServiceCalibration(uint32_t now_ms, uint8_t stationary)
         imu_state.gyro_auto_cal_state       = IMU_BMI270_GYRO_AUTO_CAL_DONE;
         if (calibrated_q_valid != 0U)
         {
-            imu_fusion.q            = calibrated_q;
-            imu_fusion.integral[0]  = 0.0f;
-            imu_fusion.integral[1]  = 0.0f;
-            imu_fusion.integral[2]  = 0.0f;
-            imu_fusion.accel_weight = 1.0f;
-            imu_fusion.status_flags = 0UL;
-            imu_fusion.initialized  = 1U;
+            attitude_estimator.q            = calibrated_q;
+            attitude_estimator.integral[0]  = 0.0f;
+            attitude_estimator.integral[1]  = 0.0f;
+            attitude_estimator.integral[2]  = 0.0f;
+            attitude_estimator.accel_weight = 1.0f;
+            attitude_estimator.status_flags = 0UL;
+            attitude_estimator.initialized  = 1U;
         }
         else
         {
-            ImuBmi270Mahony_Init(&imu_fusion);
+            ImuBmi270Mahony_Init(&attitude_estimator);
         }
         __set_PRIMASK(primask);
         imu_gyro_calibration_active = 0U;

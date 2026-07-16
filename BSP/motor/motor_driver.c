@@ -1,11 +1,13 @@
 #include "motor_driver.h"
 #include "motor_hw_map.h"
 
-#include "bsp_config.h"
 #include "chassis_layout.h"
+#include "chassis_layout_config.h"
 #include "cmsis_os2.h"
 #include "main.h"
 #include "direction_apply.h"
+#include "motor_config.h"
+#include "motor_reversal_state.h"
 #include "tim.h"
 
 #define MOTOR_PWM_RISE_STEP_PER_CYCLE 15

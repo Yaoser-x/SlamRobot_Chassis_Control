@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+static uint32_t host_critical_depth;
+
 #if defined(__GNUC__)
 __attribute__((weak)) uint32_t osKernelGetTickCount(void)
 {
@@ -23,12 +25,19 @@ __attribute__((weak)) uint32_t HAL_GetTick(void)
 
 platform_critical_state_t PlatformCritical_Enter(void)
 {
-    return 0U;
+    platform_critical_state_t previous = host_critical_depth;
+    host_critical_depth++;
+    return previous;
 }
 
 void PlatformCritical_Exit(platform_critical_state_t state)
 {
-    (void)state;
+    host_critical_depth = state;
+}
+
+uint8_t HostPlatform_CriticalActive(void)
+{
+    return (host_critical_depth != 0UL) ? 1U : 0U;
 }
 
 uint32_t PlatformTime_NowMs(void)

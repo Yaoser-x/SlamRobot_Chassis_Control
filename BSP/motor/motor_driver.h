@@ -4,13 +4,15 @@
 #include <stdint.h>
 
 #include "motor_break.h"
-#include "motor_reversal_state.h"
+#include "motor_state_types.h"
 #include "motor_types.h"
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+#define MOTOR_DRIVER_MAX_PERMILLE 1000
 
     typedef enum
     {

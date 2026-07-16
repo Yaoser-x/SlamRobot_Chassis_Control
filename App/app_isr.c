@@ -1,14 +1,14 @@
 #include "app_isr.h"
 
-#include "imu_service.h"
 #include "main.h"
 #include "platform_task_event.h"
+#include "state_estimation_service.h"
 
 void AppIsr_OnGpioExti(uint16_t pin)
 {
     if (pin == IMU_INT1_Pin)
     {
-        ImuService_OnDataReadyFromIsr();
+        StateEstimation_OnImuDataReadyFromIsr();
         PlatformTaskEvent_SetFromIsr(PLATFORM_TASK_EVENT_IMU_DRDY);
     }
 }

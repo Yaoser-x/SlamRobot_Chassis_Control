@@ -23,10 +23,16 @@ static uint32_t layout_calls_while_masked;
 
 static void EncoderDriverTest_Update(uint32_t now_ms)
 {
-    param_model_t params;
+    param_model_t           params;
+    encoder_driver_config_t config;
 
     (void)ParamService_GetSnapshot(&params);
-    EncoderDriver_Update(now_ms, &params);
+    config.wheel_radius_m = params.wheel_radius_m;
+    for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
+    {
+        config.encoder_dir[index] = params.encoder_dir[index];
+    }
+    EncoderDriver_Update(now_ms, &config);
 }
 
 static void require_int(int condition, const char *message)

@@ -1,8 +1,8 @@
 #include "encoder_driver.h"
 
-#include "bsp_config.h"
+#include "encoder_config.h"
 #include "chassis_layout.h"
-#include "encoder_math.h"
+#include "wheel_speed_estimator.h"
 #include "direction_apply.h"
 #include "tim.h"
 
@@ -39,7 +39,7 @@ static int32_t EncoderDriver_AbsI32(int32_t value)
 
 int32_t EncoderDriver_DiffCount(uint32_t now, uint32_t last, uint32_t period)
 {
-    return EncoderMath_DiffCount(now, last, period);
+    return WheelSpeedEstimator_DiffCount(now, last, period);
 }
 
 float EncoderDriver_GetCountsPerRev(void)
@@ -66,14 +66,14 @@ void EncoderDriver_Init(void)
         (void)HAL_TIM_Encoder_Start(encoder_hw[i].htim, TIM_CHANNEL_ALL);
         __HAL_TIM_SET_COUNTER(encoder_hw[i].htim, 0U);
         last_count[i] = 0U;
-        EncoderMath_SpeedWindowReset(&speed_window[i]);
+        WheelSpeedEstimator_SpeedWindowReset(&speed_window[i]);
     }
     published_encoder_state = (encoder_state_t){0};
     last_update_ms          = 0U;
     has_last_update         = 0U;
 }
 
-void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
+void EncoderDriver_Update(uint32_t now_ms, const encoder_driver_config_t *config)
 {
     encoder_state_t encoder_state;
     uint32_t        now_count[MOTOR_ID_COUNT];
@@ -92,11 +92,11 @@ void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
     float           left_speed_sum  = 0.0f;
     float           right_speed_sum = 0.0f;
 
-    if (params == 0)
+    if (config == 0)
     {
         return;
     }
-    meters_per_rev = TWO_PI_F * params->wheel_radius_m;
+    meters_per_rev = TWO_PI_F * config->wheel_radius_m;
 
     primask = __get_PRIMASK();
     __disable_irq();
@@ -110,7 +110,7 @@ void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
         if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
         {
             delta[i] = DirectionApply_Signed(EncoderDriver_DiffCount(now_count[i], last_count[i], period),
-                                             params->encoder_dir[i]);
+                                             config->encoder_dir[i]);
         }
         else
         {
@@ -129,7 +129,7 @@ void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
             encoder_state.speed_mps[i]     = 0.0f;
             encoder_state.speed_valid[i]   = 0U;
             encoder_state.reject_streak[i] = 0U;
-            EncoderMath_SpeedWindowReset(&speed_window[i]);
+            WheelSpeedEstimator_SpeedWindowReset(&speed_window[i]);
             continue;
         }
 
@@ -141,22 +141,22 @@ void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
             encoder_state.speed_mps[i]     = 0.0f;
             encoder_state.speed_valid[i]   = 0U;
             encoder_state.reject_streak[i] = 0U;
-            EncoderMath_SpeedWindowReset(&speed_window[i]);
+            WheelSpeedEstimator_SpeedWindowReset(&speed_window[i]);
             valid_all = 0U;
         }
         else
         {
-            if (EncoderMath_RecordDeltaOrRebuild(&speed_window[i],
-                                                 delta[i],
-                                                 dt_ms,
-                                                 counts_per_rev,
-                                                 params->wheel_radius_m,
-                                                 CHASSIS_ENCODER_MAX_ABS_MPS,
-                                                 CHASSIS_ENCODER_SPIKE_REJECT_MPS,
-                                                 CHASSIS_ENCODER_FILTER_MIN_SAMPLES,
-                                                 CHASSIS_ENCODER_REBUILD_REJECTS,
-                                                 &encoder_state.reject_streak[i],
-                                                 &encoder_state.window_rebuild_count[i])
+            if (WheelSpeedEstimator_RecordDeltaOrRebuild(&speed_window[i],
+                                                         delta[i],
+                                                         dt_ms,
+                                                         counts_per_rev,
+                                                         config->wheel_radius_m,
+                                                         CHASSIS_ENCODER_MAX_ABS_MPS,
+                                                         CHASSIS_ENCODER_SPIKE_REJECT_MPS,
+                                                         CHASSIS_ENCODER_FILTER_MIN_SAMPLES,
+                                                         CHASSIS_ENCODER_REBUILD_REJECTS,
+                                                         &encoder_state.reject_streak[i],
+                                                         &encoder_state.window_rebuild_count[i])
                 != 0U)
             {
                 encoder_state.delta[i] = delta[i];
@@ -170,10 +170,10 @@ void EncoderDriver_Update(uint32_t now_ms, const param_model_t *params)
                 encoder_state.consecutive_anomalies[i]++;
             }
 
-            encoder_state.speed_mps[i] = EncoderMath_CountDeltaSpeedMps(speed_window[i].delta_sum,
-                                                                        speed_window[i].dt_sum_ms,
-                                                                        counts_per_rev,
-                                                                        params->wheel_radius_m);
+            encoder_state.speed_mps[i] = WheelSpeedEstimator_CountDeltaSpeedMps(speed_window[i].delta_sum,
+                                                                                speed_window[i].dt_sum_ms,
+                                                                                counts_per_rev,
+                                                                                config->wheel_radius_m);
             if (encoder_state.consecutive_anomalies[i] >= CHASSIS_ENCODER_MAX_CONSECUTIVE_ANOMALIES)
             {
                 encoder_state.speed_valid[i] = 0U;

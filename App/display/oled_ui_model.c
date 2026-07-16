@@ -1,9 +1,9 @@
 #include "oled_ui_model.h"
 
-void OLED_UI_ModelBuild(const system_snapshot_t *snapshot,
-                        uint32_t                 now_ms,
-                        uint32_t                 calibration_terminal_since_ms,
-                        oled_ui_model_t         *model)
+void OLED_UI_ModelBuild(const communication_publish_model_t *snapshot,
+                        uint32_t                             now_ms,
+                        uint32_t                             calibration_terminal_since_ms,
+                        oled_ui_model_t                     *model)
 {
     if (snapshot == 0 || model == 0)
     {

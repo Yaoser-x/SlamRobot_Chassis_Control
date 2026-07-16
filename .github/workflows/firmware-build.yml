@@ -139,7 +139,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Five-layer architecture check
-        run: python3 scripts/check_architecture_dependencies.py
+        run: |
+          python3 scripts/check_architecture_dependencies.py
+          python3 scripts/check_naming_conventions.py
+          python3 scripts/check_service_ownership.py
 
       - name: Install clang-format
         run: |
@@ -148,7 +151,7 @@ jobs:
 
       - name: clang-format dry run
         run: |
-          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
+          files=$(git ls-files 'Algorithm/*.c' 'Algorithm/*.h' 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
             echo "$files" | xargs clang-format --dry-run --Werror
           else
@@ -170,7 +173,7 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          files=$(git ls-files 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
+          files=$(git ls-files 'Algorithm/*.c' 'Algorithm/*.h' 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
             cppcheck --enable=warning --error-exitcode=1 \
               --suppress=missingIncludeSystem \

@@ -115,7 +115,7 @@ firmware/esp12f/        ESP12F Arduino 固件源码
 控制源提交命令 → ControlService（优先级仲裁 + 独立超时 + reject-and-stop）
     → ChassisService_Step（每 10ms，motorTask 驱动）
         → ChassisLayout 查表（电机启用/侧别/方向）
-        → ChassisMath_ResolveDifferentialTargets（linear_x/angular_z → 左右轮目标速度）
+        → DifferentialDriveKinematics_ResolveDifferentialTargets（linear_x/angular_z → 左右轮目标速度）
         → 速度斜坡（加速/减速限制 + 方向反转状态机）
         → 直行补偿（轮速耦合 + IMU 航向保持）
         → 轮速等比缩放（一侧达到上限时等比压缩另一侧）
@@ -167,8 +167,8 @@ v_right = linear_x + (angular_z × track_width / 2)
 ```
 
 **函数：**
-- `ChassisMath_ResolveDifferentialTargets(linear_x, angular_z, wheel_base_m, *left_mps, *right_mps)` — 计算左右轮目标速度，线性速度单位 m/s，角速度单位 rad/s
-- `ChassisMath_ControlDt(now_ms, *last_step_ms, *initialized, *dt_s)` — 控制周期时间差计算：
+- `DifferentialDriveKinematics_ResolveDifferentialTargets(linear_x, angular_z, track_width_m, *left_mps, *right_mps)` — 计算左右轮目标速度，线性速度单位 m/s，角速度单位 rad/s
+- `DifferentialDriveKinematics_ControlDt(now_ms, *last_step_ms, *initialized, *dt_s)` — 控制周期时间差计算：
   - 首次调用默认 0.010s
   - 两次调用间隔 >100ms 返回超时（0）
   - 防止零时间间隔（返回 0）
@@ -440,7 +440,7 @@ typedef struct {
    - ESTOP/Fault-Stop → 紧急停止
 6. **测试模式：** 处理开环/raw 指令（需维护锁授权，400ms 租约）
 7. **获取命令：** `ControlService_GetCommand()` → 最高优先级活跃命令
-8. **差速分解：** `ChassisMath_ResolveDifferentialTargets()` → 左右目标速度
+8. **差速分解：** `DifferentialDriveKinematics_ResolveDifferentialTargets()` → 左右目标速度
 9. **速度斜坡：** 带方向感知的增量斜坡（加速/减速同斜率）
 10. **直行补偿：** `StraightController_Step()` 注入方向 trim、轮速与 gyro PI 修正
 11. **轮速等比缩放：** 一侧超限时等比压缩另一侧
@@ -1211,7 +1211,7 @@ typedef struct {
 
 ### 4.6 电池电压监测
 
-**模块：** 集成在 `BSP/adc/adc_monitor.c` 和 `Service/safety/safety_service.c` 中
+**模块：** 集成在 `BSP/adc/adc_monitor.c`、`Service/power_management/` 和 `Service/safety_management/` 中
 
 **采样：**
 - ADC1 通道（VBAT_SENSE, PC4）
@@ -1235,8 +1235,8 @@ typedef struct {
 
 ### 5.1 Upper Protocol V2
 
-**模块：** `App/protocol/upper_protocol.c`
-**头文件：** `App/protocol/upper_protocol.h`
+**模块：** `Service/communication/internal/upper_protocol.c`
+**头文件：** `Service/communication/internal/upper_protocol.h`
 
 **帧格式：**
 ```
@@ -1363,7 +1363,7 @@ typedef struct {
 
 ### 5.4 ESP12F 通信透传桥
 
-**编排模块：** `App/protocol/esp12f_flash_bridge.c`
+**编排模块：** `App/adapters/esp12f_flash_bridge.c`
 **硬件模块：** `BSP/esp12f/esp12f_boot_control.c`、`BSP/transport/uart_bridge_transport.c`
 
 **功能：** PC ↔ ESP8266 双向 UART 透传，用于固件烧录。
@@ -1461,7 +1461,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 5.6 UART 回调分发
 
-**模块：** `App/protocol/uart_callbacks.c`
+**模块：** `App/adapters/uart_callbacks.c`
 
 **目的：** 集中管理所有 HAL UART 回调，按 `huart` 句柄路由到对应模块。
 
@@ -1481,8 +1481,8 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 6.1 系统错误体系
 
-**模块：** `Service/safety/safety_service.c`
-**头文件：** `Service/safety/safety_service.h`
+**模块：** `Service/safety_management/safety_management_service.c`
+**头文件：** `Service/safety_management/safety_management_service.h`
 
 **19 个错误位定义：**
 
@@ -1513,7 +1513,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 6.2 SafetyService 健康聚合
 
-**模块：** `Service/safety/safety_service.c`（~537 行）
+**模块：** `Service/safety_management/safety_management_service.c`
 
 **SafetyService_Update() 每 20ms（safetyTask）执行流程：**
 
@@ -1755,7 +1755,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 8.1 运行时参数存储（ParamService）
 
-**模块：** `Service/param/param_service.c`（~313 行）
+**模块：** `Service/parameter_management/parameter_management_service.c`
 
 **核心数据结构（50+ 字段）：**
 
@@ -1937,7 +1937,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 7. 获取命令：ControlService_GetCommand() → 最高优先级活跃命令
 
-8. 差速分解：ChassisMath_ResolveDifferentialTargets(lx, az, track, &left, &right)
+8. 差速分解：DifferentialDriveKinematics_ResolveDifferentialTargets(lx, az, track, &left, &right)
 
 9. 速度斜坡：左右目标速度分别渐进（加速度/减速度同斜率）
    方向反转时：降到零 → 反制动 → 相位切换 → 反加速

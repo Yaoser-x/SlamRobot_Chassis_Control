@@ -1,15 +1,14 @@
 #include "adc_monitor.h"
-#include "bsp_config.h"
 
 #include "adc.h"
-#include "bsp_config.h"
-#include "control_config.h"
+#include "adc_monitor_config.h"
 #include "chassis_layout.h"
 #include "tim.h"
 
 #include <string.h>
 
 static uint16_t            adc_dma_buffer[ADC_MONITOR_CHANNEL_COUNT];
+static uint32_t            adc_update_period_ms;
 static volatile uint16_t   adc_sample_snapshot[ADC_MONITOR_CHANNEL_COUNT];
 static volatile uint16_t   adc_window_latest_raw[MOTOR_ID_COUNT];
 static volatile uint32_t   adc_window_raw_sum[MOTOR_ID_COUNT];
@@ -293,6 +292,11 @@ void AdcMonitor_Init(void)
     }
 }
 
+void AdcMonitor_SetUpdatePeriodMs(uint32_t period_ms)
+{
+    adc_update_period_ms = period_ms;
+}
+
 void AdcMonitor_Update(void)
 {
     /* Called only by safetyTask. Keep its sizeable snapshot workspace out of the
@@ -391,9 +395,9 @@ void AdcMonitor_Update(void)
     next_state.current_zero_sample_count = zero_sample_count;
     next_state.raw_sample_count          = AdcMonitor_ClampU16(raw_sample_count);
     next_state.missed_window_count       = adc_state.missed_window_count;
-    if (CHASSIS_ADC_PERIOD_MS > 0U)
+    if (adc_update_period_ms > 0U)
     {
-        next_state.sample_rate_hz_milli = (uint32_t)((raw_sample_count * 1000000UL) / CHASSIS_ADC_PERIOD_MS);
+        next_state.sample_rate_hz_milli = (uint32_t)((raw_sample_count * 1000000UL) / adc_update_period_ms);
     }
     if (samples_ready != 0U)
     {

@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LAYERS = ("App", "Service", "Domain", "BSP", "Platform")
+LAYERS = ("App", "Service", "Algorithm", "Domain", "BSP", "Platform")
 SOURCE_SUFFIXES = {".c", ".h"}
 INCLUDE = re.compile(r"^\s*#\s*include\b", re.MULTILINE)
 STATIC_FUNCTION = re.compile(

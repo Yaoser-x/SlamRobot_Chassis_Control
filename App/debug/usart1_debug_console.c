@@ -1,8 +1,8 @@
 #include "usart1_debug_console.h"
 
-#include "chassis_service.h"
+#include "motion_control_service.h"
 #include "cmsis_os2.h"
-#include "control_service.h"
+#include "command_management_service.h"
 #include "debug_maintenance_policy.h"
 #include "debug_telemetry.h"
 #include "debug_console_writer.h"
@@ -17,6 +17,7 @@
 #include "debug_system_status.h"
 #include "esp12f_flash_bridge.h"
 #include "platform_reset_trace.h"
+#include "safety_management_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -61,12 +62,12 @@ static char                       rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t                    rx_len;
 static uint8_t                    debug_velocity_enabled;
 static uint32_t                   debug_velocity_generation;
-static chassis_cmd_t              debug_velocity_cmd;
+static command_velocity_t         debug_velocity_cmd;
 static debug_maintenance_policy_t maintenance_policy;
 
 static uint8_t DebugConsole_MotorTestAllowed(void)
 {
-    if (ControlService_IsEmergencyStop() != 0U || ControlService_IsFaultStop() != 0U)
+    if (SafetyManagement_IsEmergencyStop() != 0U || SafetyManagement_IsFaultStop() != 0U)
     {
         Usart1DebugConsole_RevokeMaintenanceAuthorization();
         return 0U;
@@ -169,10 +170,10 @@ void Usart1DebugConsole_Init(void)
 {
     rx_len                    = 0U;
     debug_velocity_enabled    = 0U;
-    debug_velocity_generation = ControlService_GetMotionRevokeGeneration();
+    debug_velocity_generation = CommandManagement_GetMotionRevokeGeneration();
     DebugMaintenancePolicy_Init(&maintenance_policy);
     DebugTelemetry_Init();
-    debug_velocity_cmd = (chassis_cmd_t){0};
+    debug_velocity_cmd = (command_velocity_t){0};
     DebugUartTransport_Init();
     DebugConsole_Write("\r\nF407 V2 chassis firmware\r\n");
     DebugSystemStatus_PrintResetFlags();
@@ -210,8 +211,8 @@ void Usart1DebugConsole_RevokeMaintenanceAuthorization(void)
 {
     DebugMaintenancePolicy_Revoke(&maintenance_policy);
     debug_velocity_enabled = 0U;
-    ChassisService_CancelTestMode();
-    ControlService_ClearSource(CONTROL_SOURCE_DEBUG);
+    MotionControl_CancelTestMode();
+    CommandManagement_ClearSource(COMMAND_SOURCE_DEBUG);
 }
 
 void DebugConsole_RunTask(void *argument)
@@ -222,7 +223,7 @@ void DebugConsole_RunTask(void *argument)
         uint32_t now_ms = osKernelGetTickCount();
 
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_DEBUG, now_ms);
-        if (ControlService_IsEmergencyStop() != 0U || ControlService_IsFaultStop() != 0U)
+        if (SafetyManagement_IsEmergencyStop() != 0U || SafetyManagement_IsFaultStop() != 0U)
         {
             Usart1DebugConsole_RevokeMaintenanceAuthorization();
         }
@@ -230,7 +231,7 @@ void DebugConsole_RunTask(void *argument)
         {
             if (DEBUG_CONSOLE_RELEASE_REQUIRES_ARM != 0U)
             {
-                ChassisService_CancelTestMode();
+                MotionControl_CancelTestMode();
             }
         }
         if (Esp12fFlashBridge_IsActive() != 0U)
@@ -241,7 +242,7 @@ void DebugConsole_RunTask(void *argument)
 
         DebugConsole_PollRx();
 
-        if (debug_velocity_enabled != 0U && debug_velocity_generation != ControlService_GetMotionRevokeGeneration())
+        if (debug_velocity_enabled != 0U && debug_velocity_generation != CommandManagement_GetMotionRevokeGeneration())
         {
             Usart1DebugConsole_RevokeMaintenanceAuthorization();
             LOG_WARN("velocity command requires a new local command");
@@ -249,8 +250,8 @@ void DebugConsole_RunTask(void *argument)
         else if (debug_velocity_enabled != 0U)
         {
             debug_velocity_cmd.timestamp_ms = now_ms;
-            if (ControlService_SetCommandForGeneration(&debug_velocity_cmd, debug_velocity_generation)
-                != CONTROL_COMMAND_ACCEPTED)
+            if (CommandManagement_SetForGeneration(&debug_velocity_cmd, debug_velocity_generation)
+                != COMMAND_RESULT_ACCEPTED)
             {
                 debug_velocity_enabled = 0U;
                 LOG_WARN("velocity command stopped");

@@ -1,9 +1,9 @@
 #include "app_tasks.h"
 
-#include "control_config.h"
-#include "bsp_config.h"
+#include "robot_config.h"
+#include "app_publish_model.h"
 #include "platform_time.h"
-#include "task_health_service.h"
+#include "system_monitoring_service.h"
 #include "upper_uart_service.h"
 
 void Task_RpiComm(void *argument)
@@ -12,7 +12,12 @@ void Task_RpiComm(void *argument)
     (void)argument;
     for (;;)
     {
-        UpperUartService_Update();
-        TaskHealthService_DelayUntil(TASK_HEALTH_SERVICE_RPI, &next_wake, UPPER_UART_TASK_PERIOD_MS);
+        communication_publish_model_t publish_model;
+
+        (void)AppPublishModel_Get(&publish_model);
+        UpperUartService_Update(&publish_model);
+        SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_HOST,
+                                    &next_wake,
+                                    RobotConfig_GetDefault()->tasks[APP_TASK_HOST].period_ms);
     }
 }

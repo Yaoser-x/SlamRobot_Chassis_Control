@@ -14,8 +14,8 @@ static void require_int(int condition, const char *message)
 
 int main(void)
 {
-    system_snapshot_t snapshot = {0};
-    oled_ui_model_t   model;
+    communication_publish_model_t snapshot = {0};
+    oled_ui_model_t               model;
 
     snapshot.safety.battery_voltage             = 12.4f;
     snapshot.safety.error_flags                 = 0x1234U;

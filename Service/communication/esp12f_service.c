@@ -1,12 +1,10 @@
 #include "esp12f_service.h"
 #include "communication_command_router.h"
 #include "framed_stream_parser.h"
-#include "system_snapshot_service.h"
 #include "telemetry_frame_builder.h"
 #include "platform_time.h"
 #include "esp12f_transport.h"
 
-#include "control_config.h"
 #include "upper_protocol.h"
 
 #define ESP12F_RX_RING_SIZE            128U
@@ -23,6 +21,7 @@ static uint32_t               esp12f_last_status_ms;
 static uint8_t                esp12f_diagnostic_tx_frame[UPPER_PROTOCOL_MAX_FRAME];
 static uint32_t               esp12f_last_diagnostic_ms;
 static esp12f_service_state_t esp12f_state;
+static communication_config_t esp12f_config;
 static uint8_t                esp12f_isolated;
 
 static void Esp12fService_ResetParser(void)
@@ -65,11 +64,11 @@ static void Esp12fService_PollRx(void)
     }
 }
 
-static void Esp12fService_SendStatus(uint32_t now_ms, const system_snapshot_t *snapshot)
+static void Esp12fService_SendStatus(uint32_t now_ms, const communication_publish_model_t *snapshot)
 {
     uint16_t frame_len;
 
-    if ((now_ms - esp12f_last_status_ms) < ESP12F_STATUS_PERIOD_MS)
+    if ((now_ms - esp12f_last_status_ms) < esp12f_config.esp12f_status_period_ms)
     {
         return;
     }
@@ -97,11 +96,12 @@ static void Esp12fService_SendStatus(uint32_t now_ms, const system_snapshot_t *s
     }
 }
 
-static void Esp12fService_SendDiagnostic(uint32_t now_ms, const system_snapshot_t *snapshot)
+static void Esp12fService_SendDiagnostic(uint32_t now_ms, const communication_publish_model_t *snapshot)
 {
     uint16_t frame_len;
 
-    if ((now_ms - esp12f_last_diagnostic_ms) < UPPER_DIAGNOSTIC_PERIOD_MS || Esp12fTransport_IsTxReady() == 0U)
+    if ((now_ms - esp12f_last_diagnostic_ms) < esp12f_config.host_diagnostic_period_ms
+        || Esp12fTransport_IsTxReady() == 0U)
     {
         return;
     }
@@ -117,8 +117,13 @@ static void Esp12fService_SendDiagnostic(uint32_t now_ms, const system_snapshot_
     }
 }
 
-void Esp12fService_Init(void)
+uint8_t Esp12fService_Init(const communication_config_t *config)
 {
+    if (config == 0 || config->esp12f_status_period_ms == 0U || config->host_diagnostic_period_ms == 0U)
+    {
+        return 0U;
+    }
+    esp12f_config                     = *config;
     esp12f_isolated                   = 0U;
     esp12f_rx_head                    = 0U;
     esp12f_rx_tail                    = 0U;
@@ -128,6 +133,7 @@ void Esp12fService_Init(void)
     esp12f_state.last_rx_timestamp_ms = 0U;
     Esp12fService_SetDownloadMode(0U);
     Esp12fService_RestartRx();
+    return 1U;
 }
 
 void Esp12fService_RestartRx(void)
@@ -138,10 +144,9 @@ void Esp12fService_RestartRx(void)
     Esp12fTransport_StartRx(&esp12f_rx_byte);
 }
 
-void Esp12fService_Update(void)
+void Esp12fService_Update(const communication_publish_model_t *publish_model)
 {
-    system_snapshot_t snapshot = {0};
-    uint32_t          now_ms   = PlatformTime_TaskNowMs();
+    uint32_t now_ms = PlatformTime_TaskNowMs();
 
     if (esp12f_isolated != 0U)
     {
@@ -155,9 +160,11 @@ void Esp12fService_Update(void)
         Esp12fService_ResetParser();
     }
     Esp12fService_PollRx();
-    (void)SystemSnapshotService_Get(&snapshot);
-    Esp12fService_SendStatus(now_ms, &snapshot);
-    Esp12fService_SendDiagnostic(now_ms, &snapshot);
+    if (publish_model != 0)
+    {
+        Esp12fService_SendStatus(now_ms, publish_model);
+        Esp12fService_SendDiagnostic(now_ms, publish_model);
+    }
 }
 
 void Esp12fService_ResetModule(void)

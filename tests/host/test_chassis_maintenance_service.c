@@ -5,6 +5,8 @@
 #include "control_service.h"
 #include "encoder_driver.h"
 #include "motor_driver.h"
+#include "safety_management_service.h"
+#include "state_estimation_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,10 +40,20 @@ uint8_t ControlService_BeginMaintenance(void)
     return 1U;
 }
 
+uint8_t SafetyManagement_BeginMaintenance(void)
+{
+    return ControlService_BeginMaintenance();
+}
+
 void ControlService_EndMaintenance(void)
 {
     fake_lock = 0U;
     end_count++;
+}
+
+void SafetyManagement_EndMaintenance(void)
+{
+    ControlService_EndMaintenance();
 }
 
 uint8_t ControlService_IsMaintenanceLocked(void)
@@ -55,15 +67,30 @@ void ChassisService_CancelTestMode(void)
     cancel_count++;
 }
 
+void MotionControl_CancelTestMode(void)
+{
+    ChassisService_CancelTestMode();
+}
+
 void ChassisService_EmergencyStop(void)
 {
     require_int(fake_lock != 0U, "maintenance locks before chassis stop");
     emergency_stop_count++;
 }
 
+void MotionControl_EmergencyStop(void)
+{
+    ChassisService_EmergencyStop();
+}
+
 uint8_t ChassisService_IsStepActive(void)
 {
     return fake_control_step_active;
+}
+
+uint8_t MotionControl_IsStepActive(void)
+{
+    return ChassisService_IsStepActive();
 }
 
 void MotorDriver_StopAll(motor_stop_mode_t mode)
@@ -76,6 +103,17 @@ void MotorDriver_StopAll(motor_stop_mode_t mode)
 void EncoderDriver_GetState(encoder_state_t *state)
 {
     *state = fake_encoder;
+}
+
+uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *state)
+{
+    *state = (state_estimation_wheel_status_t){0};
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+        state->speed_mps[i]   = fake_encoder.speed_mps[i];
+        state->speed_valid[i] = fake_encoder.speed_valid[i];
+    }
+    return 1U;
 }
 
 void MotorDriver_GetState(motor_driver_state_t *state)
@@ -110,8 +148,8 @@ static void test_success_holds_lock_until_end(void)
     reset_fake();
     require_int(ChassisMaintenanceService_Begin() == CHASSIS_MAINTENANCE_SERVICE_OK, "stationary maintenance begins");
     require_int(fake_lock != 0U, "successful maintenance holds lock");
-    require_int(cancel_count == 1U && emergency_stop_count == 1U && motor_stop_count == 1U,
-                "maintenance cancels every output path");
+    require_int(cancel_count == 1U && emergency_stop_count == 1U && motor_stop_count == 0U,
+                "maintenance stops through the Motion output owner");
     ChassisMaintenanceService_End();
     require_int(fake_lock == 0U && end_count == 1U, "maintenance end releases lock once");
 }
