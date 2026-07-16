@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "line_uart.h"
+#include "line_sensor_driver.h"
 #include "param_service.h"
 #include "usart.h"
 
@@ -93,26 +93,26 @@ static void require_int(int condition, const char *message)
 
 static void test_nonblocking_tx_busy_and_complete(void)
 {
-    line_uart_state_t state;
+    line_sensor_driver_state_t state;
 
-    LineUart_Init();
+    LineSensorDriver_Init();
     require_int(rx_start_count == 1U, "rx dma starts");
 
-    LineUart_InitSensor();
-    LineUart_GetState(&state);
+    LineSensorDriver_InitSensor();
+    LineSensorDriver_GetState(&state);
     require_int(tx_it_count == 1U, "init sensor uses interrupt tx");
     require_int(last_tx_byte == 0x00U, "init sensor byte");
     require_int(state.tx_busy != 0U, "tx busy after async start");
     require_int(state.tx_frames == 1U, "tx frame count after init");
 
-    LineUart_RequestAnalog();
-    LineUart_GetState(&state);
+    LineSensorDriver_RequestAnalog();
+    LineSensorDriver_GetState(&state);
     require_int(tx_it_count == 1U, "busy request does not start another tx");
     require_int(state.tx_busy_drops == 1U, "busy drop counted");
 
-    LineUart_OnTxCplt();
-    LineUart_RequestAnalog();
-    LineUart_GetState(&state);
+    LineSensorDriver_OnTxCplt();
+    LineSensorDriver_RequestAnalog();
+    LineSensorDriver_GetState(&state);
     require_int(tx_it_count == 2U, "request starts after complete");
     require_int(last_tx_byte == LINE_SENSOR_CMD_ANALOG, "analog query byte");
     require_int(state.tx_frames == 2U, "tx frame count after query");
@@ -120,21 +120,21 @@ static void test_nonblocking_tx_busy_and_complete(void)
 
 static void test_tx_failure_and_uart_error_restart_dma(void)
 {
-    line_uart_state_t state;
-    uint32_t          rx_before;
+    line_sensor_driver_state_t state;
+    uint32_t                   rx_before;
 
-    LineUart_OnTxCplt();
+    LineSensorDriver_OnTxCplt();
     next_tx_status = HAL_ERROR;
-    LineUart_RequestAnalog();
-    LineUart_GetState(&state);
+    LineSensorDriver_RequestAnalog();
+    LineSensorDriver_GetState(&state);
     require_int(state.tx_failures == 1U, "tx failure counted");
     require_int(state.tx_busy == 0U, "tx failure leaves tx idle");
     next_tx_status = HAL_OK;
 
     rx_before           = rx_start_count;
     huart4.Instance->SR = UART_FLAG_ORE | UART_FLAG_NE | UART_FLAG_FE | UART_FLAG_PE;
-    LineUart_OnUartError();
-    LineUart_GetState(&state);
+    LineSensorDriver_OnUartError();
+    LineSensorDriver_GetState(&state);
     require_int(dma_stop_count == 1U, "uart error stops dma");
     require_int(rx_start_count == rx_before + 1U, "uart error restarts dma");
     require_int(state.uart_errors == 1U, "uart error counted");
@@ -166,8 +166,8 @@ static void test_rx_frame_still_parses_after_restart(void)
     }
     fake_tick                     = 1234U;
     huart4.hdmarx->Instance->NDTR = (uint32_t)(rx_size - LINE_SENSOR_FRAME_LEN);
-    LineUart_Update();
-    require_int(LineUart_GetSensorData(&data) != 0U, "line frame valid");
+    LineSensorDriver_Update();
+    require_int(LineSensorDriver_GetSensorData(&data) != 0U, "line frame valid");
     require_int(data.timestamp_ms == 1234U, "line timestamp");
     require_int(data.analog[7] == 107U, "line analog channel");
 
@@ -183,7 +183,7 @@ static void test_rx_frame_still_parses_after_restart(void)
             frame[5U + (ch * 2U)]         = (uint8_t)(raw >> 8);
         }
         require_int(ParamService_Set(&params) != 0U, "active-high polarity accepted");
-        LineUart_SetThresholdConfig(params.line_threshold_raw, params.line_active_low);
+        LineSensorDriver_SetThresholdConfig(params.line_threshold_raw, params.line_active_low);
         checksum_sum = 0U;
         for (uint8_t i = 2U; i < 20U; ++i)
         {
@@ -196,8 +196,8 @@ static void test_rx_frame_still_parses_after_restart(void)
         }
         fake_tick++;
         huart4.hdmarx->Instance->NDTR = (uint32_t)(rx_size - (2U * LINE_SENSOR_FRAME_LEN));
-        LineUart_Update();
-        (void)LineUart_GetSensorData(&data);
+        LineSensorDriver_Update();
+        (void)LineSensorDriver_GetSensorData(&data);
         require_int(data.state[0] == 1U && data.state[1] == 0U,
                     "runtime active-high polarity is applied in one mapping layer");
     }

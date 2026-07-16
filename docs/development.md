@@ -227,7 +227,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | ADC/电流/电压 | ✅ 完成 | 五通道 DMA 采样 |
 | BMI270 IMU | ✅ 完成 | 配置表/校准/姿态估计/诊断 |
 | PS2 手柄 | ✅ 完成 | bit-bang 协议/宏指令/巡线切换 |
-| ESP12F 协议 | ✅ 完成 | upper_protocol 帧协议通信 + 烧录透传桥 |
+| ESP12F 协议 | ✅ 完成 | robot_link_protocol 帧协议通信 + 烧录透传桥 |
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
 | POST/参数持久化 | ✅ 基础完成 | 上电 POST、ParamService、Flash 镜像、`get/set/set save/set reset` |

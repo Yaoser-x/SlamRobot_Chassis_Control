@@ -1,6 +1,6 @@
 #include "wheel_feedback_monitor.h"
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 
 static float WheelFeedbackMonitor_Abs(float value)
 {
@@ -48,7 +48,7 @@ uint8_t WheelFeedbackMonitor_DetectFault(wheel_feedback_monitor_t              *
     }
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)index) == 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)index) == 0U)
         {
             guard->no_motion_active[index] = 0U;
             continue;

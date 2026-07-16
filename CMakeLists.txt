@@ -68,22 +68,24 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Five-layer user-maintained sources
 set(F407_APP_SOURCES
-    App/app_imu_calibration.c
-    App/app_line_sensor_calibration.c
     App/config/robot_config.c
-    App/app_init.c
-    App/app_isr.c
-    App/app_publish_model.c
     App/tasks/task_debug.c
-    App/tasks/task_esp12f.c
     App/tasks/task_imu.c
-    App/tasks/task_led.c
-    App/tasks/task_line.c
     App/tasks/task_motor.c
     App/tasks/task_oled.c
     App/tasks/task_ps2.c
     App/tasks/task_safety.c
     App/tasks/task_upper_comm.c
+)
+
+set(F407_APP_ADAPTER_SOURCES
+    App/app_imu_calibration.c
+    App/app_line_sensor_calibration.c
+    App/app_init.c
+    App/app_isr.c
+    App/tasks/task_esp12f.c
+    App/tasks/task_led.c
+    App/tasks/task_line.c
     App/debug/debug_maintenance_policy.c
     App/debug/debug_log_policy.c
     App/debug/debug_straight_telemetry.c
@@ -139,10 +141,10 @@ set(F407_SERVICE_SOURCES
     Service/command_management/command_management_service.c
     Service/line_following/line_following_service.c
     Service/teleoperation/teleoperation_service.c
-    Service/safety_management/internal/battery_guard.c
-    Service/safety_management/internal/safety_fault_policy.c
+    Service/safety_management/internal/battery_voltage_monitor.c
+    Service/safety_management/internal/fault_stop_policy.c
     Service/safety_management/safety_management_service.c
-    Service/safety_management/post_service.c
+    Service/safety_management/internal/power_on_self_test.c
     Service/parameter_management/parameter_management_service.c
     Service/parameter_management/internal/parameter_management_persistence.c
     Service/parameter_management/internal/param_persistence.c
@@ -153,12 +155,13 @@ set(F407_SERVICE_SOURCES
     Service/power_management/power_management_service.c
     Service/state_estimation/state_estimation_service.c
     Service/system_monitoring/system_monitoring_service.c
-    Service/communication/esp12f_service.c
-    Service/communication/upper_uart_service.c
-    Service/communication/internal/communication_command_router.c
-    Service/communication/internal/telemetry_frame_builder.c
+    Service/communication/wireless_communication_service.c
+    Service/communication/host_communication_service.c
+    Service/communication/internal/remote_command_dispatcher.c
+    Service/communication/internal/telemetry_encoder.c
+    Service/communication/internal/communication_publish_model.c
     Service/communication/internal/framed_stream_parser.c
-    Service/communication/internal/upper_protocol.c
+    Service/communication/internal/robot_link_protocol.c
 )
 
 set(F407_ALGORITHM_SOURCES
@@ -167,39 +170,40 @@ set(F407_ALGORITHM_SOURCES
     Algorithm/control/straight_line_controller.c
     Algorithm/calibration/imu_calibration.c
     Algorithm/calibration/imu_calibration_guard.c
-    Algorithm/filtering/imu_signal_filter.c
-    Algorithm/estimation/attitude_estimator.c
-    Algorithm/estimation/imu_timestamp_tracker.c
     Algorithm/calibration/line_sensor_calibration.c
     Algorithm/kinematics/differential_drive_kinematics.c
-    Algorithm/estimation/wheel_speed_estimator.c
 )
 
 set(F407_BSP_SOURCES
-    BSP/adc/adc_monitor.c
+    BSP/adc/power_adc_driver.c
     BSP/diagnostics/i2c_bus_diagnostic.c
-    BSP/encoder/encoder_driver.c
+    BSP/encoder/wheel_encoder_driver.c
+    BSP/encoder/internal/wheel_speed_filter.c
     BSP/esp12f/esp12f_boot_control.c
     BSP/flash/flash_storage.c
-    BSP/imu/imu_bmi270.c
+    BSP/imu/bmi270_driver.c
+    BSP/imu/internal/bmi270_attitude_filter.c
+    BSP/imu/internal/bmi270_calibration.c
+    BSP/imu/internal/bmi270_signal_filter.c
+    BSP/imu/internal/bmi270_timestamp.c
     BSP/imu/bmi270_bus.c
     BSP/imu/bmi270_device.c
     BSP/imu/imu_bmi270_config.c
     BSP/imu/imu_bmi270_fifo.c
     BSP/imu/imu_bmi270_profile.c
-    BSP/led/led_status.c
-    BSP/line/line_uart.c
+    BSP/led/status_led_driver.c
+    BSP/line/line_sensor_driver.c
     BSP/motor/motor_driver.c
     BSP/motor/motor_break.c
-    BSP/motor/motor_hw_map.c
-    BSP/motor/internal/chassis_layout.c
-    BSP/motor/internal/motor_output_logic.c
-    BSP/motor/internal/motor_reversal_state.c
-    BSP/ps2/ps2_hw.c
+    BSP/motor/motor_hardware_map.c
+    BSP/motor/internal/motor_hardware_layout.c
+    BSP/motor/internal/motor_ph_en_mapper.c
+    BSP/motor/internal/motor_reversal_state_machine.c
+    BSP/ps2/ps2_controller_driver.c
     BSP/transport/debug_uart_transport.c
     BSP/transport/esp12f_transport.c
     BSP/transport/uart_bridge_transport.c
-    BSP/transport/upper_uart_transport.c
+    BSP/transport/host_uart_transport.c
     BSP/oled/ssd1306.c
     BSP/oled/oled_font_data.c
 )
@@ -209,6 +213,7 @@ add_library(f407_platform STATIC ${F407_PLATFORM_SOURCES})
 add_library(f407_bsp STATIC ${F407_BSP_SOURCES})
 add_library(f407_service STATIC ${F407_SERVICE_SOURCES})
 add_library(f407_app STATIC ${F407_APP_SOURCES})
+add_library(f407_app_adapters STATIC ${F407_APP_ADAPTER_SOURCES})
 
 target_include_directories(f407_algorithm PUBLIC
     Algorithm/control
@@ -239,6 +244,8 @@ target_include_directories(f407_bsp
         BSP/ps2
         BSP/transport
     PRIVATE
+        BSP/encoder/internal
+        BSP/imu/internal
         BSP/motor/internal
 )
 
@@ -261,7 +268,7 @@ target_include_directories(f407_service PRIVATE
 )
 target_include_directories(f407_service PRIVATE Service/communication/internal)
 
-target_include_directories(f407_app PRIVATE
+set(F407_APP_INCLUDE_DIRS
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     App
     App/config
@@ -273,28 +280,36 @@ target_include_directories(f407_app PRIVATE
     App/display/pages
     App/adapters
 )
+target_include_directories(f407_app PRIVATE ${F407_APP_INCLUDE_DIRS})
+target_include_directories(f407_app_adapters PRIVATE ${F407_APP_INCLUDE_DIRS})
 
 # CubeMX's freertos.c is the composition root that calls App task entrypoints.
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
     App/config
     App/tasks
-    Service/communication/internal
 )
 
 target_link_libraries(f407_algorithm PUBLIC m)
 target_link_libraries(f407_platform PRIVATE stm32cubemx)
-target_link_libraries(f407_bsp PRIVATE f407_algorithm f407_platform stm32cubemx)
-target_link_libraries(f407_service PRIVATE f407_algorithm f407_bsp f407_platform)
-target_link_libraries(f407_app PRIVATE f407_service f407_algorithm f407_bsp f407_platform stm32cubemx)
+target_link_libraries(f407_bsp PRIVATE f407_platform stm32cubemx)
+target_link_libraries(f407_service
+    PUBLIC f407_algorithm
+    PRIVATE f407_bsp f407_platform
+)
+target_link_libraries(f407_app PRIVATE f407_service f407_platform)
+target_link_libraries(f407_app_adapters PRIVATE f407_service f407_algorithm f407_bsp f407_platform stm32cubemx)
 
 # Release maintenance authorization is consumed while compiling f407_app.
 target_compile_definitions(f407_app PRIVATE
     $<$<CONFIG:Release>:DEBUG_CONSOLE_RELEASE_REQUIRES_ARM=1>
 )
+target_compile_definitions(f407_app_adapters PRIVATE
+    $<$<CONFIG:Release>:DEBUG_CONSOLE_RELEASE_REQUIRES_ARM=1>
+)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    foreach(layer_target f407_algorithm f407_platform f407_bsp f407_service f407_app)
+    foreach(layer_target f407_algorithm f407_platform f407_bsp f407_service f407_app f407_app_adapters)
         target_compile_options(${layer_target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endforeach()
 endif()
@@ -307,6 +322,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
     -Wl,--whole-archive
     f407_app
+    f407_app_adapters
     -Wl,--no-whole-archive
     f407_service
     f407_algorithm

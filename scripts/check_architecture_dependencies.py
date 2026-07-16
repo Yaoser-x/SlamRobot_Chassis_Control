@@ -11,16 +11,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FINAL_LAYERS = ("Algorithm", "Platform", "BSP", "Service", "App")
-MIGRATION_LAYERS = ("Domain",) + FINAL_LAYERS
 SOURCE_SUFFIXES = {".c", ".h"}
 
 ALLOWED = {
     "Algorithm": {"Algorithm"},
-    "Domain": {"Domain"},
     "Platform": {"Platform"},
-    "BSP": {"BSP", "Algorithm", "Domain", "Platform"},
-    "Service": {"Service", "Algorithm", "Domain", "BSP", "Platform"},
-    "App": set(MIGRATION_LAYERS),
+    "BSP": {"BSP", "Platform"},
+    "Service": {"Service", "Algorithm", "BSP", "Platform"},
+    "App": {"App", "Service", "Platform"},
 }
 
 FINAL_SERVICE_DEPENDENCIES = {
@@ -31,7 +29,10 @@ FINAL_SERVICE_DEPENDENCIES = {
     "command_management": {"parameter_management"},
     "teleoperation": {"state_estimation", "line_following", "command_management", "parameter_management"},
     "line_following": {"safety_management", "command_management", "parameter_management"},
-    "communication": {"command_management", "safety_management", "line_following", "parameter_management"},
+    "communication": {
+        "command_management", "line_following", "motion_control", "parameter_management", "power_management",
+        "safety_management", "state_estimation", "system_monitoring", "teleoperation",
+    },
     "parameter_management": set(),
     "system_monitoring": set(),
 }
@@ -46,10 +47,6 @@ FORBIDDEN_APIS = {
         r"\b(?:HAL_[A-Za-z0-9_]+|os(?:Kernel|Delay|Thread|Event|Mutex|Semaphore)[A-Za-z0-9_]*|"
         r"NVIC_[A-Za-z0-9_]+|SCB|SysTick|__(?:disable_irq|enable_irq|get_PRIMASK|set_PRIMASK|DSB|ISB))\b"
     ),
-    "Domain": re.compile(
-        r"\b(?:HAL_[A-Za-z0-9_]+|os(?:Kernel|Delay|Thread|Event|Mutex|Semaphore)[A-Za-z0-9_]*|"
-        r"NVIC_[A-Za-z0-9_]+|SCB|SysTick|__(?:disable_irq|enable_irq|get_PRIMASK|set_PRIMASK|DSB|ISB))\b"
-    ),
     "Service": re.compile(
         r"\b(?:HAL_[A-Za-z0-9_]+|os(?:Kernel|Delay|Thread|Event|Mutex|Semaphore)[A-Za-z0-9_]*|"
         r"NVIC_[A-Za-z0-9_]+|SCB|SysTick|__(?:disable_irq|enable_irq|get_PRIMASK|set_PRIMASK))\b"
@@ -58,7 +55,6 @@ FORBIDDEN_APIS = {
 
 FORBIDDEN_HEADER_MARKERS = {
     "Algorithm": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
-    "Domain": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
     "Service": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
 }
 
@@ -67,80 +63,6 @@ OLD_SYMBOLS = re.compile(
     r"(?:chassis_tasks|control_manager|system_monitor(?!ing)|param_store)"
 )
 REMOVED_HEADERS = {"chassis_config.h"}
-
-# Exact Beta4 debt. Entries may be removed as consumers migrate; new entries are
-# forbidden. The final gate ignores this allowance and requires an empty debt.
-LEGACY_PUBLIC_HEADER_LEAKS = {
-    ("Service/chassis/chassis_feedback_guard.h", "encoder_driver.h"),
-    ("Service/chassis/chassis_feedback_guard.h", "motor_driver.h"),
-    ("Service/chassis/chassis_output_service.h", "adc_monitor.h"),
-    ("Service/chassis/chassis_service.h", "motor_driver.h"),
-    ("Service/chassis/chassis_speed_loop.h", "motor_driver.h"),
-}
-
-APP_BSP_INCLUDE_ALLOWLIST = {
-    "App/app_init.c": {"led_status.h", "line_uart.h", "ssd1306.h"},
-    "App/debug/commands/debug_cmd_control.c": {"motor_config.h"},
-    "App/debug/commands/debug_cmd_current.c": {
-        "adc_monitor.h", "adc_monitor_config.h", "chassis_layout.h", "motor_driver.h"
-    },
-    "App/debug/commands/debug_cmd_imu.c": {"imu_bmi270.h"},
-    "App/debug/commands/debug_cmd_line.c": {"line_uart.h"},
-    "App/debug/commands/debug_cmd_param.c": {"adc_monitor.h", "imu_bmi270.h"},
-    "App/debug/commands/debug_cmd_system.c": {"i2c_bus_diagnostic.h"},
-    "App/debug/commands/debug_rtos_report.c": {"debug_uart_transport.h"},
-    "App/debug/commands/debug_system_status.c": {
-        "adc_monitor.h", "adc_monitor_config.h", "chassis_layout.h", "encoder_driver.h", "imu_bmi270.h", "line_uart.h",
-        "motor_driver.h"
-    },
-    "App/debug/debug_console_writer.c": {"debug_uart_transport.h"},
-    "App/debug/debug_console_parser.h": {"motor_types.h"},
-    "App/debug/debug_straight_telemetry.h": {"adc_monitor.h"},
-    "App/debug/telemetry/debug_telemetry.c": {
-        "adc_monitor.h", "encoder_driver.h", "imu_bmi270.h", "line_uart.h", "motor_driver.h"
-    },
-    "App/debug/telemetry/debug_telemetry_model.h": {
-        "adc_monitor.h", "encoder_driver.h", "imu_bmi270.h", "line_uart.h", "motor_driver.h"
-    },
-    "App/debug/usart1_debug_console.c": {"debug_uart_transport.h"},
-    "App/display/oled_text_renderer.c": {"ssd1306.h"},
-    "App/display/oled_ui.c": {"bsp_config.h", "ssd1306.h"},
-    "App/display/pages/oled_page_calibration.c": {"oled_font_8x16.h", "ssd1306.h"},
-    "App/display/pages/oled_page_fault.c": {"oled_font_8x16.h", "ssd1306.h"},
-    "App/display/pages/oled_page_runtime.c": {"oled_font_16x16.h", "oled_font_8x16.h", "ssd1306.h"},
-    "App/display/pages/oled_page_selfcheck.c": {"oled_font_16x16.h", "oled_font_8x16.h", "ssd1306.h"},
-    "App/display/pages/oled_page_welcome.c": {"oled_font_16x16.h", "oled_font_8x16.h", "ssd1306.h"},
-    "App/adapters/esp12f_flash_bridge.c": {"esp12f_boot_control.h", "uart_bridge_transport.h"},
-    "App/adapters/uart_callbacks.c": {"line_uart.h", "uart_bridge_transport.h"},
-    "App/tasks/task_esp12f.c": {"bsp_config.h"},
-    "App/tasks/task_imu.c": {"bsp_config.h"},
-    "App/tasks/task_led.c": {"bsp_config.h", "led_status.h"},
-    "App/tasks/task_line.c": {"bsp_config.h", "line_uart.h"},
-    "App/tasks/task_motor.c": {"bsp_config.h"},
-    "App/tasks/task_oled.c": {"bsp_config.h"},
-    "App/tasks/task_ps2.c": {"bsp_config.h"},
-    "App/tasks/task_safety.c": {"bsp_config.h"},
-    "App/tasks/task_upper_comm.c": {"bsp_config.h"},
-}
-
-LEGACY_CONFIG_CONSUMERS = {
-    "App/debug/commands/debug_cmd_control.c", "App/debug/commands/debug_cmd_current.c",
-    "App/debug/commands/debug_system_status.c", "App/display/oled_ui.c", "App/tasks/task_esp12f.c",
-    "App/tasks/task_imu.c", "App/tasks/task_led.c", "App/tasks/task_line.c", "App/tasks/task_motor.c",
-    "App/tasks/task_oled.c", "App/tasks/task_ps2.c", "App/tasks/task_safety.c", "App/tasks/task_upper_comm.c",
-    "BSP/adc/adc_monitor.c", "BSP/encoder/encoder_driver.c", "BSP/motor/motor_driver.c", "BSP/oled/ssd1306.c",
-    "Service/chassis/chassis_feedback_guard.c", "Service/chassis/chassis_maintenance_service.c",
-    "Service/chassis/chassis_output_service.c", "Service/chassis/chassis_param_sync.c",
-    "Service/chassis/chassis_service.c", "Service/chassis/chassis_speed_loop.c",
-    "Service/chassis/chassis_target_planner.c", "Service/chassis/chassis_test_mode.c",
-    "Service/communication/communication_command_router.c", "Service/communication/esp12f_service.c",
-    "Service/communication/upper_uart_service.c", "Service/control/control_service.c",
-    "Service/control/line_control_service.c", "Service/control/ps2_control_service.c",
-    "Service/parameter_management/param_service.c",
-    "Service/safety_management/battery_guard.c", "Service/motion_control/internal/current_guard.c",
-    "Service/telemetry/system_snapshot_service.c",
-}
-
 
 def strip_non_code(text: str) -> str:
     text = BLOCK_COMMENT.sub(" ", text)
@@ -157,7 +79,7 @@ def source_files(root: Path, layer: str) -> list[Path]:
 
 def build_header_index(root: Path) -> dict[str, set[str]]:
     index: dict[str, set[str]] = defaultdict(set)
-    for layer in MIGRATION_LAYERS:
+    for layer in FINAL_LAYERS:
         base = root / layer
         if not base.exists():
             continue
@@ -183,7 +105,7 @@ def build_internal_header_index(root: Path) -> dict[str, set[str]]:
 def include_layer(include: str, index: dict[str, set[str]]) -> str | None:
     normalized = include.replace("\\", "/")
     first = normalized.split("/", 1)[0]
-    if first in MIGRATION_LAYERS:
+    if first in FINAL_LAYERS:
         return first
     matches = index.get(normalized) or index.get(Path(normalized).name)
     if matches and len(matches) == 1:
@@ -262,19 +184,29 @@ def final_service_graph_errors(root: Path) -> list[str]:
     return errors
 
 
-def analyze(root: Path, final: bool = False) -> list[str]:
+def app_adapter_sources(root: Path) -> set[str]:
+    cmake_path = root / "CMakeLists.txt"
+    if not cmake_path.is_file():
+        return set()
+    cmake = cmake_path.read_text(encoding="utf-8", errors="replace")
+    match = re.search(r"set\(F407_APP_ADAPTER_SOURCES\s+(.*?)\n\)", cmake, re.DOTALL)
+    return set(re.findall(r"\bApp/[a-zA-Z0-9_./-]+\.(?:c|h)\b", match.group(1))) if match else set()
+
+
+def analyze(root: Path, final: bool = True) -> list[str]:
     root = Path(root).resolve()
     errors: list[str] = []
     header_index = build_header_index(root)
     internal_header_index = build_internal_header_index(root)
+    adapters = app_adapter_sources(root)
+    adapter_directories = {Path(path).parent.as_posix() for path in adapters}
 
-    if final:
-        if (root / "Domain").exists():
-            errors.append("Domain/: legacy layer must be removed before Beta5 final")
-        if not (root / "Algorithm").is_dir():
-            errors.append("Algorithm/: required final layer is missing")
+    if (root / "Domain").exists():
+        errors.append("Domain/: legacy layer must be removed before Beta5 final")
+    if not (root / "Algorithm").is_dir():
+        errors.append("Algorithm/: required final layer is missing")
 
-    for layer in MIGRATION_LAYERS:
+    for layer in FINAL_LAYERS:
         for path in source_files(root, layer):
             relative_path = path.relative_to(root)
             relative = relative_path.as_posix()
@@ -287,10 +219,16 @@ def analyze(root: Path, final: bool = False) -> list[str]:
                     errors.append(f"{relative}: removed legacy header {include}")
 
                 target = include_layer(include, header_index)
-                if final and target == "Domain":
-                    errors.append(f"{relative}: final code must not include Domain header {include}")
-                elif target is not None and target not in ALLOWED[layer]:
-                    errors.append(f"{relative}: {layer} must not include {target} header {include}")
+                adapter_dependency = (
+                    layer == "App"
+                    and (relative in adapters or relative_path.parent.as_posix() in adapter_directories)
+                    and target in {"Algorithm", "BSP"}
+                )
+                if target is not None and target not in ALLOWED[layer] and not adapter_dependency:
+                    if layer == "App" and target == "BSP":
+                        errors.append(f"{relative}: App BSP include {include} is outside f407_app_adapters")
+                    else:
+                        errors.append(f"{relative}: {layer} must not include {target} header {include}")
 
                 internal_owners = internal_header_index.get(normalized) or internal_header_index.get(include_name)
                 if internal_owners:
@@ -299,20 +237,12 @@ def analyze(root: Path, final: bool = False) -> list[str]:
                         owners = ", ".join(sorted(internal_owners))
                         errors.append(f"{relative}: private Service internal header {include} belongs to {owners}")
 
-                if layer == "App" and target == "BSP":
-                    allowed = APP_BSP_INCLUDE_ALLOWLIST.get(relative, set())
-                    if include_name not in allowed:
-                        errors.append(f"{relative}: App BSP include {include} is not in the exact allowlist")
-
                 public_service_header = layer == "Service" and path.suffix.lower() == ".h" and "internal" not in relative_path.parts
                 if public_service_header and target in {"BSP", "Platform"}:
-                    debt = (relative, include_name) in LEGACY_PUBLIC_HEADER_LEAKS
-                    if final or not debt:
-                        errors.append(f"{relative}: public Service header leaks {target} header {include}")
+                    errors.append(f"{relative}: public Service header leaks {target} header {include}")
 
                 if include_name in {"control_config.h", "bsp_config.h"}:
-                    if final or relative not in LEGACY_CONFIG_CONSUMERS:
-                        errors.append(f"{relative}: legacy mixed configuration include {include}")
+                    errors.append(f"{relative}: legacy mixed configuration include {include}")
 
                 lowered = include.lower()
                 if layer in FORBIDDEN_HEADER_MARKERS and any(
@@ -332,8 +262,7 @@ def analyze(root: Path, final: bool = False) -> list[str]:
                 line = code.count("\n", 0, match.start()) + 1
                 errors.append(f"{relative}:{line}: removed legacy symbol/path {match.group(0)}")
 
-    if final:
-        errors.extend(final_service_graph_errors(root))
+    errors.extend(final_service_graph_errors(root))
     return sorted(set(errors))
 
 
@@ -352,8 +281,7 @@ def main(final: bool | None = None) -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
-    mode = "final" if final else "migration"
-    print(f"Architecture dependency check passed ({mode}: layers, contracts, config, Service DAG).")
+    print("Architecture dependency check passed (final: layers, contracts, config, Service DAG).")
     return 0
 
 

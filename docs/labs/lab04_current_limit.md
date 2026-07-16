@@ -22,7 +22,7 @@ I_motor = max(V_adc - V_zero, 0) / MOTOR_CURRENT_VOLTS_PER_AMP
 
 | 参数 | 符号 | 默认值 |
 |------|------|--------|
-| 上电零点采样 | `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | 256 |
+| 上电零点采样 | `POWER_ADC_DRIVER_CURRENT_ZERO_SAMPLES` | 256 |
 | 电压-电流比 | `MOTOR_CURRENT_VOLTS_PER_AMP` | 1.0 V/A |
 | 每路电压-电流比 | `MOTOR_CURRENT_VOLTS_PER_AMP_M1..M4` | 继承全局 |
 | 实时电流节流 | `MOTOR_CURRENT_LIMIT_A` | 0.0 A（关闭） |
@@ -36,7 +36,7 @@ I_motor = max(V_adc - V_zero, 0) / MOTOR_CURRENT_VOLTS_PER_AMP
 
 ### 2. 窗口统计与 EMA 低通滤波
 
-ADC1 由 TIM8 TRGO 触发约 2kHz 采样；`AdcMonitor_Update()` 每 20ms 取走一批样本并计算：
+ADC1 由 TIM8 TRGO 触发约 2kHz 采样；`PowerAdcDriver_Update()` 每 20ms 取走一批样本并计算：
 
 ```
 signed_delta = raw - zero

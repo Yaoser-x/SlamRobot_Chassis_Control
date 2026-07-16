@@ -2,11 +2,11 @@
 
 #include "robot_config.h"
 #include "app_imu_calibration.h"
-#include "app_publish_model.h"
+#include "communication_publish_model_service.h"
 #include "command_management_service.h"
 #include "platform_time.h"
 #include "platform_watchdog.h"
-#include "post_service.h"
+#include "power_on_self_test_service.h"
 #include "parameter_management_service.h"
 #include "platform_reset_trace.h"
 #include "safety_management_service.h"
@@ -28,7 +28,7 @@ void Task_Safety(void *argument)
                                               params.current_fault_debounce_ms);
         SafetyManagement_Update();
         PostService_UpdateRuntime(now_ms);
-        AppPublishModel_Update(now_ms);
+        CommunicationPublishModel_Update(now_ms);
         PlatformResetTrace_UpdateControl((uint8_t)CommandManagement_GetActiveSource(now_ms),
                                          SafetyManagement_IsEmergencyStop(),
                                          SafetyManagement_IsFaultStop());

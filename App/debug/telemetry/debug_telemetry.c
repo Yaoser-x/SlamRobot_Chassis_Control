@@ -3,16 +3,15 @@
 #include "debug_telemetry_json.h"
 #include "debug_telemetry_model.h"
 
-#include "adc_monitor.h"
+#include "power_adc_driver.h"
 #include "motion_control_service.h"
 #include "debug_console_writer.h"
 #include "debug_log_policy.h"
 #include "debug_straight_telemetry.h"
-#include "encoder_driver.h"
-#include "wheel_speed_estimator.h"
-#include "esp12f_service.h"
-#include "imu_bmi270.h"
-#include "line_uart.h"
+#include "wheel_encoder_driver.h"
+#include "wireless_communication_service.h"
+#include "bmi270_driver.h"
+#include "line_sensor_driver.h"
 #include "motor_driver.h"
 #include "parameter_management_service.h"
 #include "teleoperation_service.h"
@@ -77,10 +76,11 @@ static void DebugTelemetry_ResetMotorBaseline(void)
     motor_log_last_ms        = 0U;
 }
 
-static void DebugTelemetry_GetMotorSpeed(uint32_t now_ms, const encoder_state_t *state, float speed_mps[MOTOR_ID_COUNT])
+static void
+DebugTelemetry_GetMotorSpeed(uint32_t now_ms, const wheel_encoder_state_t *state, float speed_mps[MOTOR_ID_COUNT])
 {
     uint32_t      dt_ms          = now_ms - motor_log_last_ms;
-    float         counts_per_rev = EncoderDriver_GetCountsPerRev();
+    float         counts_per_rev = WheelEncoderDriver_GetCountsPerRev();
     param_model_t params;
 
     (void)ParameterManagement_GetSnapshot(&params);
@@ -89,10 +89,10 @@ static void DebugTelemetry_GetMotorSpeed(uint32_t now_ms, const encoder_state_t 
     {
         if (motor_log_baseline_valid != 0U)
         {
-            speed_mps[i] = WheelSpeedEstimator_CountDeltaSpeedMps(state->count[i] - motor_log_last_count[i],
-                                                                  dt_ms,
-                                                                  counts_per_rev,
-                                                                  params.wheel_radius_m);
+            speed_mps[i] = WheelEncoderDriver_CountDeltaSpeedMps(state->count[i] - motor_log_last_count[i],
+                                                                 dt_ms,
+                                                                 counts_per_rev,
+                                                                 params.wheel_radius_m);
         }
         else
         {
@@ -122,22 +122,22 @@ static void DebugTelemetry_PrintFilteredHeader(void)
 
 static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t field, uint32_t now_ms)
 {
-    adc_monitor_state_t        adc;
-    encoder_state_t            enc;
-    motion_control_status_t    cs;
-    motor_driver_state_t       motor_state;
-    safety_management_status_t mon;
-    imu_bmi270_state_t         imu;
-    teleoperation_status_t     ps2;
-    line_uart_state_t          line;
-    esp12f_service_state_t     esp;
-    float                      motor_log_speed_mps[MOTOR_ID_COUNT];
+    power_adc_driver_state_t       adc;
+    wheel_encoder_state_t          enc;
+    motion_control_status_t        cs;
+    motor_driver_state_t           motor_state;
+    safety_management_status_t     mon;
+    bmi270_driver_state_t          imu;
+    teleoperation_status_t         ps2;
+    line_sensor_driver_state_t     line;
+    wireless_communication_state_t esp;
+    float                          motor_log_speed_mps[MOTOR_ID_COUNT];
 
     /* 惰性获取：仅需要的字段才获取状态快照 */
     switch (field)
     {
         case LOG_FLD_MOTOR:
-            EncoderDriver_GetState(&enc);
+            WheelEncoderDriver_GetState(&enc);
             (void)MotionControl_GetStatus(&cs);
             MotorDriver_GetState(&motor_state);
             DebugTelemetry_GetMotorSpeed(now_ms, &enc, motor_log_speed_mps);
@@ -155,7 +155,7 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
             break;
 
         case LOG_FLD_ADC:
-            AdcMonitor_GetState(&adc);
+            PowerAdcDriver_GetState(&adc);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_TELEMETRY_TX_SIZE - pos,
                                     "%ld,%ld,%ld,%ld,%ld",
@@ -167,7 +167,7 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
             break;
 
         case LOG_FLD_ADC_RAW:
-            AdcMonitor_GetState(&adc);
+            PowerAdcDriver_GetState(&adc);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_TELEMETRY_TX_SIZE - pos,
                                     "%ld,%ld,%ld,%u,%ld,%ld,%ld,%u,%ld,%ld,%ld,%u,%ld,%ld,%ld,%u",
@@ -190,7 +190,7 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
             break;
 
         case LOG_FLD_IMU:
-            ImuBmi270_GetState(&imu);
+            Bmi270Driver_GetState(&imu);
             pos += (size_t)snprintf(
                 tx + pos,
                 DEBUG_TELEMETRY_TX_SIZE - pos,
@@ -237,7 +237,7 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
             break;
 
         case LOG_FLD_LINE:
-            LineUart_GetState(&line);
+            LineSensorDriver_GetState(&line);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_TELEMETRY_TX_SIZE - pos,
                                     "%lu,%lu",
@@ -246,7 +246,7 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
             break;
 
         case LOG_FLD_ESP:
-            Esp12fService_GetState(&esp);
+            WirelessCommunication_GetState(&esp);
             pos += (size_t)snprintf(tx + pos,
                                     DEBUG_TELEMETRY_TX_SIZE - pos,
                                     "%lu,%lu",
@@ -296,16 +296,16 @@ void DebugTelemetry_PrintHeader(void)
 
 static void DebugTelemetry_CaptureFullSnapshot(uint32_t now_ms, debug_full_log_snapshot_t *snapshot)
 {
-    AdcMonitor_GetState(&snapshot->adc);
-    EncoderDriver_GetState(&snapshot->encoder);
+    PowerAdcDriver_GetState(&snapshot->adc);
+    WheelEncoderDriver_GetState(&snapshot->encoder);
     DebugTelemetry_GetMotorSpeed(now_ms, &snapshot->encoder, snapshot->motor_log_speed_mps);
     (void)MotionControl_GetStatus(&snapshot->chassis);
     MotorDriver_GetState(&snapshot->motor);
     (void)SafetyManagement_GetStatus(&snapshot->monitor);
-    ImuBmi270_GetState(&snapshot->imu);
+    Bmi270Driver_GetState(&snapshot->imu);
     (void)Teleoperation_GetStatus(&snapshot->ps2);
-    LineUart_GetState(&snapshot->line);
-    Esp12fService_GetState(&snapshot->esp);
+    LineSensorDriver_GetState(&snapshot->line);
+    WirelessCommunication_GetState(&snapshot->esp);
 }
 
 static void DebugTelemetry_PrintFullFrame(uint32_t now_ms)

@@ -2,9 +2,9 @@
 
 #include "debug_console_writer.h"
 #include "debug_uart_transport.h"
-#include "esp12f_service.h"
+#include "wireless_communication_service.h"
 #include "system_monitoring_service.h"
-#include "upper_uart_service.h"
+#include "host_communication_service.h"
 
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
@@ -64,14 +64,14 @@ DebugConsole_PrintTaskStatus(const char *name, osThreadId_t handle, uint32_t mis
 
 void DebugRtosReport_Print(void)
 {
-    char                       tx[DEBUG_RTOS_REPORT_TX_SIZE];
-    upper_uart_service_state_t upper_state;
-    esp12f_service_state_t     esp_state;
-    uint32_t                   heap_free = (uint32_t)xPortGetFreeHeapSize();
-    uint32_t                   heap_min  = (uint32_t)xPortGetMinimumEverFreeHeapSize();
+    char                           tx[DEBUG_RTOS_REPORT_TX_SIZE];
+    host_communication_state_t     upper_state;
+    wireless_communication_state_t esp_state;
+    uint32_t                       heap_free = (uint32_t)xPortGetFreeHeapSize();
+    uint32_t                       heap_min  = (uint32_t)xPortGetMinimumEverFreeHeapSize();
 
-    UpperUartService_GetState(&upper_state);
-    Esp12fService_GetState(&esp_state);
+    HostCommunication_GetState(&upper_state);
+    WirelessCommunication_GetState(&esp_state);
 
     (void)snprintf(tx,
                    sizeof(tx),

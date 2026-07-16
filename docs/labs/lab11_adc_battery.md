@@ -61,7 +61,7 @@ I_motor = V_propi / 1.0
 I_mA = abs(ADC_raw - ADC_zero_raw) / 4095 × 3.3 / 1.0 × 1000
 ```
 
-上电静止阶段会对四路 IPROPI 分别采样 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次，平均得到每路 raw 零点。实际运放偏移会被运行时零点抵消；若校准期间电机转动或负载电流不为零，零点会被错误写入运行时状态。
+上电静止阶段会对四路 IPROPI 分别采样 `POWER_ADC_DRIVER_CURRENT_ZERO_SAMPLES` 次，平均得到每路 raw 零点。实际运放偏移会被运行时零点抵消；若校准期间电机转动或负载电流不为零，零点会被错误写入运行时状态。
 
 ### 4. EMA 数字滤波
 
@@ -73,7 +73,7 @@ I_filtered(k) = 0.25 × I_raw(k) + 0.75 × I_filtered(k−1)
 
 ### 5. ADC 校准
 
-`ADC_MONITOR_CALIBRATION_ENABLED = 1U`：启用运行时电流零点校准。F407 当前实现不依赖片上 ADC 自校准；电池电压绝对精度仍需要万用表或可调电源作为外部基准。
+`POWER_ADC_DRIVER_CALIBRATION_ENABLED = 1U`：启用运行时电流零点校准。F407 当前实现不依赖片上 ADC 自校准；电池电压绝对精度仍需要万用表或可调电源作为外部基准。
 
 ## 实验设备
 
@@ -104,7 +104,7 @@ s
 - 分压电阻实际值偏离标称值（47kΩ/10kΩ ±1% 可能导致 ±1.7% 误差）
 - ADC 参考电压偏离 3.3V
 
-修正方法：用万用表实测 R_upper 和 R_lower 的实际阻值，修改 `ADC_MONITOR_BATTERY_R_UPPER_OHM` / `_R_LOWER_OHM`。
+修正方法：用万用表实测 R_upper 和 R_lower 的实际阻值，修改 `POWER_ADC_DRIVER_BATTERY_R_UPPER_OHM` / `_R_LOWER_OHM`。
 
 ### 步骤 2：分压公式反向验证
 
@@ -236,7 +236,7 @@ plt.savefig('lab11_discharge.png', dpi=150)
 
 ## 思考题
 
-1. 电阻分压公式中 `ADC_MONITOR_BATTERY_DIVIDER = (47k+10k)/10k = 5.7`。如果 47kΩ 电阻实际为 46.5kΩ (±1% 误差)，电池电压读数会偏大还是偏小？偏多少？
+1. 电阻分压公式中 `POWER_ADC_DRIVER_BATTERY_DIVIDER = (47k+10k)/10k = 5.7`。如果 47kΩ 电阻实际为 46.5kΩ (±1% 误差)，电池电压读数会偏大还是偏小？偏多少？
 
 2. 如果上电零点校准期间某一路实际带有 +10mV 对应的负载电流，这个错误零点对后续电流读数有什么影响？会造成过流保护误触发还是漏触发？
 

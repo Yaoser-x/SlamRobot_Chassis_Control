@@ -3,7 +3,7 @@
 #include "command_management_service.h"
 #include "motion_control_service.h"
 #include "esp12f_boot_control.h"
-#include "esp12f_service.h"
+#include "wireless_communication_service.h"
 #include "platform_time.h"
 #include "uart_bridge_transport.h"
 #include "usart1_debug_console.h"
@@ -28,7 +28,7 @@ static void Esp12fFlashBridge_RestoreServices(void)
 {
     Esp12fBootControl_EnterNormal();
     Usart1DebugConsole_RestartRx();
-    Esp12fService_RestartRx();
+    WirelessCommunication_RestartRx();
 }
 
 void Esp12fFlashBridge_Init(void)
@@ -86,7 +86,7 @@ void Esp12fFlashBridge_Disable(void)
     if (UartBridgeTransport_IsActive() == 0U)
     {
         bridge_download_mode = 0U;
-        Esp12fService_SetDownloadMode(0U);
+        WirelessCommunication_SetDownloadMode(0U);
         Esp12fFlashBridge_ReleaseMaintenance();
         return;
     }

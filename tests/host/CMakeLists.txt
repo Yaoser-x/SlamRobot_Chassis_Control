@@ -16,6 +16,8 @@ include_directories(
     ../../Platform
     ../../BSP/transport
     ../../BSP/motor
+    ../../BSP/encoder/internal
+    ../../BSP/imu/internal
     ../../Algorithm/kinematics
     ../../BSP/motor/internal
     compat/config
@@ -49,16 +51,16 @@ link_libraries(host_platform)
 
 add_executable(test_f407_v2
     test_f407_v2.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
     ../../Algorithm/kinematics/differential_drive_kinematics.c
     ../../Service/system_monitoring/system_monitoring_service.c
     compat/control/control_service.c
     ../../Service/command_management/command_management_service.c
     compat/param/param_service.c
     ../../Service/parameter_management/parameter_management_service.c
-    ../../Service/communication/internal/upper_protocol.c
-    ../../Algorithm/estimation/wheel_speed_estimator.c
-    ../../BSP/motor/internal/motor_output_logic.c
+    ../../Service/communication/internal/robot_link_protocol.c
+    ../../BSP/encoder/internal/wheel_speed_filter.c
+    ../../BSP/motor/internal/motor_ph_en_mapper.c
     ../../Algorithm/control/wheel_speed_pid_controller.c
 )
 
@@ -80,17 +82,17 @@ add_executable(test_command_management_service
 )
 add_test(NAME command_management_service COMMAND test_command_management_service)
 
-add_executable(test_chassis_layout_2wd
+add_executable(test_motor_hardware_layout_2wd
     test_chassis_layout_2wd.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
 )
 
-target_include_directories(test_chassis_layout_2wd PRIVATE
+target_include_directories(test_motor_hardware_layout_2wd PRIVATE
     ../../BSP
     ../../BSP/motor
 )
 
-add_test(NAME chassis_layout_2wd COMMAND test_chassis_layout_2wd)
+add_test(NAME motor_hardware_layout_2wd COMMAND test_motor_hardware_layout_2wd)
 
 add_executable(test_runtime_direction_apply test_runtime_direction_apply.c)
 target_include_directories(test_runtime_direction_apply PRIVATE ../../BSP)
@@ -113,13 +115,13 @@ target_include_directories(test_esp_frame_parser PRIVATE
     ../../firmware/esp12f/F407_ESP12F)
 add_test(NAME esp_frame_parser COMMAND test_esp_frame_parser)
 
-add_executable(test_adc_monitor
-    test_adc_monitor.c
-    ../../BSP/adc/adc_monitor.c
-    ../../BSP/motor/internal/chassis_layout.c
+add_executable(test_power_adc_driver
+    test_power_adc_driver.c
+    ../../BSP/adc/power_adc_driver.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
 )
 
-target_include_directories(test_adc_monitor PRIVATE
+target_include_directories(test_power_adc_driver PRIVATE
     .
     ../../BSP
     ../../BSP/adc
@@ -127,9 +129,9 @@ target_include_directories(test_adc_monitor PRIVATE
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(test_adc_monitor PRIVATE -fstack-usage)
+    target_compile_options(test_power_adc_driver PRIVATE -fstack-usage)
     add_test(
-        NAME adc_monitor_stack_budget
+        NAME power_adc_driver_stack_budget
         COMMAND ${CMAKE_COMMAND}
             -DSTACK_USAGE_DIR=${CMAKE_CURRENT_BINARY_DIR}
             -DMAX_STACK_BYTES=256
@@ -137,23 +139,23 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     )
 endif()
 
-add_test(NAME adc_monitor COMMAND test_adc_monitor)
+add_test(NAME power_adc_driver COMMAND test_power_adc_driver)
 
-add_executable(test_line_uart
+add_executable(test_line_sensor_driver
     test_line_uart.c
-    ../../BSP/line/line_uart.c
+    ../../BSP/line/line_sensor_driver.c
     compat/param/param_service.c
     ../../Service/parameter_management/parameter_management_service.c
 )
 
-target_include_directories(test_line_uart PRIVATE
+target_include_directories(test_line_sensor_driver PRIVATE
     .
     ../../BSP/line
     ../../BSP
     ../../BSP/motor
 )
 
-add_test(NAME line_uart COMMAND test_line_uart)
+add_test(NAME line_sensor_driver COMMAND test_line_sensor_driver)
 
 add_executable(test_line_control_service
     test_line_control_service.c
@@ -185,17 +187,17 @@ target_include_directories(test_line_sensor_calibration PRIVATE
 
 add_test(NAME line_sensor_calibration COMMAND test_line_sensor_calibration)
 
-add_executable(test_upper_uart_service
-    test_upper_uart_service.c
-    ../../Service/communication/upper_uart_service.c
-    ../../Service/communication/internal/communication_command_router.c
-    ../../Service/communication/internal/telemetry_frame_builder.c
+add_executable(test_host_communication_service
+    test_host_communication_service.c
+    ../../Service/communication/host_communication_service.c
+    ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/telemetry_encoder.c
     ../../Service/communication/internal/framed_stream_parser.c
-    ../../Service/communication/internal/upper_protocol.c
-    ../../BSP/transport/upper_uart_transport.c
+    ../../Service/communication/internal/robot_link_protocol.c
+    ../../BSP/transport/host_uart_transport.c
 )
 
-target_include_directories(test_upper_uart_service PRIVATE
+target_include_directories(test_host_communication_service PRIVATE
     .
     ../../App/adapters
     ../../BSP
@@ -206,7 +208,7 @@ target_include_directories(test_upper_uart_service PRIVATE
     ../../BSP/motor
 )
 
-add_test(NAME upper_uart_service COMMAND test_upper_uart_service)
+add_test(NAME host_communication_service COMMAND test_host_communication_service)
 
 add_executable(test_uart_bridge_transport
     test_uart_bridge_transport.c
@@ -244,32 +246,32 @@ add_test(NAME esp12f_flash_bridge COMMAND test_esp12f_flash_bridge)
 add_executable(test_framed_stream_parser
     test_framed_stream_parser.c
     ../../Service/communication/internal/framed_stream_parser.c
-    ../../Service/communication/internal/upper_protocol.c
+    ../../Service/communication/internal/robot_link_protocol.c
 )
 add_test(NAME framed_stream_parser COMMAND test_framed_stream_parser)
 
-add_executable(test_communication_command_router
-    test_communication_command_router.c
-    ../../Service/communication/internal/communication_command_router.c
-    ../../Service/communication/internal/upper_protocol.c
+add_executable(test_remote_command_dispatcher
+    test_remote_command_dispatcher.c
+    ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/robot_link_protocol.c
 )
-add_test(NAME communication_command_router COMMAND test_communication_command_router)
+add_test(NAME remote_command_dispatcher COMMAND test_remote_command_dispatcher)
 
-add_executable(test_telemetry_frame_builder
-    test_telemetry_frame_builder.c
-    ../../Service/communication/internal/telemetry_frame_builder.c
-    ../../Service/communication/internal/upper_protocol.c
+add_executable(test_telemetry_encoder
+    test_telemetry_encoder.c
+    ../../Service/communication/internal/telemetry_encoder.c
+    ../../Service/communication/internal/robot_link_protocol.c
 )
-add_test(NAME telemetry_frame_builder COMMAND test_telemetry_frame_builder)
+add_test(NAME telemetry_encoder COMMAND test_telemetry_encoder)
 
 add_executable(test_motor_driver_gpio
     test_motor_driver_gpio.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
     ../../BSP/motor/motor_driver.c
     ../../BSP/motor/motor_break.c
-    ../../BSP/motor/motor_hw_map.c
-    ../../BSP/motor/internal/motor_output_logic.c
-    ../../BSP/motor/internal/motor_reversal_state.c
+    ../../BSP/motor/motor_hardware_map.c
+    ../../BSP/motor/internal/motor_ph_en_mapper.c
+    ../../BSP/motor/internal/motor_reversal_state_machine.c
     compat/param/param_service.c
     ../../Service/parameter_management/parameter_management_service.c
 )
@@ -282,16 +284,16 @@ target_include_directories(test_motor_driver_gpio PRIVATE
 
 add_test(NAME motor_driver_gpio COMMAND test_motor_driver_gpio)
 
-add_executable(test_motor_reversal_state
+add_executable(test_motor_reversal_state_machine
     test_motor_reversal_state.c
-    ../../BSP/motor/internal/motor_reversal_state.c
+    ../../BSP/motor/internal/motor_reversal_state_machine.c
 )
-add_test(NAME motor_reversal_state COMMAND test_motor_reversal_state)
+add_test(NAME motor_reversal_state_machine COMMAND test_motor_reversal_state_machine)
 
 add_executable(test_safety_service
     test_safety_service.c
-    ../../Service/safety_management/internal/battery_guard.c
-    ../../Service/safety_management/internal/safety_fault_policy.c
+    ../../Service/safety_management/internal/battery_voltage_monitor.c
+    ../../Service/safety_management/internal/fault_stop_policy.c
     ../../Service/safety_management/safety_management_service.c
     ../../Service/system_monitoring/system_monitoring_service.c
 )
@@ -308,8 +310,8 @@ add_test(NAME safety_service COMMAND test_safety_service)
 
 add_executable(test_safety_service_fault_enabled
     test_safety_service.c
-    ../../Service/safety_management/internal/battery_guard.c
-    ../../Service/safety_management/internal/safety_fault_policy.c
+    ../../Service/safety_management/internal/battery_voltage_monitor.c
+    ../../Service/safety_management/internal/fault_stop_policy.c
     ../../Service/safety_management/safety_management_service.c
     ../../Service/system_monitoring/system_monitoring_service.c
 )
@@ -331,7 +333,7 @@ add_test(NAME safety_service_fault_enabled COMMAND test_safety_service_fault_ena
 add_executable(test_current_guard
     test_current_guard.c
     ../../Service/motion_control/internal/motor_current_limiter.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
 )
 
 target_include_directories(test_current_guard PRIVATE
@@ -346,7 +348,7 @@ add_test(NAME current_guard COMMAND test_current_guard)
 add_executable(test_current_guard_soft_limit
     test_current_guard.c
     ../../Service/motion_control/internal/motor_current_limiter.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
 )
 
 target_include_directories(test_current_guard_soft_limit PRIVATE
@@ -382,7 +384,7 @@ add_executable(test_chassis_service_current_limit
     ../../Service/motion_control/internal/motor_current_limiter.c
     compat/param/param_service.c
     ../../Service/parameter_management/parameter_management_service.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
     ../../Algorithm/control/wheel_speed_pid_controller.c
 )
 
@@ -416,7 +418,7 @@ add_executable(test_chassis_speed_feedback
     test_chassis_speed_feedback.c
     ../../Service/motion_control/internal/wheel_speed_control_loop.c
     ../../Service/motion_control/internal/wheel_feedback_monitor.c
-    ../../BSP/motor/internal/chassis_layout.c
+    ../../BSP/motor/internal/motor_hardware_layout.c
     ../../Algorithm/control/wheel_speed_pid_controller.c
 )
 target_include_directories(test_chassis_speed_feedback PRIVATE
@@ -522,10 +524,10 @@ add_executable(test_imu_pipeline
     ../../Algorithm/calibration/imu_calibration_guard.c
     ../../Algorithm/calibration/imu_calibration.c
     ../../BSP/imu/imu_bmi270_fifo.c
-    ../../Algorithm/estimation/attitude_estimator.c
-    ../../Algorithm/filtering/imu_signal_filter.c
+    ../../BSP/imu/internal/bmi270_attitude_filter.c
+    ../../BSP/imu/internal/bmi270_signal_filter.c
     ../../BSP/imu/imu_bmi270_profile.c
-    ../../Algorithm/estimation/imu_timestamp_tracker.c
+    ../../BSP/imu/internal/bmi270_timestamp.c
 )
 
 target_include_directories(test_imu_pipeline PRIVATE
@@ -617,24 +619,24 @@ target_include_directories(test_foundation_services PRIVATE
 target_link_libraries(test_foundation_services PRIVATE m)
 add_test(NAME foundation_services COMMAND test_foundation_services)
 
-add_executable(test_encoder_driver
-    test_encoder_driver.c
+add_executable(test_wheel_encoder_driver
+    test_wheel_encoder_driver.c
     compat/param/param_service.c
     ../../Service/parameter_management/parameter_management_service.c
-    ../../BSP/encoder/encoder_driver.c
-    ../../Algorithm/estimation/wheel_speed_estimator.c
+    ../../BSP/encoder/wheel_encoder_driver.c
+    ../../BSP/encoder/internal/wheel_speed_filter.c
 )
 
-target_include_directories(test_encoder_driver PRIVATE
+target_include_directories(test_wheel_encoder_driver PRIVATE
     .
     ../../BSP
     ../../BSP/encoder
     ../../BSP/motor
 )
 
-target_link_libraries(test_encoder_driver PRIVATE m)
+target_link_libraries(test_wheel_encoder_driver PRIVATE m)
 
-add_test(NAME encoder_driver COMMAND test_encoder_driver)
+add_test(NAME wheel_encoder_driver COMMAND test_wheel_encoder_driver)
 
 add_executable(test_flash_param
     test_flash_param.c
@@ -664,8 +666,8 @@ add_test(NAME flash_param
 )
 
 add_executable(test_power_on_self_test
-    test_post_service.c
-    ../../Service/safety_management/post_service.c
+    test_power_on_self_test.c
+    ../../Service/safety_management/internal/power_on_self_test.c
 )
 
 target_include_directories(test_power_on_self_test PRIVATE
@@ -724,7 +726,7 @@ add_test(NAME analysis_scripts
 
 add_executable(generate_upper_v2_golden
     generate_upper_v2_golden.c
-    ../../Service/communication/internal/upper_protocol.c
+    ../../Service/communication/internal/robot_link_protocol.c
 )
 
 target_include_directories(generate_upper_v2_golden PRIVATE
@@ -739,11 +741,11 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/upper_v2_golden.json
 )
 
-add_executable(test_app_publish_model
-    test_app_publish_model.c
-    ../../App/app_publish_model.c
+add_executable(test_communication_publish_model
+    test_communication_publish_model.c
+    ../../Service/communication/internal/communication_publish_model.c
 )
-target_include_directories(test_app_publish_model PRIVATE
+target_include_directories(test_communication_publish_model PRIVATE
     .
     ../../BSP
     ../../BSP/adc
@@ -754,7 +756,7 @@ target_include_directories(test_app_publish_model PRIVATE
     compat/config
     ../../App
 )
-add_test(NAME app_publish_model COMMAND test_app_publish_model)
+add_test(NAME communication_publish_model COMMAND test_communication_publish_model)
 
 add_executable(test_debug_console_core
     test_debug_console_core.c

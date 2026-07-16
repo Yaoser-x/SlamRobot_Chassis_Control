@@ -1,13 +1,13 @@
 #include "motor_driver.h"
-#include "motor_hw_map.h"
+#include "motor_hardware_map.h"
 
-#include "chassis_layout.h"
-#include "chassis_layout_config.h"
+#include "motor_hardware_layout.h"
+#include "motor_hardware_layout_config.h"
 #include "cmsis_os2.h"
 #include "main.h"
 #include "direction_apply.h"
 #include "motor_config.h"
-#include "motor_reversal_state.h"
+#include "motor_reversal_state_machine.h"
 #include "tim.h"
 
 #define MOTOR_PWM_RISE_STEP_PER_CYCLE 15
@@ -47,8 +47,8 @@ void MotorDriver_SetDirectionConfig(const int8_t direction[MOTOR_ID_COUNT])
     }
 }
 
-static motor_reversal_state_t motor_runtime[MOTOR_ID_COUNT];
-static motor_driver_state_t   motor_state;
+static motor_reversal_state_machine_t motor_runtime[MOTOR_ID_COUNT];
+static motor_driver_state_t           motor_state;
 
 static void MotorDriver_UpdateEffectivePwmAll(void);
 
@@ -77,7 +77,7 @@ static void MotorDriver_ClearRuntimeAfterBreak(void)
 {
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        MotorReversalState_ClearOutput(&motor_runtime[i]);
+        MotorReversalStateMachine_ClearOutput(&motor_runtime[i]);
         motor_state.requested_pwm[i]   = 0;
         motor_state.applied_pwm[i]     = 0;
         motor_state.output_permille[i] = 0;
@@ -100,7 +100,7 @@ static uint8_t MotorDriver_ReadNfaultHighMask(void)
 
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        const motor_hw_t *hw = MotorHwMap_Get((motor_id_t)i);
+        const motor_hw_t *hw = MotorHardwareMap_Get((motor_id_t)i);
         if (HAL_GPIO_ReadPin(hw->fault_port, hw->fault_pin) == GPIO_PIN_SET)
         {
             mask |= (uint8_t)(1U << i);
@@ -116,7 +116,7 @@ static uint8_t MotorDriver_StartupInputsHigh(uint8_t *nfault_high_mask)
 
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U)
         {
             required_mask |= (uint8_t)(1U << i);
         }
@@ -153,7 +153,7 @@ static int16_t MotorDriver_ComputeEffectivePwm(motor_id_t motor)
 {
     uint32_t index = (uint32_t)motor;
 
-    if (MotorDriver_IsValidMotor(motor) == 0U || ChassisLayout_MotorEnabled(motor) == 0U
+    if (MotorDriver_IsValidMotor(motor) == 0U || MotorHardwareLayout_MotorEnabled(motor) == 0U
         || motor_state.fault_active[index] != 0U || motor_state.tim1_moe_active == 0U
         || motor_state.tim1_break_latched != 0U || motor_state.tim1_break_flag != 0U)
     {
@@ -233,8 +233,8 @@ static void MotorDriver_SetRaw(const motor_hw_t *motor, uint32_t in1_pulse, int8
 
 static void MotorDriver_RecordRuntime(motor_id_t motor)
 {
-    uint32_t                      primask;
-    const motor_reversal_state_t *runtime;
+    uint32_t                              primask;
+    const motor_reversal_state_machine_t *runtime;
 
     if (MotorDriver_IsValidMotor(motor) == 0U)
     {
@@ -256,8 +256,8 @@ static void MotorDriver_RecordRuntime(motor_id_t motor)
 
 static void MotorDriver_ApplyRuntimeOutput(motor_id_t motor)
 {
-    const motor_hw_t             *hw      = MotorHwMap_Get(motor);
-    const motor_reversal_state_t *runtime = &motor_runtime[(uint32_t)motor];
+    const motor_hw_t                     *hw      = MotorHardwareMap_Get(motor);
+    const motor_reversal_state_machine_t *runtime = &motor_runtime[(uint32_t)motor];
     uint32_t pulse = MotorDriver_PulseFromPermille(hw->in1_htim, MotorDriver_AbsSigned(runtime->applied_pwm));
 
     MotorDriver_SetEnPulse(hw, pulse);
@@ -266,18 +266,18 @@ static void MotorDriver_ApplyRuntimeOutput(motor_id_t motor)
 
 static void MotorDriver_ClearRuntimeOutput(motor_id_t motor)
 {
-    const motor_hw_t *hw = MotorHwMap_Get(motor);
+    const motor_hw_t *hw = MotorHardwareMap_Get(motor);
 
-    MotorReversalState_ClearOutput(&motor_runtime[(uint32_t)motor]);
+    MotorReversalStateMachine_ClearOutput(&motor_runtime[(uint32_t)motor]);
     MotorDriver_SetEnPulse(hw, 0U);
     MotorDriver_RecordRuntime(motor);
 }
 
 static void MotorDriver_DisableRuntimeOutput(motor_id_t motor)
 {
-    const motor_hw_t *hw = MotorHwMap_Get(motor);
+    const motor_hw_t *hw = MotorHardwareMap_Get(motor);
 
-    MotorReversalState_Disable(&motor_runtime[(uint32_t)motor]);
+    MotorReversalStateMachine_Disable(&motor_runtime[(uint32_t)motor]);
     MotorDriver_SetRaw(hw, 0U, -1);
     MotorDriver_RecordRuntime(motor);
 }
@@ -305,8 +305,8 @@ void MotorDriver_Init(void)
     motor_state.sleep_enabled = 1U;
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        MotorReversalState_Init(&motor_runtime[i]);
-        const motor_hw_t *hw = MotorHwMap_Get((motor_id_t)i);
+        MotorReversalStateMachine_Init(&motor_runtime[i]);
+        const motor_hw_t *hw = MotorHardwareMap_Get((motor_id_t)i);
         MotorDriver_StartPwm(hw);
         MotorDriver_SetRaw(hw, 0U, -1);
         MotorDriver_RecordRuntime((motor_id_t)i);
@@ -344,9 +344,9 @@ void MotorDriver_Init(void)
 
 void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
 {
-    motor_reversal_state_t *runtime;
-    motor_reversal_input_t  input = {0};
-    motor_reversal_output_t output;
+    motor_reversal_state_machine_t *runtime;
+    motor_reversal_input_t          input = {0};
+    motor_reversal_output_t         output;
 
     if (MotorDriver_IsValidMotor(motor) == 0U)
     {
@@ -359,7 +359,7 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
         MotorDriver_ClearRuntimeOutput(motor);
         return;
     }
-    if (ChassisLayout_MotorEnabled(motor) == 0U)
+    if (MotorHardwareLayout_MotorEnabled(motor) == 0U)
     {
         MotorDriver_DisableRuntimeOutput(motor);
         return;
@@ -372,10 +372,10 @@ void MotorDriver_SetPermille(motor_id_t motor, int16_t permille)
     {
         input.speed_mps = g_speed_getter(motor);
     }
-    output = MotorReversalState_Step(runtime, &motor_reversal_config, &input);
+    output = MotorReversalStateMachine_Step(runtime, &motor_reversal_config, &input);
     if (output.phase_changed != 0U)
     {
-        const motor_hw_t *hw = MotorHwMap_Get(motor);
+        const motor_hw_t *hw = MotorHardwareMap_Get(motor);
         MotorDriver_SetEnPulse(hw, 0U);
         MotorDriver_WritePhase(hw, output.current_ph_dir);
     }
@@ -438,9 +438,9 @@ void MotorDriver_UpdateFaults(void)
     MotorDriver_UpdateBreakStatus();
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U)
         {
-            const motor_hw_t *hw = MotorHwMap_Get((motor_id_t)i);
+            const motor_hw_t *hw = MotorHardwareMap_Get((motor_id_t)i);
             fault_active[i]      = (HAL_GPIO_ReadPin(hw->fault_port, hw->fault_pin) == GPIO_PIN_RESET) ? 1U : 0U;
         }
         else
@@ -496,7 +496,7 @@ uint8_t MotorDriver_ClearBreakLatch(void)
     MotorDriver_UpdateFaults();
     for (uint32_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
         {
             external_safe = 0U;
         }

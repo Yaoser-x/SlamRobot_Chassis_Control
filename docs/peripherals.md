@@ -83,10 +83,10 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `ADC_MONITOR_VREF_V` | `3.3f` | ADC 参考电压 |
-| `ADC_MONITOR_RESOLUTION_COUNTS` | `4095.0f` | 12-bit 满量程 |
-| `ADC_MONITOR_BATTERY_FILTER_ALPHA` | `0.10f` | 电池电压 EMA 滤波系数 |
-| `ADC_MONITOR_CURRENT_ZERO_SAMPLES` | `256U` | 上电电流零点采样次数 |
+| `POWER_ADC_DRIVER_VREF_V` | `3.3f` | ADC 参考电压 |
+| `POWER_ADC_DRIVER_RESOLUTION_COUNTS` | `4095.0f` | 12-bit 满量程 |
+| `POWER_ADC_DRIVER_BATTERY_FILTER_ALPHA` | `0.10f` | 电池电压 EMA 滤波系数 |
+| `POWER_ADC_DRIVER_CURRENT_ZERO_SAMPLES` | `256U` | 上电电流零点采样次数 |
 | `MOTOR_CURRENT_VOLTS_PER_AMP` | `1.0f` | 电流传感器实测初始标定 (1.0V/A) |
 | `MOTOR_CURRENT_VOLTS_PER_AMP_M1..M4` | 继承全局值 | 每路电流比例标定，`adccal plan` 给出建议值 |
 | `MOTOR_CURRENT_FILTER_ALPHA` | `0.25f` | 电流窗口 trimmed 值的 EMA 滤波系数 |
@@ -95,13 +95,13 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | `MOTOR_CURRENT_SOFT_LIMIT_ENABLED` | `0U` | 电流软限流开关；默认关闭 |
 | `MOTOR_ADC_OVERCURRENT_FAULT_ENABLED` | `0U` | ADC 电流软件过流锁停开关；默认关闭 |
 | `MOTOR_OVERCURRENT_DEBOUNCE_COUNT` | `5U` | 过流去抖计数 |
-| `ADC_MONITOR_CURRENT_ZERO_MAX_SPAN_RAW` | `20U` | 零点学习窗口允许的最大 raw 跨度 |
+| `POWER_ADC_DRIVER_CURRENT_ZERO_MAX_SPAN_RAW` | `20U` | 零点学习窗口允许的最大 raw 跨度 |
 
 **电池分压**：`VBAT × R_lower / (R_upper + R_lower)`，默认 `R_upper = 47kΩ`，`R_lower = 10kΩ`，分压比 `5.7`。
 
-**电流零点**：上电后 ADC monitor 在静止阶段累计 `ADC_MONITOR_CURRENT_ZERO_SAMPLES` 次 ADC 样本，分别生成 M1-M4 的 raw 零点；`status` 中 `cal=n/256` 表示零点采样进度，完成后 `valid=1`。`adccal zero` 可在所有有效电机输出为 0 时重新学习零点，若零点窗口跨度超过 `ADC_MONITOR_CURRENT_ZERO_MAX_SPAN_RAW`，`current_control_valid` 会保持无效，避免错误零点进入保护/控制。
+**电流零点**：上电后 ADC monitor 在静止阶段累计 `POWER_ADC_DRIVER_CURRENT_ZERO_SAMPLES` 次 ADC 样本，分别生成 M1-M4 的 raw 零点；`status` 中 `cal=n/256` 表示零点采样进度，完成后 `valid=1`。`adccal zero` 可在所有有效电机输出为 0 时重新学习零点，若零点窗口跨度超过 `POWER_ADC_DRIVER_CURRENT_ZERO_MAX_SPAN_RAW`，`current_control_valid` 会保持无效，避免错误零点进入保护/控制。
 
-**电流窗口**：ADC1 由 TIM8 TRGO 约 2kHz 触发，`AdcMonitor_Update()` 每 20ms 汇总窗口统计。`status` 的 `ADCWIN` 行和 `log 1 adcraw` 可查看每路 `mean/rms/peak/n`；`ADCQ` 行补充 `signed_mean/noise/zero_span/quality_flags`，用于区分真实反向漂移、噪声和零点异常。默认 `adc` 字段继续输出慢速稳定电流，保持旧 CSV 兼容。
+**电流窗口**：ADC1 由 TIM8 TRGO 约 2kHz 触发，`PowerAdcDriver_Update()` 每 20ms 汇总窗口统计。`status` 的 `ADCWIN` 行和 `log 1 adcraw` 可查看每路 `mean/rms/peak/n`；`ADCQ` 行补充 `signed_mean/noise/zero_span/quality_flags`，用于区分真实反向漂移、噪声和零点异常。默认 `adc` 字段继续输出慢速稳定电流，保持旧 CSV 兼容。
 
 **电流介入**：电流链路分为 `current_valid`（可显示）和 `current_control_valid`（可用于保护/控制）。默认 `MOTOR_CURRENT_GUARD_OBSERVE_ONLY=1U`、`MOTOR_CURRENT_SOFT_LIMIT_ENABLED=0U`、`MOTOR_ADC_OVERCURRENT_FAULT_ENABLED=0U`，即只记录 over-limit 和 would-latch 计数，不改变 PWM，也不触发软件 fault-stop。只有 `current_control_valid=1` 且显式打开对应配置时，软限流或 ADC 软件过流锁停才会介入。
 
@@ -118,7 +118,7 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | USART3 | PD8 TX, PD9 RX | RPI | DMA1 Stream1 Circular | 是 | 上位机 (Raspberry Pi) 帧协议 |
 | UART4 | PC10 TX, PC11 RX | LINE | DMA1 Stream2 Circular | 是 | HiWonder 八路巡线传感器 |
 
-USART3 / ESP12F 共用同一上位机帧协议（`Domain/protocol/upper_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
+USART3 / ESP12F 共用同一上位机帧协议（`Domain/protocol/robot_link_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
 
 ---
 
@@ -238,7 +238,7 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 
 | 文件 | 层级 | 职责 |
 | --- | --- | --- |
-| `BSP/line/line_uart.c` | BSP 驱动 | DMA 循环缓冲管理、二进制帧状态机解析（帧头检测、校验和验证、8 通道模拟量与状态位提取）、传感器初始化与周期查询 |
+| `BSP/line/line_sensor_driver.c` | BSP 驱动 | DMA 循环缓冲管理、二进制帧状态机解析（帧头检测、校验和验证、8 通道模拟量与状态位提取）、传感器初始化与周期查询 |
 | `Service/control/line_control_service.c` | Service 控制 | 加权平均线位置计算 → PD 控制器 → 通过 `ControlService_SetCommand` 提交至 `CONTROL_SOURCE_LINE` |
 
 ### 8.4 控制参数
@@ -253,7 +253,7 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 | `LINE_ANGULAR_MAX_RPS` | `2.0f` | 角速度输出钳位 (rad/s) |
 | `LINE_SENSOR_TIMEOUT_MS` | `50U` | 传感器数据超时（超时清源） |
 | `LINE_DETECT_THRESHOLD_COUNT` | `1U` | 最少检测通道数（低于此值视为丢线） |
-| `LINE_ANALOG_THRESHOLD` | `500U` | 黑线判定模拟量阈值（在 `line_uart.h`） |
+| `LINE_ANALOG_THRESHOLD` | `500U` | 黑线判定模拟量阈值（在 `line_sensor_driver.h`） |
 | `CHASSIS_LINE_PERIOD_MS` | `5U` | 巡线任务周期 |
 
 ### 8.5 控制行为
@@ -324,12 +324,12 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | --- | --- | --- |
 | RPI | 上位机 | USART3 最近一帧 RX 时间戳 < `OLED_MODULE_TIMEOUT_RPI_MS`（500ms） |
 | PS2 | PS2 手柄 | `Ps2Control_GetState().online` |
-| IMU | BMI270 | `ImuBmi270_GetState().online` |
+| IMU | BMI270 | `Bmi270Driver_GetState().online` |
 | Line | 巡线传感器 | 传感器数据时间戳 < `OLED_MODULE_TIMEOUT_LINE_MS`（50ms） |
-| Enc | 编码器 | `EncoderDriver_GetState().speed_valid_all` |
-| ESP | ESP12F | `Esp12fService_GetState().rx_frames > 0` |
+| Enc | 编码器 | `WheelEncoderDriver_GetState().speed_valid_all` |
+| ESP | ESP12F | `WirelessCommunication_GetState().rx_frames > 0` |
 | Motr | 电机驱动 | `SafetyService_GetState().error_flags` 无 `DRV_FAULT` |
-| ADC | 模数采样 | `AdcMonitor_GetState().current_valid`；保护/控制另看 `current_control_valid` |
+| ADC | 模数采样 | `PowerAdcDriver_GetState().current_valid`；保护/控制另看 `current_control_valid` |
 
 ### 9.6 配置参数
 

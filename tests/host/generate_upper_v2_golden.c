@@ -1,4 +1,4 @@
-#include "upper_protocol.h"
+#include "robot_link_protocol.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -15,7 +15,7 @@ static void print_hex(const uint8_t *data, uint16_t length)
 static void
 print_frame(const char *name, uint8_t command, const uint8_t *payload, uint8_t payload_length, uint8_t is_last)
 {
-    uint8_t  frame[UPPER_PROTOCOL_MAX_FRAME] = {0U};
+    uint8_t  frame[ROBOT_LINK_PROTOCOL_MAX_FRAME] = {0U};
     uint16_t frame_length = UpperProtocol_BuildFrame(command, payload, payload_length, frame, sizeof(frame));
 
     (void)printf("    {\"name\":\"%s\",\"command\":%u,\"payload_length\":%u,"
@@ -30,8 +30,8 @@ print_frame(const char *name, uint8_t command, const uint8_t *payload, uint8_t p
 
 static void emit_status(void)
 {
-    upper_status_payload_t status                                     = {0};
-    uint8_t                payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN] = {0U};
+    upper_status_payload_t status                                          = {0};
+    uint8_t                payload[ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN] = {0U};
 
     status.battery_voltage          = 12.345f;
     status.motor_speed_mps[0]       = 1.25f;
@@ -69,8 +69,8 @@ static void emit_status(void)
 
 static void emit_imu(const char *name, int8_t temperature_c, uint8_t is_last)
 {
-    upper_imu_status_payload_t imu                                            = {0};
-    uint8_t                    payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN] = {0U};
+    upper_imu_status_payload_t imu                                                 = {0};
+    uint8_t                    payload[ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN] = {0U};
 
     imu.accel_g[0]            = 0.125f;
     imu.accel_g[1]            = -0.25f;
@@ -102,8 +102,8 @@ static void emit_imu(const char *name, int8_t temperature_c, uint8_t is_last)
 
 static void emit_diagnostic(void)
 {
-    upper_diagnostic_payload_t diagnostic                                     = {0};
-    uint8_t                    payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN] = {0U};
+    upper_diagnostic_payload_t diagnostic                                          = {0};
+    uint8_t                    payload[ROBOT_LINK_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN] = {0U};
 
     diagnostic.post_done                = 1U;
     diagnostic.imu_status_flags         = 0x0BU;

@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 
 static void require_int(int condition, const char *message)
 {
@@ -15,13 +15,13 @@ static void require_int(int condition, const char *message)
 
 int main(void)
 {
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M1) == 0U, "m1 disabled");
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M2) != 0U, "m2 enabled");
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M3) != 0U, "m3 enabled");
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M4) == 0U, "m4 disabled");
-    require_int(ChassisLayout_SideMotorCount(MOTOR_SIDE_LEFT) == 1U, "left count");
-    require_int(ChassisLayout_SideMotorCount(MOTOR_SIDE_RIGHT) == 1U, "right count");
-    require_int(ChassisLayout_HasBothSides() != 0U, "both sides present");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M1) == 0U, "m1 disabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M2) != 0U, "m2 enabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M3) != 0U, "m3 enabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M4) == 0U, "m4 disabled");
+    require_int(MotorHardwareLayout_SideMotorCount(MOTOR_SIDE_LEFT) == 1U, "left count");
+    require_int(MotorHardwareLayout_SideMotorCount(MOTOR_SIDE_RIGHT) == 1U, "right count");
+    require_int(MotorHardwareLayout_HasBothSides() != 0U, "both sides present");
     (void)printf("PASS: chassis layout 2wd host test\n");
     return 0;
 }

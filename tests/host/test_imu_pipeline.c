@@ -1,10 +1,10 @@
 #include "imu_calibration.h"
-#include "imu_signal_filter.h"
+#include "bmi270_signal_filter.h"
 #include "imu_bmi270_fifo.h"
-#include "imu_bmi270.h"
-#include "imu_bmi270_math.h"
+#include "bmi270_driver.h"
+#include "bmi270_driver_math.h"
 #include "imu_bmi270_profile.h"
-#include "imu_timestamp_tracker.h"
+#include "bmi270_timestamp.h"
 #include "imu_calibration_guard.h"
 
 #include <math.h>
@@ -79,14 +79,14 @@ static void test_raw_frame_signal_guard_rejects_all_zero_frame(void)
     const int16_t accel_with_signal[3] = {0, 0, 1};
     const int16_t gyro_with_signal[3]  = {0, -1, 0};
 
-    require_int(ImuBmi270_RawFrameHasSignal(zero_accel, zero_gyro) == 0U,
+    require_int(Bmi270Driver_RawFrameHasSignal(zero_accel, zero_gyro) == 0U,
                 "raw frame guard rejects all-zero accel and gyro");
-    require_int(ImuBmi270_RawFrameHasSignal(accel_with_signal, zero_gyro) == 1U,
+    require_int(Bmi270Driver_RawFrameHasSignal(accel_with_signal, zero_gyro) == 1U,
                 "raw frame guard accepts nonzero accel");
-    require_int(ImuBmi270_RawFrameHasSignal(zero_accel, gyro_with_signal) == 1U,
+    require_int(Bmi270Driver_RawFrameHasSignal(zero_accel, gyro_with_signal) == 1U,
                 "raw frame guard accepts nonzero gyro");
-    require_int(ImuBmi270_RawFrameHasSignal(0, zero_gyro) == 0U, "raw frame guard rejects null accel pointer");
-    require_int(ImuBmi270_RawFrameHasSignal(zero_accel, 0) == 0U, "raw frame guard rejects null gyro pointer");
+    require_int(Bmi270Driver_RawFrameHasSignal(0, zero_gyro) == 0U, "raw frame guard rejects null accel pointer");
+    require_int(Bmi270Driver_RawFrameHasSignal(zero_accel, 0) == 0U, "raw frame guard rejects null gyro pointer");
 }
 
 static void test_gyro_cal_span_limit_reports_first_unstable_axis(void)
@@ -97,40 +97,42 @@ static void test_gyro_cal_span_limit_reports_first_unstable_axis(void)
     const float unstable_max[3] = {1.0f, 3.5f, 7.0f};
     uint8_t     axis            = 99U;
 
-    require_int(ImuBmi270_GyroCalSpanWithinLimit(stable_min, stable_max, 5.0f, &axis) == 1U,
+    require_int(Bmi270Driver_GyroCalSpanWithinLimit(stable_min, stable_max, 5.0f, &axis) == 1U,
                 "gyro cal span accepts axes at or below limit");
-    require_int(ImuBmi270_GyroCalSpanWithinLimit(unstable_min, unstable_max, 5.0f, &axis) == 0U,
+    require_int(Bmi270Driver_GyroCalSpanWithinLimit(unstable_min, unstable_max, 5.0f, &axis) == 0U,
                 "gyro cal span rejects first axis above limit");
     require_int(axis == 1U, "gyro cal span reports first unstable axis");
-    require_int(ImuBmi270_GyroCalSpanWithinLimit(0, stable_max, 5.0f, &axis) == 0U,
+    require_int(Bmi270Driver_GyroCalSpanWithinLimit(0, stable_max, 5.0f, &axis) == 0U,
                 "gyro cal span rejects null min pointer");
 }
 
 static void test_auto_cal_scheduler_waits_for_online_uncalibrated_due_state(void)
 {
-    require_int(ImuBmi270_AutoCalDue(1U, 1U, 0U, 0U, 3U, 1000UL, 1000UL) == 1U,
+    require_int(Bmi270Driver_AutoCalDue(1U, 1U, 0U, 0U, 3U, 1000UL, 1000UL) == 1U,
                 "auto cal runs when online uncalibrated and due");
-    require_int(ImuBmi270_AutoCalDue(1U, 1U, 0U, 0U, 3U, 999UL, 1000UL) == 0U, "auto cal waits until due time");
-    require_int(ImuBmi270_AutoCalDue(0U, 1U, 0U, 0U, 3U, 1000UL, 1000UL) == 0U, "auto cal respects disabled flag");
-    require_int(ImuBmi270_AutoCalDue(1U, 0U, 0U, 0U, 3U, 1000UL, 1000UL) == 0U, "auto cal waits for online IMU");
-    require_int(ImuBmi270_AutoCalDue(1U, 1U, 1U, 0U, 3U, 1000UL, 1000UL) == 0U,
+    require_int(Bmi270Driver_AutoCalDue(1U, 1U, 0U, 0U, 3U, 999UL, 1000UL) == 0U, "auto cal waits until due time");
+    require_int(Bmi270Driver_AutoCalDue(0U, 1U, 0U, 0U, 3U, 1000UL, 1000UL) == 0U, "auto cal respects disabled flag");
+    require_int(Bmi270Driver_AutoCalDue(1U, 0U, 0U, 0U, 3U, 1000UL, 1000UL) == 0U, "auto cal waits for online IMU");
+    require_int(Bmi270Driver_AutoCalDue(1U, 1U, 1U, 0U, 3U, 1000UL, 1000UL) == 0U,
                 "auto cal skips already calibrated IMU");
-    require_int(ImuBmi270_AutoCalDue(1U, 1U, 0U, 3U, 3U, 1000UL, 1000UL) == 0U, "auto cal stops at max attempts");
+    require_int(Bmi270Driver_AutoCalDue(1U, 1U, 0U, 3U, 3U, 1000UL, 1000UL) == 0U, "auto cal stops at max attempts");
 }
 
 static void test_temperature_conversion_uses_direct_celsius(void)
 {
     float temperature_c = 0.0f;
 
-    require_int(ImuBmi270_TemperatureRawToC(0, &temperature_c) == 1U, "temperature raw zero is valid");
+    require_int(Bmi270Driver_TemperatureRawToC(0, &temperature_c) == 1U, "temperature raw zero is valid");
     require_close(temperature_c, 23.0f, 0.001f, "temperature raw zero maps to 23C");
-    require_int(ImuBmi270_TemperatureRawToC(INT16_MAX, &temperature_c) == 1U, "maximum positive temperature is valid");
+    require_int(Bmi270Driver_TemperatureRawToC(INT16_MAX, &temperature_c) == 1U,
+                "maximum positive temperature is valid");
     require_close(temperature_c, 86.998f, 0.002f, "maximum positive raw maps near 87C");
-    require_int(ImuBmi270_TemperatureRawToC((int16_t)0x8001U, &temperature_c) == 1U,
+    require_int(Bmi270Driver_TemperatureRawToC((int16_t)0x8001U, &temperature_c) == 1U,
                 "minimum valid negative temperature is valid");
     require_close(temperature_c, -40.998f, 0.002f, "minimum valid raw maps near -41C");
-    require_int(ImuBmi270_TemperatureRawToC(INT16_MIN, &temperature_c) == 0U, "0x8000 temperature sentinel is invalid");
-    require_int(ImuBmi270_TemperatureRawToC(0, 0) == 0U, "temperature conversion rejects null output");
+    require_int(Bmi270Driver_TemperatureRawToC(INT16_MIN, &temperature_c) == 0U,
+                "0x8000 temperature sentinel is invalid");
+    require_int(Bmi270Driver_TemperatureRawToC(0, 0) == 0U, "temperature conversion rejects null output");
 }
 
 static void test_temperature_compensation_uses_calibration_slope(void)

@@ -41,11 +41,11 @@ void Usart1DebugConsole_RestartRx(void)
 {
     debug_restart_count++;
 }
-void Esp12fService_RestartRx(void)
+void WirelessCommunication_RestartRx(void)
 {
     esp_restart_count++;
 }
-void Esp12fService_SetDownloadMode(uint8_t enabled)
+void WirelessCommunication_SetDownloadMode(uint8_t enabled)
 {
     (void)enabled;
 }

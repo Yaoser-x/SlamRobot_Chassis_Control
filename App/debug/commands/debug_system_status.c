@@ -1,24 +1,24 @@
 #include "debug_system_status.h"
 
-#include "adc_monitor.h"
-#include "chassis_layout.h"
+#include "power_adc_driver.h"
+#include "motor_hardware_layout.h"
 #include "motion_control_service.h"
-#include "adc_monitor_config.h"
+#include "power_adc_driver_config.h"
 #include "debug_cmd_current.h"
 #include "debug_console_writer.h"
-#include "encoder_driver.h"
-#include "esp12f_service.h"
-#include "imu_bmi270.h"
-#include "line_uart.h"
+#include "wheel_encoder_driver.h"
+#include "wireless_communication_service.h"
+#include "bmi270_driver.h"
+#include "line_sensor_driver.h"
 #include "motor_driver.h"
 #include "parameter_management_service.h"
 #include "platform_reset.h"
 #include "platform_reset_trace.h"
-#include "post_service.h"
+#include "power_on_self_test_service.h"
 #include "teleoperation_service.h"
 #include "safety_management_service.h"
 #include "system_monitoring_service.h"
-#include "upper_uart_service.h"
+#include "host_communication_service.h"
 
 #include <stdio.h>
 
@@ -106,32 +106,32 @@ void DebugSystemStatus_PrintResetTrace(void)
 
 void DebugSystemStatus_Print(void)
 {
-    char                       tx[DEBUG_SYSTEM_STATUS_TX_SIZE];
-    adc_monitor_state_t        adc_state;
-    encoder_state_t            encoder_state;
-    motion_control_status_t    chassis_state;
-    safety_management_status_t monitor_state;
-    imu_bmi270_state_t         imu_state;
-    teleoperation_status_t     ps2_state;
-    line_uart_state_t          line_state;
-    esp12f_service_state_t     esp_state;
-    motor_driver_state_t       motor_state;
-    post_result_t              post_result;
-    param_model_t              params;
-    uint32_t                   encoder_hw_count[MOTOR_ID_COUNT];
+    char                           tx[DEBUG_SYSTEM_STATUS_TX_SIZE];
+    power_adc_driver_state_t       adc_state;
+    wheel_encoder_state_t          encoder_state;
+    motion_control_status_t        chassis_state;
+    safety_management_status_t     monitor_state;
+    bmi270_driver_state_t          imu_state;
+    teleoperation_status_t         ps2_state;
+    line_sensor_driver_state_t     line_state;
+    wireless_communication_state_t esp_state;
+    motor_driver_state_t           motor_state;
+    power_on_self_test_result_t    post_result;
+    param_model_t                  params;
+    uint32_t                       encoder_hw_count[MOTOR_ID_COUNT];
 
-    AdcMonitor_GetState(&adc_state);
-    EncoderDriver_GetState(&encoder_state);
+    PowerAdcDriver_GetState(&adc_state);
+    WheelEncoderDriver_GetState(&encoder_state);
     (void)MotionControl_GetStatus(&chassis_state);
     (void)SafetyManagement_GetStatus(&monitor_state);
-    ImuBmi270_GetState(&imu_state);
+    Bmi270Driver_GetState(&imu_state);
     (void)Teleoperation_GetStatus(&ps2_state);
-    LineUart_GetState(&line_state);
-    Esp12fService_GetState(&esp_state);
+    LineSensorDriver_GetState(&line_state);
+    WirelessCommunication_GetState(&esp_state);
     MotorDriver_GetState(&motor_state);
-    POST_GetResult(&post_result);
+    PowerOnSelfTest_GetResult(&post_result);
     (void)ParameterManagement_GetSnapshot(&params);
-    EncoderDriver_GetHardwareCounts(encoder_hw_count);
+    WheelEncoderDriver_GetHardwareCounts(encoder_hw_count);
 
     (void)snprintf(tx,
                    sizeof(tx),
@@ -250,7 +250,7 @@ void DebugSystemStatus_Print(void)
                    adc_state.raw_current[MOTOR_ID_M4],
                    adc_state.current_zero_raw[MOTOR_ID_M4],
                    adc_state.current_zero_sample_count,
-                   (uint16_t)ADC_MONITOR_CURRENT_ZERO_SAMPLES,
+                   (uint16_t)POWER_ADC_DRIVER_CURRENT_ZERO_SAMPLES,
                    adc_state.current_valid,
                    (unsigned long)adc_state.valid_flags,
                    (unsigned long)adc_state.invalid_reason_flags,
@@ -265,12 +265,12 @@ void DebugSystemStatus_Print(void)
                    "POST done=%u errors=0x%08lX drv=%s(mask=0x%02X) adc=%s imu=%s(chip=0x%02X) enc=%s\r\n",
                    post_result.done,
                    (unsigned long)post_result.error_flags,
-                   POST_ItemStatusString(post_result.drv_status),
+                   PowerOnSelfTest_ItemStatusString(post_result.drv_status),
                    post_result.drv_fault_mask,
-                   POST_ItemStatusString(post_result.adc_status),
-                   POST_ItemStatusString(post_result.imu_status),
+                   PowerOnSelfTest_ItemStatusString(post_result.adc_status),
+                   PowerOnSelfTest_ItemStatusString(post_result.imu_status),
                    post_result.imu_chip_id,
-                   POST_ItemStatusString(post_result.encoder_status));
+                   PowerOnSelfTest_ItemStatusString(post_result.encoder_status));
     DebugConsoleWriter_Write(tx);
 
     (void)snprintf(tx,

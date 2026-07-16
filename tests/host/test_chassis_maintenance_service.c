@@ -1,9 +1,9 @@
 #include "chassis_maintenance_service.h"
 
 #include "chassis_service.h"
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "control_service.h"
-#include "encoder_driver.h"
+#include "wheel_encoder_driver.h"
 #include "motor_driver.h"
 #include "safety_management_service.h"
 #include "state_estimation_service.h"
@@ -11,15 +11,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static uint8_t              fake_lock;
-static uint8_t              fake_begin_allowed;
-static uint32_t             cancel_count;
-static uint32_t             emergency_stop_count;
-static uint32_t             motor_stop_count;
-static uint32_t             end_count;
-static encoder_state_t      fake_encoder;
-static motor_driver_state_t fake_motor;
-static uint8_t              fake_control_step_active;
+static uint8_t               fake_lock;
+static uint8_t               fake_begin_allowed;
+static uint32_t              cancel_count;
+static uint32_t              emergency_stop_count;
+static uint32_t              motor_stop_count;
+static uint32_t              end_count;
+static wheel_encoder_state_t fake_encoder;
+static motor_driver_state_t  fake_motor;
+static uint8_t               fake_control_step_active;
 
 static void require_int(int condition, const char *message)
 {
@@ -100,7 +100,7 @@ void MotorDriver_StopAll(motor_stop_mode_t mode)
     motor_stop_count++;
 }
 
-void EncoderDriver_GetState(encoder_state_t *state)
+void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
 {
     *state = fake_encoder;
 }
@@ -121,7 +121,7 @@ void MotorDriver_GetState(motor_driver_state_t *state)
     *state = fake_motor;
 }
 
-uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
+uint8_t MotorHardwareLayout_MotorEnabled(motor_id_t motor)
 {
     return ((uint32_t)motor < MOTOR_ID_COUNT) ? 1U : 0U;
 }
@@ -134,7 +134,7 @@ static void reset_fake(void)
     emergency_stop_count     = 0U;
     motor_stop_count         = 0U;
     end_count                = 0U;
-    fake_encoder             = (encoder_state_t){0};
+    fake_encoder             = (wheel_encoder_state_t){0};
     fake_motor               = (motor_driver_state_t){0};
     fake_control_step_active = 0U;
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)

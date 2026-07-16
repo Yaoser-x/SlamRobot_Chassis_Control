@@ -1,8 +1,8 @@
 #include "debug_cmd_current.h"
 
-#include "adc_monitor.h"
-#include "adc_monitor_config.h"
-#include "chassis_layout.h"
+#include "power_adc_driver.h"
+#include "power_adc_driver_config.h"
+#include "motor_hardware_layout.h"
 #include "debug_console_writer.h"
 #include "motor_driver.h"
 #include "safety_management_service.h"
@@ -59,7 +59,7 @@ static uint8_t DebugCmdCurrent_AllEnabledMotorsStopped(void)
     MotorDriver_GetState(&motor_state);
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.effective_pwm[i] != 0)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.effective_pwm[i] != 0)
         {
             return 0U;
         }
@@ -70,17 +70,17 @@ static uint8_t DebugCmdCurrent_AllEnabledMotorsStopped(void)
 void DebugCmdCurrent_PrintCalibrationStatus(void)
 {
     char                       tx[DEBUG_CMD_CURRENT_TX_SIZE];
-    adc_monitor_state_t        adc_state;
+    power_adc_driver_state_t   adc_state;
     safety_management_status_t monitor_state;
 
-    AdcMonitor_GetState(&adc_state);
+    PowerAdcDriver_GetState(&adc_state);
     (void)SafetyManagement_GetStatus(&monitor_state);
     (void)snprintf(tx,
                    sizeof(tx),
                    "ADCCAL cal=%u/%u valid=%u cvalid=%u cmask=0x%02X invalid=0x%08lX raw_n=%u rate_mHz=%lu "
                    "observe=%lu,%lu,%lu,%lu would=%lu,%lu,%lu,%lu\r\n",
                    adc_state.current_zero_sample_count,
-                   (uint16_t)ADC_MONITOR_CURRENT_ZERO_SAMPLES,
+                   (uint16_t)POWER_ADC_DRIVER_CURRENT_ZERO_SAMPLES,
                    adc_state.current_valid,
                    adc_state.current_control_valid,
                    adc_state.current_control_valid_mask,
@@ -121,13 +121,13 @@ void DebugCmdCurrent_PrintCalibrationStatus(void)
 
 static void DebugCmdCurrent_PrintPlan(const char *motor_token, const char *known_token)
 {
-    motor_id_t          motor = MOTOR_ID_M1;
-    int                 known_ma;
-    adc_monitor_state_t adc_state;
-    float               measured_a;
-    float               known_a;
-    float               current_scale;
-    float               suggested_scale;
+    motor_id_t               motor = MOTOR_ID_M1;
+    int                      known_ma;
+    power_adc_driver_state_t adc_state;
+    float                    measured_a;
+    float                    known_a;
+    float                    current_scale;
+    float                    suggested_scale;
 
     if (DebugCmdCurrent_ParseMotor(motor_token, &motor) == 0U || known_token == 0)
     {
@@ -140,7 +140,7 @@ static void DebugCmdCurrent_PrintPlan(const char *motor_token, const char *known
         CURRENT_LOG("WARN", "adccal plan rejected: known_mA must be positive");
         return;
     }
-    AdcMonitor_GetState(&adc_state);
+    PowerAdcDriver_GetState(&adc_state);
     measured_a = adc_state.current_signed_mean_a[motor];
     if (measured_a < 0.0f)
     {
@@ -194,7 +194,7 @@ uint8_t DebugCmdCurrent_TryHandle(char *line)
         }
         else
         {
-            AdcMonitor_RequestCurrentZeroCalibration();
+            PowerAdcDriver_RequestCurrentZeroCalibration();
             CURRENT_LOG("INFO", "adc current zero calibration restarted");
         }
     }

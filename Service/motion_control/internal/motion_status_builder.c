@@ -1,6 +1,6 @@
 #include "motion_status_builder.h"
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 
 static float MotionStatusBuilder_Abs(float value)
 {
@@ -21,9 +21,9 @@ void MotionStatusBuilder_SetSideTargets(motion_control_status_t *snapshot,
         motor_id_t motor  = (motor_id_t)index;
         float      target = 0.0f;
 
-        if (ChassisLayout_MotorEnabled(motor) != 0U)
+        if (MotorHardwareLayout_MotorEnabled(motor) != 0U)
         {
-            target = (ChassisLayout_MotorSide(motor) == MOTOR_SIDE_LEFT) ? left_mps : right_mps;
+            target = (MotorHardwareLayout_MotorSide(motor) == MOTOR_SIDE_LEFT) ? left_mps : right_mps;
         }
         snapshot->motor_target_mps[index] = target;
         if (requested != 0U)
@@ -52,8 +52,8 @@ void MotionStatusBuilder_SyncSides(motion_control_status_t *snapshot)
     {
         return;
     }
-    snapshot->left_speed_valid      = (ChassisLayout_SideMotorCount(MOTOR_SIDE_LEFT) != 0U) ? 1U : 0U;
-    snapshot->right_speed_valid     = (ChassisLayout_SideMotorCount(MOTOR_SIDE_RIGHT) != 0U) ? 1U : 0U;
+    snapshot->left_speed_valid      = (MotorHardwareLayout_SideMotorCount(MOTOR_SIDE_LEFT) != 0U) ? 1U : 0U;
+    snapshot->right_speed_valid     = (MotorHardwareLayout_SideMotorCount(MOTOR_SIDE_RIGHT) != 0U) ? 1U : 0U;
     snapshot->left_pid_active       = 0U;
     snapshot->right_pid_active      = 0U;
     snapshot->left_feedback_lost    = 0U;
@@ -64,11 +64,11 @@ void MotionStatusBuilder_SyncSides(motion_control_status_t *snapshot)
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
         motor_id_t motor = (motor_id_t)index;
-        if (ChassisLayout_MotorEnabled(motor) == 0U)
+        if (MotorHardwareLayout_MotorEnabled(motor) == 0U)
         {
             continue;
         }
-        if (ChassisLayout_MotorSide(motor) == MOTOR_SIDE_LEFT)
+        if (MotorHardwareLayout_MotorSide(motor) == MOTOR_SIDE_LEFT)
         {
             left_count++;
             left_target_sum += snapshot->motor_target_mps[index];

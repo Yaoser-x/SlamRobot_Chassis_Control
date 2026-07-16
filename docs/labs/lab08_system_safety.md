@@ -71,7 +71,7 @@ DRV8874 nFAULT 拉低 → SYSTEM_ERROR_DRV_FAULT
 
 ### 5. LED 指示
 
-`BSP/led/led_status.c` 按状态模式闪烁：
+`BSP/led/status_led_driver.c` 按状态模式闪烁：
 
 | 模式 | 闪烁 | 含义 |
 |------|------|------|

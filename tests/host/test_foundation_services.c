@@ -1,10 +1,10 @@
 #include "robot_config.h"
 #include "app_imu_calibration.h"
-#include "adc_monitor.h"
-#include "chassis_layout.h"
-#include "encoder_driver.h"
+#include "power_adc_driver.h"
+#include "motor_hardware_layout.h"
+#include "wheel_encoder_driver.h"
 #include "host_platform.h"
-#include "imu_bmi270.h"
+#include "bmi270_driver.h"
 #include "motion_control_service.h"
 #include "motor_driver.h"
 #include "parameter_management_service.h"
@@ -16,16 +16,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static encoder_state_t          fake_wheel;
-static imu_bmi270_state_t       fake_imu;
-static adc_monitor_state_t      fake_adc;
-static motor_driver_state_t     fake_motor;
-static encoder_driver_config_t  last_encoder_config;
-static imu_bmi270_calibration_t fake_calibration;
-static uint8_t                  fake_zero_stationary;
-static uint32_t                 external_call_in_critical_count;
-static uint32_t                 persistence_save_count;
-static flash_param_bundle_t     last_saved_bundle;
+static wheel_encoder_state_t         fake_wheel;
+static bmi270_driver_state_t         fake_imu;
+static power_adc_driver_state_t      fake_adc;
+static motor_driver_state_t          fake_motor;
+static wheel_encoder_driver_config_t last_wheel_encoder_config;
+static bmi270_calibration_t          fake_calibration;
+static uint8_t                       fake_zero_stationary;
+static uint32_t                      external_call_in_critical_count;
+static uint32_t                      persistence_save_count;
+static flash_param_bundle_t          last_saved_bundle;
 
 static void require_int(int condition, const char *message)
 {
@@ -44,35 +44,35 @@ static void record_external_call(void)
     }
 }
 
-void EncoderDriver_Init(void)
+void WheelEncoderDriver_Init(void)
 {
     record_external_call();
-    fake_wheel                    = (encoder_state_t){0};
+    fake_wheel                    = (wheel_encoder_state_t){0};
     fake_wheel.count[MOTOR_ID_M2] = 17;
 }
 
-void EncoderDriver_Update(uint32_t now_ms, const encoder_driver_config_t *config)
+void WheelEncoderDriver_Update(uint32_t now_ms, const wheel_encoder_driver_config_t *config)
 {
     record_external_call();
-    last_encoder_config       = *config;
+    last_wheel_encoder_config = *config;
     fake_wheel.last_update_ms = now_ms;
 }
 
-void EncoderDriver_GetState(encoder_state_t *state)
+void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
 {
     record_external_call();
     *state = fake_wheel;
 }
 
-void ImuBmi270_Init(void)
+void Bmi270Driver_Init(void)
 {
     record_external_call();
-    fake_imu            = (imu_bmi270_state_t){0};
+    fake_imu            = (bmi270_driver_state_t){0};
     fake_imu.chip_id    = 0x24U;
-    fake_imu.init_state = IMU_BMI270_INIT_STATE_SAMPLING;
+    fake_imu.init_state = STATE_ESTIMATION_IMU_INIT_STATE_SAMPLING;
 }
 
-uint8_t ImuBmi270_Update(void)
+uint8_t Bmi270Driver_Update(void)
 {
     record_external_call();
     fake_imu.last_update_ms += 10U;
@@ -80,13 +80,13 @@ uint8_t ImuBmi270_Update(void)
     return 1U;
 }
 
-void ImuBmi270_OnDataReadyFromIsr(void)
+void Bmi270Driver_OnDataReadyFromIsr(void)
 {
     record_external_call();
     fake_imu.drdy_count++;
 }
 
-void ImuBmi270_ServiceCalibration(uint32_t now_ms, uint8_t stationary)
+void Bmi270Driver_ServiceCalibration(uint32_t now_ms, uint8_t stationary)
 {
     record_external_call();
     (void)now_ms;
@@ -96,7 +96,7 @@ void ImuBmi270_ServiceCalibration(uint32_t now_ms, uint8_t stationary)
     }
 }
 
-uint8_t ImuBmi270_ApplyCalibration(const imu_bmi270_calibration_t *calibration)
+uint8_t Bmi270Driver_ApplyCalibration(const bmi270_calibration_t *calibration)
 {
     record_external_call();
     if (calibration == 0)
@@ -108,55 +108,55 @@ uint8_t ImuBmi270_ApplyCalibration(const imu_bmi270_calibration_t *calibration)
     return 1U;
 }
 
-void ImuBmi270_GetCalibration(imu_bmi270_calibration_t *calibration)
+void Bmi270Driver_GetCalibration(bmi270_calibration_t *calibration)
 {
     record_external_call();
     *calibration = fake_calibration;
 }
 
-void ImuBmi270_ClearCalibration(void)
+void Bmi270Driver_ClearCalibration(void)
 {
     record_external_call();
-    fake_calibration = (imu_bmi270_calibration_t){0};
+    fake_calibration = (bmi270_calibration_t){0};
 }
 
-void ImuBmi270_GetState(imu_bmi270_state_t *state)
+void Bmi270Driver_GetState(bmi270_driver_state_t *state)
 {
     record_external_call();
     *state = fake_imu;
 }
 
-void AdcMonitor_Init(void)
+void PowerAdcDriver_Init(void)
 {
     record_external_call();
-    fake_adc                 = (adc_monitor_state_t){0};
+    fake_adc                 = (power_adc_driver_state_t){0};
     fake_adc.battery_voltage = 11.8f;
 }
 
-void AdcMonitor_SetUpdatePeriodMs(uint32_t period_ms)
+void PowerAdcDriver_SetUpdatePeriodMs(uint32_t period_ms)
 {
     require_int(period_ms == 20U, "ADC update period injected");
 }
 
-void AdcMonitor_Update(void)
+void PowerAdcDriver_Update(void)
 {
     record_external_call();
     fake_adc.raw_sample_count++;
 }
 
-void AdcMonitor_GetState(adc_monitor_state_t *state)
+void PowerAdcDriver_GetState(power_adc_driver_state_t *state)
 {
     record_external_call();
     *state = fake_adc;
 }
 
-void AdcMonitor_RequestCurrentZeroCalibration(void)
+void PowerAdcDriver_RequestCurrentZeroCalibration(void)
 {
     record_external_call();
     fake_adc.current_zero_valid = 0U;
 }
 
-void AdcMonitor_ApplyCurrentZeroCalibration(const uint16_t zero_raw[MOTOR_ID_COUNT])
+void PowerAdcDriver_ApplyCurrentZeroCalibration(const uint16_t zero_raw[MOTOR_ID_COUNT])
 {
     record_external_call();
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
@@ -166,7 +166,7 @@ void AdcMonitor_ApplyCurrentZeroCalibration(const uint16_t zero_raw[MOTOR_ID_COU
     fake_adc.current_zero_valid = 1U;
 }
 
-void AdcMonitor_SetCurrentZeroStationary(uint8_t stationary)
+void PowerAdcDriver_SetCurrentZeroStationary(uint8_t stationary)
 {
     record_external_call();
     fake_zero_stationary = stationary;
@@ -178,7 +178,7 @@ void MotorDriver_GetState(motor_driver_state_t *state)
     *state = fake_motor;
 }
 
-uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
+uint8_t MotorHardwareLayout_MotorEnabled(motor_id_t motor)
 {
     record_external_call();
     return (motor == MOTOR_ID_M2 || motor == MOTOR_ID_M3) ? 1U : 0U;
@@ -265,7 +265,7 @@ static void test_state_generations_and_freshness_are_independent(void)
     StateEstimation_UpdateWheel(100U);
     wheel_generation = StateEstimation_GetWheel(&wheel);
     require_int(wheel_generation == 1UL && wheel.last_update_ms == 100U, "wheel publish generation one");
-    require_int(last_encoder_config.wheel_radius_m == 0.035f, "wheel conversion consumes parameter snapshot");
+    require_int(last_wheel_encoder_config.wheel_radius_m == 0.035f, "wheel conversion consumes parameter snapshot");
 
     fake_imu.last_update_ms = 90U;
     require_int(StateEstimation_RunImuCycle() != 0U, "IMU cycle updates");

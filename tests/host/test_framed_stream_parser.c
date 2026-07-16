@@ -28,19 +28,19 @@ int main(void)
 {
     frame_parser_t   parser;
     protocol_frame_t frame = {0};
-    uint8_t          bytes[UPPER_PROTOCOL_MAX_FRAME];
+    uint8_t          bytes[ROBOT_LINK_PROTOCOL_MAX_FRAME];
     const uint8_t    payload[] = {0x11U, 0x22U, 0x33U};
     uint16_t         length;
 
     FrameParser_Init(&parser);
     assert(FrameParser_IsIdle(&parser) != 0U);
     assert(FrameParser_Push(&parser, 0x00U, &frame) == FRAME_PARSER_NONE);
-    assert(FrameParser_Push(&parser, UPPER_PROTOCOL_HEAD_0, &frame) == FRAME_PARSER_NONE);
+    assert(FrameParser_Push(&parser, ROBOT_LINK_PROTOCOL_HEAD_0, &frame) == FRAME_PARSER_NONE);
     assert(FrameParser_Push(&parser, 0x00U, &frame) == FRAME_PARSER_NONE);
     assert(FrameParser_IsIdle(&parser) != 0U);
 
-    assert(FrameParser_Push(&parser, UPPER_PROTOCOL_HEAD_0, &frame) == FRAME_PARSER_NONE);
-    assert(FrameParser_Push(&parser, UPPER_PROTOCOL_HEAD_1, &frame) == FRAME_PARSER_NONE);
+    assert(FrameParser_Push(&parser, ROBOT_LINK_PROTOCOL_HEAD_0, &frame) == FRAME_PARSER_NONE);
+    assert(FrameParser_Push(&parser, ROBOT_LINK_PROTOCOL_HEAD_1, &frame) == FRAME_PARSER_NONE);
     assert(FrameParser_Push(&parser, 0U, &frame) == FRAME_PARSER_LENGTH_ERROR);
     assert(FrameParser_IsIdle(&parser) != 0U);
 

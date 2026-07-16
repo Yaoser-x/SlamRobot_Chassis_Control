@@ -2,7 +2,7 @@
 
 ## 实验目标
 
-1. **知识**：理解 STM32↔ESP8266 的 UART 帧协议结构、upper_protocol 二进制帧格式、烧录桥原理
+1. **知识**：理解 STM32↔ESP8266 的 UART 帧协议结构、robot_link_protocol 二进制帧格式、烧录桥原理
 2. **技能**：能通过 `espflash` 命令建立 STM32→ESP8266 烧录通道，用 `esptool.py` 烧录 ESP8266 固件
 3. **素养**：理解嵌入式系统中"协议通信"与"透明桥接"两种模式的设计——正常通信用帧协议，固件更新用透传桥
 
@@ -12,7 +12,7 @@
 
 ```
 正常模式:
-  手机网页 ──WiFi──→ ESP12F ──upper_protocol帧──→ STM32F407
+  手机网页 ──WiFi──→ ESP12F ──robot_link_protocol帧──→ STM32F407
                      (USART2)                      │
                                                    ↓
                                               CONTROL_SOURCE_ESP12F
@@ -21,7 +21,7 @@
   PC (esptool.py) ──bin──→ USART1 ──透明桥──→ USART2 ──→ ESP12F BootROM
 ```
 
-**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 `upper_protocol` 帧协议发送给 STM32（`Service/communication/esp12f_service.c` 解析），提交至 `CONTROL_SOURCE_ESP12F`。这不是桥接，而是标准的帧协议通信。
+**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 `robot_link_protocol` 帧协议发送给 STM32（`Service/communication/wireless_communication_service.c` 解析），提交至 `CONTROL_SOURCE_ESP12F`。这不是桥接，而是标准的帧协议通信。
 
 **烧录模式** (`espflash on`)：USART1 和 USART2 之间建立透明桥——STM32 将 PC 发来的二进制流直传给 ESP12F，同时将 ESP12F 的回复直传给 PC。此模式下调试台暂停命令解析（避免二进制流被误当作文本命令）。**桥接仅用于烧录固件，正常通信不使用桥接。**
 
@@ -42,7 +42,7 @@ PC (esptool.py) ←──bin── USART1 ←── USART2 ←── ESP12F
 
 ### 3. ESP12F 控制协议
 
-正常模式下 ESP12F 发送的 `SET_VELOCITY` 帧复用 `upper_protocol` 格式（`Service/communication/internal/upper_protocol.c`），与上位机 USART3 协议帧完全兼容：
+正常模式下 ESP12F 发送的 `SET_VELOCITY` 帧复用 `robot_link_protocol` 格式（`Service/communication/internal/robot_link_protocol.c`），与上位机 USART3 协议帧完全兼容：
 
 | 帧类型 | 方向 | 作用 |
 |--------|------|------|
@@ -231,7 +231,7 @@ plt.savefig('lab13_esp_frame_rate.png', dpi=150)
 
 4. 如果没有 STM32 的透明桥，要烧录 ESP8266 需要什么硬件？（提示：USB-TTL 模块 + 手动拉低 GPIO0）。STM32 烧录桥相比直连方案的优势是什么？
 
-5. ESP12F 和上位机 (USART3) 复用相同的 `upper_protocol` 帧格式。这个复用的优缺点各是什么？如果两者需要同时发送不同格式的帧，架构需要如何调整？
+5. ESP12F 和上位机 (USART3) 复用相同的 `robot_link_protocol` 帧格式。这个复用的优缺点各是什么？如果两者需要同时发送不同格式的帧，架构需要如何调整？
 
 ## 常见问题
 

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* --------------------------------------------------------------------------
- * Minimal HAL stubs sufficient to compile adc_monitor.c on a host machine.
+ * Minimal HAL stubs sufficient to compile power_adc_driver.c on a host machine.
  * Values match STM32F4 HAL headers but the structs are stripped down.  */
 
 #ifndef HOST_HAL_STATUS_TYPEDEF

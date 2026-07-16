@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "upper_protocol.h"
+#include "robot_link_protocol.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -30,13 +30,13 @@ extern "C"
     {
         uint8_t cmd;
         uint8_t payload_len;
-        uint8_t payload[UPPER_PROTOCOL_MAX_PAYLOAD];
+        uint8_t payload[ROBOT_LINK_PROTOCOL_MAX_PAYLOAD];
     } protocol_frame_t;
 
     typedef struct
     {
         frame_parser_state_t state;
-        uint8_t              buffer[UPPER_PROTOCOL_MAX_PAYLOAD + 3U];
+        uint8_t              buffer[ROBOT_LINK_PROTOCOL_MAX_PAYLOAD + 3U];
         uint8_t              frame_len;
         uint8_t              frame_index;
     } frame_parser_t;

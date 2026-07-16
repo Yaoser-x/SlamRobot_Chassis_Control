@@ -5,7 +5,7 @@
 #include "oled_ui.h"
 
 #include "robot_config.h"
-#include "app_publish_model.h"
+#include "communication_publish_model_service.h"
 #include "oled_page_runtime.h"
 #include "oled_page_selfcheck.h"
 #include "oled_page_welcome.h"
@@ -123,7 +123,7 @@ void OLED_UI_Update(void)
     uint32_t                      now     = osKernelGetTickCount();
     uint32_t                      elapsed = now - phase_start_tick;
 
-    (void)AppPublishModel_Get(&snapshot);
+    (void)CommunicationPublishModel_Get(&snapshot);
     if (snapshot.imu.calibration_state != last_calibration_state)
     {
         last_calibration_state        = snapshot.imu.calibration_state;

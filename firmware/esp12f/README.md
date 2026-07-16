@@ -8,7 +8,7 @@
 
 - **首次配置**：无有效 EEPROM 记录时仅开放 `F407_Chassis_Setup`，网页设置 8–63 字节密码；magic/version/length/CRC 回读验证成功后重启。
 - **WebSocket owner 租约**：首个 claimant 获得 500ms 控制租约，每 200ms heartbeat；其他客户端只读遥测。owner 断开/超时立即停车释权。
-- **upper_protocol 帧协议**：与 STM32F407 USART2 通信，CRC-8/Dallas 校验
+- **robot_link_protocol 帧协议**：与 STM32F407 USART2 通信，CRC-8/Dallas 校验
 - **安全保护**：配置前不启动 WebSocket；500ms 速度 deadman 与 owner 租约独立；任意客户端可设置 ESTOP，但不能远程解除。
 - **故障处理**：页面按名称显示活动/锁存原因；仅 owner 可发送 `clearfault`，并以 STM32 后续 STATUS 为准确认成功。ESTOP 始终只能在 STM32 本地解除。
 - **重启中和**：ESP 每次启动都主动向 STM32 发送速度零和 `LINE_CTRL=0`，因此模块重启/掉电恢复不会遗留旧巡线模式。

@@ -1,12 +1,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "adc_monitor.h"
+#include "power_adc_driver.h"
 #include "bsp_config.h"
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "command_management_service.h"
-#include "encoder_driver.h"
+#include "wheel_encoder_driver.h"
 #include "motor_driver.h"
 #include "control_config.h"
 #include "parameter_management_service.h"
@@ -27,15 +28,15 @@ uint32_t ParameterManagement_GetSnapshot(param_model_t *params)
     return 1U;
 }
 
-static uint32_t             fake_primask;
-static uint32_t             fake_tick_ms;
-static adc_monitor_state_t  fake_adc_state;
-static encoder_state_t      fake_encoder_state;
-static motor_driver_state_t fake_motor_state;
-static command_source_t     fake_active_source;
-static uint8_t              fake_gate_allowed;
-static uint8_t              fake_gate_closed_count;
-static uint8_t              fake_break_clear_allowed;
+static uint32_t                 fake_primask;
+static uint32_t                 fake_tick_ms;
+static power_adc_driver_state_t fake_adc_state;
+static wheel_encoder_state_t    fake_encoder_state;
+static motor_driver_state_t     fake_motor_state;
+static command_source_t         fake_active_source;
+static uint8_t                  fake_gate_allowed;
+static uint8_t                  fake_gate_closed_count;
+static uint8_t                  fake_break_clear_allowed;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -63,11 +64,11 @@ int32_t osDelayUntil(uint32_t ticks)
     return 0;
 }
 
-void AdcMonitor_Update(void)
+void PowerAdcDriver_Update(void)
 {
 }
 
-void AdcMonitor_GetState(adc_monitor_state_t *state)
+void PowerAdcDriver_GetState(power_adc_driver_state_t *state)
 {
     *state = fake_adc_state;
 }
@@ -78,18 +79,20 @@ void PowerManagement_Update(void)
 
 uint32_t PowerManagement_GetStatus(power_management_status_t *status)
 {
-    *status = fake_adc_state;
+    _Static_assert(sizeof(*status) == sizeof(fake_adc_state), "power status test fixture layout mismatch");
+    memcpy(status, &fake_adc_state, sizeof(*status));
     return 1UL;
 }
 
-void EncoderDriver_GetState(encoder_state_t *state)
+void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
 {
     *state = fake_encoder_state;
 }
 
 uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status)
 {
-    *status = fake_encoder_state;
+    _Static_assert(sizeof(*status) == sizeof(fake_encoder_state), "wheel status test fixture layout mismatch");
+    memcpy(status, &fake_encoder_state, sizeof(*status));
     return 1UL;
 }
 
@@ -128,7 +131,7 @@ void CommandManagement_SetMotionGate(uint8_t allowed, uint32_t decision_generati
     }
 }
 
-uint8_t ChassisLayout_MotorEnabled(motor_id_t motor)
+uint8_t MotorHardwareLayout_MotorEnabled(motor_id_t motor)
 {
     return (motor == MOTOR_ID_M2 || motor == MOTOR_ID_M3) ? 1U : 0U;
 }
@@ -162,8 +165,8 @@ static void reset_fake_monitor(void)
     };
     fake_primask                                   = 0U;
     fake_tick_ms                                   = 1000U;
-    fake_adc_state                                 = (adc_monitor_state_t){0};
-    fake_encoder_state                             = (encoder_state_t){0};
+    fake_adc_state                                 = (power_adc_driver_state_t){0};
+    fake_encoder_state                             = (wheel_encoder_state_t){0};
     fake_motor_state                               = (motor_driver_state_t){0};
     fake_active_source                             = COMMAND_SOURCE_DEBUG;
     fake_gate_allowed                              = 1U;
@@ -175,7 +178,7 @@ static void reset_fake_monitor(void)
     fake_adc_state.battery_voltage                 = 12.0f;
     fake_adc_state.samples_ready                   = 1U;
     fake_adc_state.raw_sample_count                = 1U;
-    fake_adc_state.valid_flags                     = ADC_MONITOR_VALID_SAMPLES_READY;
+    fake_adc_state.valid_flags                     = POWER_ADC_DRIVER_VALID_SAMPLES_READY;
     fake_encoder_state.speed_valid_all             = 1U;
     fake_encoder_state.speed_valid[MOTOR_ID_M2]    = 1U;
     fake_encoder_state.speed_valid[MOTOR_ID_M3]    = 1U;
@@ -442,7 +445,7 @@ static void test_invalid_battery_sample_resets_debounce_and_other_fault_survives
     fake_tick_ms                   = 1000U;
     SafetyManagement_Update();
     fake_tick_ms                        = 1400U;
-    fake_adc_state.invalid_reason_flags = ADC_MONITOR_INVALID_NO_NEW_SAMPLE;
+    fake_adc_state.invalid_reason_flags = POWER_ADC_DRIVER_INVALID_NO_NEW_SAMPLE;
     SafetyManagement_Update();
     fake_tick_ms                        = 1500U;
     fake_adc_state.invalid_reason_flags = 0UL;

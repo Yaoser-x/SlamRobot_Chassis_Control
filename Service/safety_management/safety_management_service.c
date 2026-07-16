@@ -1,13 +1,13 @@
 #include "safety_management_service.h"
 
-#include "battery_guard.h"
-#include "chassis_layout.h"
+#include "battery_voltage_monitor.h"
+#include "motor_hardware_layout.h"
 #include "command_management_service.h"
 #include "motor_driver.h"
 #include "platform_critical.h"
 #include "platform_time.h"
 #include "power_management_service.h"
-#include "safety_fault_policy.h"
+#include "fault_stop_policy.h"
 #include "state_estimation_service.h"
 #include "system_monitoring_service.h"
 
@@ -20,7 +20,7 @@ static uint8_t                    motor_output_active[MOTOR_ID_COUNT];
 static uint8_t                    startup_blank_armed[MOTOR_ID_COUNT];
 static uint32_t                   overcurrent_blank_until_ms[MOTOR_ID_COUNT];
 static uint32_t                   inactive_since_ms[MOTOR_ID_COUNT];
-static battery_guard_t            battery_guard;
+static battery_voltage_monitor_t  battery_voltage_monitor;
 static uint8_t                    emergency_stop;
 static uint8_t                    fault_stop;
 static uint8_t                    maintenance_lock;
@@ -41,8 +41,8 @@ static uint8_t SafetyManagement_CurrentBelowFaultThreshold(uint8_t motor, float 
 
 static uint8_t SafetyManagement_BatterySampleValid(const power_management_status_t *adc_state)
 {
-    const uint32_t invalid_mask =
-        ADC_MONITOR_INVALID_NOT_READY | ADC_MONITOR_INVALID_NO_NEW_SAMPLE | ADC_MONITOR_INVALID_DMA_ERROR;
+    const uint32_t invalid_mask = POWER_ADC_DRIVER_INVALID_NOT_READY | POWER_ADC_DRIVER_INVALID_NO_NEW_SAMPLE
+                                  | POWER_ADC_DRIVER_INVALID_DMA_ERROR;
 
     return (adc_state != 0 && adc_state->samples_ready != 0U && adc_state->raw_sample_count > 0U
             && (adc_state->invalid_reason_flags & invalid_mask) == 0UL)
@@ -90,7 +90,7 @@ static void SafetyManagement_UpdateOvercurrentCounters(const power_management_st
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         next_count[i] = previous_count[i];
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) == 0U)
         {
             next_count[i] = 0U;
             continue;
@@ -138,8 +138,8 @@ static void SafetyManagement_UpdateCurrentDryRun(const power_management_status_t
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         uint8_t mask = (uint8_t)(1U << i);
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U || (adc_state->current_control_valid_mask & mask) == 0U
-            || motor_output_active[i] == 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) == 0U
+            || (adc_state->current_control_valid_mask & mask) == 0U || motor_output_active[i] == 0U)
         {
             continue;
         }
@@ -195,7 +195,7 @@ uint8_t SafetyManagement_Init(const safety_management_config_t *config)
     monitor_state.generation     = 1UL;
     safety_initialized           = 1U;
     PlatformCritical_Exit(critical);
-    BatteryGuard_Init(&battery_guard);
+    BatteryVoltageMonitor_Init(&battery_voltage_monitor);
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         overcurrent_count[i]                = 0U;
@@ -237,25 +237,25 @@ uint8_t SafetyManagement_IsInitialized(void)
 
 void SafetyManagement_Update(void)
 {
-    power_management_status_t       adc_state;
-    state_estimation_wheel_status_t encoder_state;
-    motor_driver_state_t            motor_state;
-    uint8_t                         active_source;
-    system_monitoring_task_health_t task_health;
-    safety_management_status_t      next_state;
-    uint8_t                         previous_overcurrent_count[MOTOR_ID_COUNT];
-    uint8_t                         next_overcurrent_count[MOTOR_ID_COUNT];
-    uint8_t                         overcurrent_blanked[MOTOR_ID_COUNT];
-    uint32_t                        new_latched_flags = 0U;
-    uint32_t                        latched_after_commit;
-    uint8_t                         request_fault_stop = 0U;
-    uint8_t                         release_fault_stop = 0U;
-    uint8_t                         battery_sample_valid;
-    uint8_t                         battery_critical_latched;
-    battery_guard_result_t          battery_result;
-    uint32_t                        auto_clear_latched_flags = 0UL;
-    uint32_t                        now_ms;
-    uint32_t                        primask;
+    power_management_status_t        adc_state;
+    state_estimation_wheel_status_t  encoder_state;
+    motor_driver_state_t             motor_state;
+    uint8_t                          active_source;
+    system_monitoring_task_health_t  task_health;
+    safety_management_status_t       next_state;
+    uint8_t                          previous_overcurrent_count[MOTOR_ID_COUNT];
+    uint8_t                          next_overcurrent_count[MOTOR_ID_COUNT];
+    uint8_t                          overcurrent_blanked[MOTOR_ID_COUNT];
+    uint32_t                         new_latched_flags = 0U;
+    uint32_t                         latched_after_commit;
+    uint8_t                          request_fault_stop = 0U;
+    uint8_t                          release_fault_stop = 0U;
+    uint8_t                          battery_sample_valid;
+    uint8_t                          battery_critical_latched;
+    battery_voltage_monitor_result_t battery_result;
+    uint32_t                         auto_clear_latched_flags = 0UL;
+    uint32_t                         now_ms;
+    uint32_t                         primask;
 
     now_ms = PlatformTime_TaskNowMs();
     SystemMonitoring_UpdateTimeouts(now_ms);
@@ -278,7 +278,7 @@ void SafetyManagement_Update(void)
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         uint8_t active =
-            (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.effective_pwm[i] != 0) ? 1U : 0U;
+            (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.effective_pwm[i] != 0) ? 1U : 0U;
         if (active != 0U)
         {
             inactive_since_ms[i] = now_ms;
@@ -330,7 +330,7 @@ void SafetyManagement_Update(void)
         next_state.motor_current_a[i]                  = adc_state.current_a[i];
         next_state.current_observe_over_limit_count[i] = current_observe_over_limit_count[i];
         next_state.current_fault_would_latch_count[i]  = current_fault_would_latch_count[i];
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
         {
             next_state.motor_fault_mask |= (uint8_t)(1U << i);
         }
@@ -342,13 +342,13 @@ void SafetyManagement_Update(void)
                                                next_overcurrent_count,
                                                &new_latched_flags);
     battery_sample_valid = SafetyManagement_BatterySampleValid(&adc_state);
-    BatteryGuard_Update(&battery_guard,
-                        &safety_config,
-                        next_state.battery_voltage,
-                        battery_sample_valid,
-                        battery_critical_latched,
-                        now_ms,
-                        &battery_result);
+    BatteryVoltageMonitor_Update(&battery_voltage_monitor,
+                                 &safety_config,
+                                 next_state.battery_voltage,
+                                 battery_sample_valid,
+                                 battery_critical_latched,
+                                 now_ms,
+                                 &battery_result);
     if (battery_result.warning_active != 0U)
     {
         next_state.error_flags |= SYSTEM_ERROR_LOW_BATTERY;
@@ -367,7 +367,7 @@ void SafetyManagement_Update(void)
     }
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
         {
             new_latched_flags |= SYSTEM_ERROR_DRV_FAULT;
         }
@@ -394,7 +394,7 @@ void SafetyManagement_Update(void)
         next_state.error_flags |= SYSTEM_ERROR_FAULT_STOP;
     }
     next_state.error_flags |= latched_after_commit;
-    if (SafetyFaultPolicy_RequiresFaultStop(latched_after_commit) != 0U)
+    if (FaultStopPolicy_RequiresFaultStop(latched_after_commit) != 0U)
     {
         request_fault_stop = 1U;
         next_state.error_flags |= SYSTEM_ERROR_FAULT_STOP;
@@ -440,7 +440,7 @@ uint32_t SafetyManagement_GetStatus(safety_management_status_t *state)
 
 void SafetyManagement_ClearLatchedFaults(uint32_t mask)
 {
-    uint32_t                        clearable = SafetyFaultPolicy_ManualClearMask(mask);
+    uint32_t                        clearable = FaultStopPolicy_ManualClearMask(mask);
     safety_management_status_t      snapshot;
     motor_driver_state_t            motor_state;
     state_estimation_wheel_status_t encoder_state;
@@ -458,7 +458,7 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
 
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && (mask & overcurrent_flags[i]) != 0U
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && (mask & overcurrent_flags[i]) != 0U
             && (((snapshot.current_control_valid_mask & (uint8_t)(1U << i)) == 0U)
                 || SafetyManagement_CurrentBelowFaultThreshold(i, snapshot.motor_current_a[i]) == 0U))
         {
@@ -469,7 +469,7 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
     {
         for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
         {
-            if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+            if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
             {
                 clearable &= ~SYSTEM_ERROR_DRV_FAULT;
             }
@@ -483,7 +483,7 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
     {
         for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
         {
-            if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U
+            if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U
                 && (encoder_state.speed_valid[i] == 0U || motor_state.requested_pwm[i] != 0
                     || motor_state.applied_pwm[i] != 0 || motor_state.effective_pwm[i] != 0))
             {
@@ -496,7 +496,7 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
     next    = monitor_state;
     next.latched_error_flags &= ~clearable;
     latched_after_clear = next.latched_error_flags;
-    if (SafetyFaultPolicy_RequiresFaultStop(latched_after_clear) == 0U)
+    if (FaultStopPolicy_RequiresFaultStop(latched_after_clear) == 0U)
     {
         for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
         {

@@ -2,7 +2,7 @@
 #include "line_following_service.h"
 
 #include "command_management_service.h"
-#include "line_uart.h"
+#include "line_sensor_driver.h"
 #include "motion_control_service.h"
 #include "parameter_management_service.h"
 #include "safety_management_service.h"
@@ -100,7 +100,7 @@ void CommandManagement_ClearSource(command_source_t source)
     }
 }
 
-uint8_t LineUart_GetSensorData(line_sensor_data_t *data)
+uint8_t LineSensorDriver_GetSensorData(line_sensor_data_t *data)
 {
     *data = fake_sensor;
     return 1U;

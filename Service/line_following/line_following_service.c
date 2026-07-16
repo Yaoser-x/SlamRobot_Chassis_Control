@@ -4,7 +4,7 @@
 
 #include "command_management_service.h"
 
-#include "line_uart.h"
+#include "line_sensor_driver.h"
 
 #include "parameter_management_service.h"
 
@@ -148,7 +148,7 @@ void LineFollowing_Update(void)
         g_line_applied_control_generation = control_generation;
     }
 
-    (void)LineUart_GetSensorData(&sensor);
+    (void)LineSensorDriver_GetSensorData(&sensor);
     next_state.sensor_valid        = sensor.valid;
     next_state.sensor_timestamp_ms = sensor.timestamp_ms;
     if (calibration_next.collecting != 0U && sensor.valid != 0U && sensor.timestamp_ms != calibration_last_timestamp)

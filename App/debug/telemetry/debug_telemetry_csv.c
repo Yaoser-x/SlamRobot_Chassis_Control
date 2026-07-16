@@ -14,16 +14,16 @@ static int32_t DebugTelemetryCsv_Milli(float value)
 
 void DebugTelemetryCsv_Print(uint32_t now_ms, const debug_full_log_snapshot_t *snapshot)
 {
-    char                       tx[DEBUG_TELEMETRY_CSV_TX_SIZE];
-    adc_monitor_state_t        adc_state     = snapshot->adc;
-    motion_control_status_t    chassis_state = snapshot->chassis;
-    safety_management_status_t monitor_state = snapshot->monitor;
-    motor_driver_state_t       motor_state   = snapshot->motor;
-    imu_bmi270_state_t         imu_state     = snapshot->imu;
-    teleoperation_status_t     ps2_state     = snapshot->ps2;
-    line_uart_state_t          line_state    = snapshot->line;
-    esp12f_service_state_t     esp_state     = snapshot->esp;
-    float                      motor_log_speed_mps[MOTOR_ID_COUNT];
+    char                           tx[DEBUG_TELEMETRY_CSV_TX_SIZE];
+    power_adc_driver_state_t       adc_state     = snapshot->adc;
+    motion_control_status_t        chassis_state = snapshot->chassis;
+    safety_management_status_t     monitor_state = snapshot->monitor;
+    motor_driver_state_t           motor_state   = snapshot->motor;
+    bmi270_driver_state_t          imu_state     = snapshot->imu;
+    teleoperation_status_t         ps2_state     = snapshot->ps2;
+    line_sensor_driver_state_t     line_state    = snapshot->line;
+    wireless_communication_state_t esp_state     = snapshot->esp;
+    float                          motor_log_speed_mps[MOTOR_ID_COUNT];
 
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {

@@ -62,8 +62,8 @@ class AnalysisTests(unittest.TestCase):
     def test_architecture_rejects_public_service_dependency_leak(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.write_fixture(root, "BSP/adc/adc_monitor.h", "#pragma once\n")
-            self.write_fixture(root, "Service/power/power_service.h", '#include "adc_monitor.h"\n')
+            self.write_fixture(root, "BSP/adc/power_adc_driver.h", "#pragma once\n")
+            self.write_fixture(root, "Service/power/power_service.h", '#include "power_adc_driver.h"\n')
             errors = architecture.analyze(root)
             self.assertTrue(any("public Service header leaks BSP" in error for error in errors), errors)
 

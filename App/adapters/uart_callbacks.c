@@ -1,7 +1,7 @@
-#include "esp12f_service.h"
+#include "wireless_communication_service.h"
 #include "esp12f_flash_bridge.h"
-#include "line_uart.h"
-#include "upper_uart_service.h"
+#include "line_sensor_driver.h"
+#include "host_communication_service.h"
 #include "uart_bridge_transport.h"
 #include "usart1_debug_console.h"
 #include "usart.h"
@@ -14,7 +14,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart3)
     {
-        UpperUartService_OnDmaFull();
+        HostCommunication_OnDmaFull();
     }
     else if (huart == &huart1)
     {
@@ -22,7 +22,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart2)
     {
-        Esp12fService_OnRxCplt();
+        WirelessCommunication_OnRxCplt();
     }
 }
 
@@ -30,7 +30,7 @@ void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart3)
     {
-        UpperUartService_OnDmaHalf();
+        HostCommunication_OnDmaHalf();
     }
 }
 
@@ -42,11 +42,11 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart4)
     {
-        LineUart_OnTxCplt();
+        LineSensorDriver_OnTxCplt();
     }
     else if (huart == &huart3)
     {
-        UpperUartService_OnTxComplete();
+        HostCommunication_OnTxComplete();
     }
 }
 
@@ -62,15 +62,15 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     }
     else if (huart == &huart2)
     {
-        Esp12fService_OnUartError();
+        WirelessCommunication_OnUartError();
     }
     else if (huart == &huart3)
     {
-        UpperUartService_OnUartError();
+        HostCommunication_OnUartError();
     }
     else if (huart == &huart4)
     {
-        LineUart_OnUartError();
+        LineSensorDriver_OnUartError();
     }
 }
 

@@ -114,7 +114,7 @@ ADC1 由 TIM8 TRGO 以 2kHz 触发五通道 DMA 扫描（20kHz PWM / 10），saf
 - `vbat` 与万用表测量值一致，偏差 < 0.2V；`raw` 为 VBAT ADC 原始值
 - `cal=256/256 valid=1` 后，四路电流在静止时接近零（±50mA）
 - `ADCCAL cvalid=1` 且 `ADCQ span` 未超过门限；否则不要启用任何电流保护/限流配置
-- 若电池电压偏差明显，调整 `ADC_MONITOR_BATTERY_R_UPPER_OHM` / `_R_LOWER_OHM`
+- 若电池电压偏差明显，调整 `POWER_ADC_DRIVER_BATTERY_R_UPPER_OHM` / `_R_LOWER_OHM`
 - 若电流零点偏移，先确认上电校准期间电机未转动，再在全部电机停止后执行 `adccal zero`，查看各路 `z=` raw 零点和 `span`
 - 三阶段验收顺序固定为：静止零点 (`status`/`adccal show`) → 空载低 PWM (`log 1 adc adcraw`) → 带载或短时堵转；默认 dry-run 只报警计数，不应改变 PWM
 

@@ -4,11 +4,13 @@
 #include "control_config.h"
 #include "bsp_config.h"
 #include "control_service.h"
-#include "imu_bmi270.h"
-#include "led_status.h"
+#include "bmi270_driver.h"
+#include "status_led_driver.h"
+
+#include <string.h>
 #include "line_sensor_calibration.h"
 #include "line_following_service.h"
-#include "ps2_hw.h"
+#include "ps2_controller_driver.h"
 #include "relative_heading_controller.h"
 #include "safety_management_service.h"
 #include "state_estimation_service.h"
@@ -18,23 +20,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static uint32_t                  fake_primask;
-static uint32_t                  fake_tick_ms;
-static uint32_t                  fake_hal_tick_ms;
-static uint8_t                   fake_read_ok;
-static uint8_t                   fake_line_enabled;
-static uint8_t                   fake_estop;
-static uint8_t                   fake_fault_stop;
-static uint8_t                   fake_maintenance;
-static ps2_hw_sample_t           fake_sample;
-static imu_bmi270_state_t        fake_imu;
-static chassis_cmd_t             last_command;
-static uint32_t                  set_command_count;
-static uint32_t                  clear_source_count;
-static uint32_t                  fake_motion_revoke_generation;
-static uint8_t                   fake_maintenance_crosses_on_query;
-static line_sensor_calibration_t fake_cal;
-static uint8_t                   fake_cal_build_result;
+static uint32_t                       fake_primask;
+static uint32_t                       fake_tick_ms;
+static uint32_t                       fake_hal_tick_ms;
+static uint8_t                        fake_read_ok;
+static uint8_t                        fake_line_enabled;
+static uint8_t                        fake_estop;
+static uint8_t                        fake_fault_stop;
+static uint8_t                        fake_maintenance;
+static ps2_controller_driver_sample_t fake_sample;
+static bmi270_driver_state_t          fake_imu;
+static chassis_cmd_t                  last_command;
+static uint32_t                       set_command_count;
+static uint32_t                       clear_source_count;
+static uint32_t                       fake_motion_revoke_generation;
+static uint8_t                        fake_maintenance_crosses_on_query;
+static line_sensor_calibration_t      fake_cal;
+static uint8_t                        fake_cal_build_result;
 
 static void require_int(int condition, const char *message)
 {
@@ -66,10 +68,10 @@ uint32_t HAL_GetTick(void)
     return fake_hal_tick_ms;
 }
 
-void Ps2Hw_Init(void)
+void Ps2ControllerDriver_Init(void)
 {
 }
-uint8_t Ps2Hw_ReadSample(ps2_hw_sample_t *sample)
+uint8_t Ps2ControllerDriver_ReadSample(ps2_controller_driver_sample_t *sample)
 {
     if (fake_read_ok != 0U)
     {
@@ -77,7 +79,7 @@ uint8_t Ps2Hw_ReadSample(ps2_hw_sample_t *sample)
     }
     return fake_read_ok;
 }
-uint8_t Ps2Hw_IsAnalogMode(uint8_t mode)
+uint8_t Ps2ControllerDriver_IsAnalogMode(uint8_t mode)
 {
     return (mode == 0x73U) ? 1U : 0U;
 }
@@ -184,18 +186,22 @@ uint8_t LineFollowing_CalibrationApplyToRam(void)
 {
     return fake_cal_build_result;
 }
-void LedStatus_SetMode(led_status_mode_t mode)
+void StatusLedDriver_SetMode(status_led_driver_mode_t mode)
 {
     (void)mode;
 }
-void ImuBmi270_GetState(imu_bmi270_state_t *state)
+void Bmi270Driver_GetState(bmi270_driver_state_t *state)
 {
     *state = fake_imu;
 }
 
 uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
 {
-    ImuBmi270_GetState(state);
+    bmi270_driver_state_t driver_state;
+
+    _Static_assert(sizeof(*state) == sizeof(driver_state), "IMU status test fixture layout mismatch");
+    Bmi270Driver_GetState(&driver_state);
+    memcpy(state, &driver_state, sizeof(*state));
     return 1UL;
 }
 
@@ -209,18 +215,18 @@ static void reset_fake(void)
     fake_estop        = 0U;
     fake_fault_stop   = 0U;
     fake_maintenance  = 0U;
-    fake_sample       = (ps2_hw_sample_t){
+    fake_sample       = (ps2_controller_driver_sample_t){
               .mode    = 0x73U,
               .right_x = PS2_AXIS_CENTER,
               .right_y = PS2_AXIS_CENTER,
               .left_x  = PS2_AXIS_CENTER,
               .left_y  = PS2_AXIS_CENTER,
     };
-    fake_imu                          = (imu_bmi270_state_t){0};
+    fake_imu                          = (bmi270_driver_state_t){0};
     fake_imu.enabled                  = 1U;
     fake_imu.online                   = 1U;
-    fake_imu.last_error               = IMU_BMI270_ERROR_NONE;
-    fake_imu.init_state               = IMU_BMI270_INIT_STATE_SAMPLING;
+    fake_imu.last_error               = STATE_ESTIMATION_IMU_ERROR_NONE;
+    fake_imu.init_state               = STATE_ESTIMATION_IMU_INIT_STATE_SAMPLING;
     fake_imu.sample_count             = 1UL;
     fake_imu.last_update_ms           = fake_hal_tick_ms;
     fake_imu.gyro_calibrated          = 1U;
@@ -315,7 +321,7 @@ static void test_imu_gate_and_runtime_cancel(void)
     fake_sample.btn2 = PS2_MACRO_L1_MASK;
     Ps2ControlService_Update();
     fake_sample.btn2       = 0U;
-    fake_imu.quality_flags = IMU_BMI270_QUALITY_SPI_ERROR;
+    fake_imu.quality_flags = STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR;
     fake_imu.online        = 0U;
     fake_tick_ms += 20U;
     fake_imu.last_update_ms = fake_tick_ms;

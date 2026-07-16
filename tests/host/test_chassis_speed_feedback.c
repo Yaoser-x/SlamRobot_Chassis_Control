@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 #include "wheel_feedback_monitor.h"
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "wheel_speed_control_loop.h"
 #include "control_config.h"
 
@@ -56,14 +56,14 @@ static void TestFeedbackLossCounter(void)
     WheelFeedbackMonitor_Init(&guard, &motion_config);
     for (uint32_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)index) != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)index) != 0U)
         {
             motor = (motor_id_t)index;
             break;
         }
     }
     assert((uint32_t)motor < MOTOR_ID_COUNT);
-    assert(ChassisLayout_MotorEnabled(motor) != 0U);
+    assert(MotorHardwareLayout_MotorEnabled(motor) != 0U);
     for (uint32_t count = 1U; count < CHASSIS_PID_FEEDBACK_LOSS_COUNT; ++count)
     {
         assert(WheelFeedbackMonitor_CheckUsable(&guard, &snapshot, motor, 0.5f, 0.0f, 1U) != 0U);

@@ -1,6 +1,6 @@
 #include "motor_current_limiter.h"
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "parameter_management_service.h"
 
 static motor_current_limiter_state_t motor_current_limiter_state;
@@ -75,7 +75,7 @@ int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       mot
     motor_current_limiter_state.control_valid[motor]          = 0U;
     motor_current_limiter_state.applied_permille[motor]       = requested_permille;
 
-    if (ChassisLayout_MotorEnabled(motor) == 0U)
+    if (MotorHardwareLayout_MotorEnabled(motor) == 0U)
     {
         motor_current_limiter_state.applied_permille[motor] = 0;
         return 0;

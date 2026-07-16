@@ -4,13 +4,13 @@
 
 #include "command_management_service.h"
 
-#include "led_status.h"
+#include "status_led_driver.h"
 
 #include "line_sensor_calibration.h"
 
 #include "line_following_service.h"
 
-#include "ps2_hw.h"
+#include "ps2_controller_driver.h"
 
 #include "relative_heading_controller.h"
 
@@ -34,9 +34,10 @@ static uint32_t                      heading_motion_generation;
 static uint32_t                      ps2_idle_start_ms;
 
 #define PS2_HEADING_CRITICAL_QUALITY_MASK                                                                              \
-    (IMU_BMI270_QUALITY_SPI_ERROR | IMU_BMI270_QUALITY_INIT_FAILED | IMU_BMI270_QUALITY_FIFO_OVERFLOW                  \
-     | IMU_BMI270_QUALITY_TIMESTAMP_ERROR | IMU_BMI270_QUALITY_GYRO_SATURATION | IMU_BMI270_QUALITY_ATTITUDE_INVALID   \
-     | IMU_BMI270_QUALITY_PROFILE_MISMATCH)
+    (STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR | STATE_ESTIMATION_IMU_QUALITY_INIT_FAILED                                 \
+     | STATE_ESTIMATION_IMU_QUALITY_FIFO_OVERFLOW | STATE_ESTIMATION_IMU_QUALITY_TIMESTAMP_ERROR                       \
+     | STATE_ESTIMATION_IMU_QUALITY_GYRO_SATURATION | STATE_ESTIMATION_IMU_QUALITY_ATTITUDE_INVALID                    \
+     | STATE_ESTIMATION_IMU_QUALITY_PROFILE_MISMATCH)
 
 static void Ps2ControlService_CopyState(ps2_control_service_state_t *dst, const ps2_control_service_state_t *src)
 {
@@ -119,7 +120,7 @@ static uint8_t Ps2ControlService_ManualInputActive(float linear_x, float angular
                : 0U;
 }
 
-static void Ps2ControlService_ApplyDpad(const ps2_hw_sample_t *sample, float *linear_x, float *angular_z)
+static void Ps2ControlService_ApplyDpad(const ps2_controller_driver_sample_t *sample, float *linear_x, float *angular_z)
 {
     uint8_t up_pressed;
     uint8_t down_pressed;
@@ -160,8 +161,8 @@ static uint32_t Ps2ControlService_ImuGateFlags(const state_estimation_imu_status
     uint32_t flags = 0U;
 
     if (imu_state == 0 || imu_state->enabled == 0U || imu_state->online == 0U
-        || imu_state->last_error != IMU_BMI270_ERROR_NONE || imu_state->init_state != IMU_BMI270_INIT_STATE_SAMPLING
-        || imu_state->sample_count == 0UL)
+        || imu_state->last_error != STATE_ESTIMATION_IMU_ERROR_NONE
+        || imu_state->init_state != STATE_ESTIMATION_IMU_INIT_STATE_SAMPLING || imu_state->sample_count == 0UL)
     {
         flags |= TELEOPERATION_HEADING_GATE_IMU_OFFLINE;
     }
@@ -263,7 +264,7 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     heading_zero_pending      = 0U;
     heading_motion_generation = CommandManagement_GetMotionRevokeGeneration();
 
-    Ps2Hw_Init();
+    Ps2ControllerDriver_Init();
     ps2_state.cmd_dat_swapped = 0U;
     ps2_state.generation      = 1UL;
     return 1U;
@@ -271,20 +272,20 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
 
 void Teleoperation_Update(void)
 {
-    ps2_hw_sample_t               sample;
-    ps2_control_service_state_t   next_state;
-    state_estimation_imu_status_t imu_state;
-    float                         linear_x  = 0.0f;
-    float                         angular_z = 0.0f;
-    uint8_t                       pressed_btn2;
-    uint8_t                       macro_pressed;
-    uint8_t                       command_active;
-    uint8_t                       manual_active;
-    uint8_t                       input_revoked;
-    uint32_t                      now_ms           = PlatformTime_TaskNowMs();
-    uint32_t                      input_generation = CommandManagement_GetMotionRevokeGeneration();
+    ps2_controller_driver_sample_t sample;
+    ps2_control_service_state_t    next_state;
+    state_estimation_imu_status_t  imu_state;
+    float                          linear_x  = 0.0f;
+    float                          angular_z = 0.0f;
+    uint8_t                        pressed_btn2;
+    uint8_t                        macro_pressed;
+    uint8_t                        command_active;
+    uint8_t                        manual_active;
+    uint8_t                        input_revoked;
+    uint32_t                       now_ms           = PlatformTime_TaskNowMs();
+    uint32_t                       input_generation = CommandManagement_GetMotionRevokeGeneration();
 
-    if (Ps2Hw_ReadSample(&sample) == 0U)
+    if (Ps2ControllerDriver_ReadSample(&sample) == 0U)
     {
         Ps2ControlService_CopyState(&next_state, &ps2_state);
         next_state.rx_fail_count++;
@@ -353,7 +354,7 @@ void Teleoperation_Update(void)
             if (cal_state.collecting == 0U)
             {
                 (void)LineFollowing_RequestCalibration(LINE_CALIBRATION_SURFACE_FLOOR, 100U);
-                LedStatus_SetMode(LED_STATUS_CAL_RUNNING);
+                StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_RUNNING);
             }
         }
         if ((pressed_btn2 & teleoperation_config.linecal_line_mask) != 0U)
@@ -361,7 +362,7 @@ void Teleoperation_Update(void)
             if (cal_state.collecting == 0U)
             {
                 (void)LineFollowing_RequestCalibration(LINE_CALIBRATION_SURFACE_LINE, 100U);
-                LedStatus_SetMode(LED_STATUS_CAL_RUNNING);
+                StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_RUNNING);
             }
         }
 
@@ -376,12 +377,12 @@ void Teleoperation_Update(void)
                     /* 双面采集完成 → 自动 apply */
                     if (LineFollowing_CalibrationApplyToRam() != 0U)
                     {
-                        LedStatus_SetMode(LED_STATUS_CAL_APPLIED);
+                        StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_APPLIED);
                     }
                     else
                     {
                         /* 分离度不足，标定失败 — 快闪提示 */
-                        LedStatus_SetMode(LED_STATUS_CAL_RUNNING);
+                        StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_RUNNING);
                     }
                     /* 清标定状态，防止重复触发 apply */
                     LineFollowing_CalibrationCancel();
@@ -390,7 +391,7 @@ void Teleoperation_Update(void)
                 else
                 {
                     /* 单面完成 */
-                    LedStatus_SetMode(LED_STATUS_CAL_OK);
+                    StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_OK);
                     prev_ready_mask = cal_state.ready_mask;
                 }
             }
@@ -470,7 +471,7 @@ void Teleoperation_Update(void)
     Ps2ControlService_CopyState(&next_state, &ps2_state);
     next_state.rx_ok_count++;
     next_state.online                  = 1U;
-    next_state.analog_mode             = Ps2Hw_IsAnalogMode(sample.mode);
+    next_state.analog_mode             = Ps2ControllerDriver_IsAnalogMode(sample.mode);
     next_state.drive_enabled           = command_active;
     next_state.btn1                    = sample.btn1;
     next_state.btn2                    = sample.btn2;

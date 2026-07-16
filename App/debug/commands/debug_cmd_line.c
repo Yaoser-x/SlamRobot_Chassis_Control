@@ -4,7 +4,7 @@
 #include "motion_control_service.h"
 #include "debug_console_writer.h"
 #include "line_following_service.h"
-#include "line_uart.h"
+#include "line_sensor_driver.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -21,14 +21,14 @@
 
 static void DebugCmdLine_PrintStatus(void)
 {
-    static char             tx[DEBUG_CMD_LINE_TX_SIZE];
-    line_sensor_data_t      sensor;
-    line_following_status_t control_state;
-    line_uart_state_t       line_state;
+    static char                tx[DEBUG_CMD_LINE_TX_SIZE];
+    line_sensor_data_t         sensor;
+    line_following_status_t    control_state;
+    line_sensor_driver_state_t line_state;
 
-    LineUart_GetSensorData(&sensor);
+    LineSensorDriver_GetSensorData(&sensor);
     (void)LineFollowing_GetStatus(&control_state);
-    LineUart_GetState(&line_state);
+    LineSensorDriver_GetState(&line_state);
 
     (void)snprintf(
         tx,

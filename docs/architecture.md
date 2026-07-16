@@ -6,7 +6,7 @@ Beta5 最终只保留 `App / Service / BSP / Algorithm / Platform` 五类用户�
 
 | 层 | 职责 | 禁止事项 |
 | --- | --- | --- |
-| App | 初始化、任务调度、ISR adapter、发布读模型、OLED 和 Debug 适配 | 持有业务状态；绕过 Service 决策；新增未列入白名单的 BSP 直连 |
+| App | 初始化和任务调度；硬件相关 ISR、OLED、Debug 由独立 adapter 构建目标承载 | 持有业务状态；绕过 Service 决策；普通 App 目标直连 BSP、Algorithm 或 HAL |
 | Service | 十项能力的唯一状态和决策所有者；定义公开 config/status DTO | 公共头泄漏 BSP/HAL/RTOS/Platform/internal 类型；直接调用 HAL/RTOS/intrinsic |
 | BSP | 原始设备采样、硬件 ID/状态、寄存器映射、transport、Flash 原始读写、电机硬件输出 | 引用 App 或 Service；拥有业务仲裁、滤波策略或运行参数 |
 | Algorithm | PID、运动学、控制器、滤波、标定数学、估计数学和值类型 | 引用 App/Service/BSP/Platform、HAL、RTOS 或全局硬件状态 |
@@ -18,16 +18,16 @@ Beta5 最终只保留 `App / Service / BSP / Algorithm / Platform` 五类用户�
 
 ```text
 Service/
-  motion/          motion control
-  state/           state estimation
-  power/           power management
-  safety/          safety management
-  command/         command management
+  motion_control/
+  state_estimation/
+  power_management/
+  safety_management/
+  command_management/
   teleoperation/   PS2 teleoperation
-  line/            line following
+  line_following/
   communication/   host and wireless communication
-  param/           parameter management
-  system/          system monitoring
+  parameter_management/
+  system_monitoring/
 ```
 
 一个目录对应一个公开能力节点。协议 codec、Flash schema、frame builder 等实现细节必须放在所属目录的 `internal/`，只允许本能力实现和显式开放的 Host Test 使用。
@@ -37,21 +37,21 @@ Service/
 - 每个 Service 定义自己的 `*_config_t`、`*_status_t`，不借用 BSP 状态作为公开 DTO。
 - 公共头只允许标准库类型、Algorithm 值类型和其他 Service 的公开 DTO。
 - `internal/` 头不得被其他 Service、App、BSP 或 Platform 引用。
-- 迁移兼容包装不保存状态：新接口是唯一实现，旧接口只转发；所有消费者迁完后整批删除。
+- 生产代码不保留兼容包装；必要的历史行为夹具只能存在于 `tests/host/compat/`。
 
 ## 构建边界
 
-最终 CMake 静态目标固定为 `f407_algorithm / f407_platform / f407_bsp / f407_service / f407_app`。迁移期间 `f407_domain` 可以继续存在，但不得新增文件、引用或职责；Algorithm 归位完成后一次删除。
+最终 CMake 静态目标固定为 `f407_algorithm / f407_platform / f407_bsp / f407_service / f407_app / f407_app_adapters`。普通 `f407_app` 只链接 Service 与 Platform；`f407_app_adapters` 显式隔离硬件调试、显示、ISR 和传输适配代码。生产树禁止存在 `Domain/`。
 
 ## 自动门禁
 
 ```powershell
-python scripts/check_architecture_dependencies.py
-python scripts/check_naming_conventions.py
-python scripts/check_service_ownership.py
+python scripts/check_architecture_dependencies.py --final
+python scripts/check_naming_conventions.py --final
+python scripts/check_service_ownership.py --final
 ```
 
-普通模式冻结 Beta4 已登记债务且禁止新增。Beta5 发布前追加 `--final`，要求 `Domain/`、混杂配置、公共头泄漏、Service 非法边和旧电机输出所有者全部归零。
+CI 与本地发布验收统一运行 Final 门禁，要求 `Domain/`、混杂配置、公共头泄漏、Service 非法边和旧电机输出所有者全部归零。
 
 ## CubeMX 边界
 

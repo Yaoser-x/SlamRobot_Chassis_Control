@@ -3,7 +3,7 @@
 #include "debug_console_writer.h"
 #include "debug_telemetry.h"
 #include "esp12f_flash_bridge.h"
-#include "esp12f_service.h"
+#include "wireless_communication_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -56,17 +56,17 @@ uint8_t DebugCmdEsp12f_TryHandle(const char *line, uint8_t *debug_velocity_enabl
     }
     if (strcmp(line, "espreset") == 0)
     {
-        Esp12fService_ResetModule();
+        WirelessCommunication_ResetModule();
         ESP_LOG("INFO", "esp12f reset");
     }
     else if (strcmp(line, "espisolate") == 0)
     {
-        Esp12fService_Isolate();
+        WirelessCommunication_Isolate();
         ESP_LOG("INFO", "esp12f isolated until board reset");
     }
     else if (sscanf(line, "espboot %d", &value) == 1)
     {
-        Esp12fService_SetDownloadMode((value != 0) ? 1U : 0U);
+        WirelessCommunication_SetDownloadMode((value != 0) ? 1U : 0U);
         ESP_LOG("INFO", "esp12f %s", (value != 0) ? "download mode" : "normal boot mode");
     }
     else if (strcmp(line, "espflash on") == 0 || strcmp(line, "espat on") == 0)

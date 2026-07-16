@@ -6,18 +6,19 @@
 
 #include "control_config.h"
 #include "bsp_config.h"
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "differential_drive_kinematics.h"
 #include "command_management_service.h"
 #include "system_monitoring_service.h"
 #include "control_service.h"
-#include "wheel_speed_estimator.h"
-#include "imu_bmi270.h"
-#include "motor_output_logic.h"
+#include "wheel_speed_filter.h"
+#include "bmi270_driver.h"
+#include "motor_ph_en_mapper.h"
 #include "param_service.h"
 #include "wheel_speed_pid_controller.h"
 #include "safety_management_service.h"
-#include "upper_protocol.h"
+#include "state_estimation_status.h"
+#include "robot_link_protocol.h"
 
 static uint32_t fake_primask;
 static uint32_t fake_tick;
@@ -190,9 +191,9 @@ static float read_float_le(const uint8_t *in)
 
 static void test_protocol_frame_and_velocity(void)
 {
-    uint8_t                  frame[UPPER_PROTOCOL_MAX_FRAME]              = {0};
-    uint8_t                  payload[UPPER_PROTOCOL_VELOCITY_PAYLOAD_LEN] = {0};
-    upper_velocity_payload_t velocity                                     = {0};
+    uint8_t                  frame[ROBOT_LINK_PROTOCOL_MAX_FRAME]              = {0};
+    uint8_t                  payload[ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN] = {0};
+    upper_velocity_payload_t velocity                                          = {0};
     uint16_t                 frame_len;
     uint8_t                  one_byte_payload = 1U;
 
@@ -203,12 +204,13 @@ static void test_protocol_frame_and_velocity(void)
 
     frame_len = UpperProtocol_BuildFrame(UPPER_CMD_SET_VELOCITY,
                                          payload,
-                                         UPPER_PROTOCOL_VELOCITY_PAYLOAD_LEN,
+                                         ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN,
                                          frame,
                                          (uint16_t)sizeof(frame));
     require_int(frame_len == 15U, "velocity frame length");
-    require_int(frame[0] == UPPER_PROTOCOL_HEAD_0 && frame[1] == UPPER_PROTOCOL_HEAD_1, "frame header");
-    require_int(frame[2] == UPPER_PROTOCOL_CMD_LEN(UPPER_PROTOCOL_VELOCITY_PAYLOAD_LEN), "frame command length");
+    require_int(frame[0] == ROBOT_LINK_PROTOCOL_HEAD_0 && frame[1] == ROBOT_LINK_PROTOCOL_HEAD_1, "frame header");
+    require_int(frame[2] == ROBOT_LINK_PROTOCOL_CMD_LEN(ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN),
+                "frame command length");
     require_int(frame[frame_len - 1U] == UpperProtocol_Checksum8(&frame[2], 12U), "frame checksum");
     require_int(UpperProtocol_ParseVelocityPayload(payload, (uint8_t)sizeof(payload), &velocity) != 0U,
                 "velocity payload parse");
@@ -218,7 +220,7 @@ static void test_protocol_frame_and_velocity(void)
 
     frame_len = UpperProtocol_BuildFrame(UPPER_CMD_ESTOP,
                                          &one_byte_payload,
-                                         UPPER_PROTOCOL_ESTOP_PAYLOAD_LEN,
+                                         ROBOT_LINK_PROTOCOL_ESTOP_PAYLOAD_LEN,
                                          frame,
                                          (uint16_t)sizeof(frame));
     require_int(frame_len == 6U, "estop frame length");
@@ -226,7 +228,7 @@ static void test_protocol_frame_and_velocity(void)
 
     frame_len = UpperProtocol_BuildFrame(UPPER_CMD_LINE_CTRL,
                                          &one_byte_payload,
-                                         UPPER_PROTOCOL_LINE_CTRL_PAYLOAD_LEN,
+                                         ROBOT_LINK_PROTOCOL_LINE_CTRL_PAYLOAD_LEN,
                                          frame,
                                          (uint16_t)sizeof(frame));
     require_int(frame_len == 6U, "line frame length");
@@ -235,12 +237,13 @@ static void test_protocol_frame_and_velocity(void)
 
 static void test_status_v2_payload_layout_and_saturation(void)
 {
-    upper_status_payload_t status                                     = {0};
-    uint8_t                payload[UPPER_PROTOCOL_STATUS_PAYLOAD_LEN] = {0};
+    upper_status_payload_t status                                          = {0};
+    uint8_t                payload[ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN] = {0};
     uint8_t                payload_len;
 
-    require_int(UPPER_PROTOCOL_STATUS_PAYLOAD_LEN == 65U, "status v2 payload length");
-    require_int(UPPER_PROTOCOL_MAX_PAYLOAD >= UPPER_PROTOCOL_STATUS_PAYLOAD_LEN, "status v2 fits max payload");
+    require_int(ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN == 65U, "status v2 payload length");
+    require_int(ROBOT_LINK_PROTOCOL_MAX_PAYLOAD >= ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN,
+                "status v2 fits max payload");
 
     status.battery_voltage = 12.345f;
     status.status_flags = UPPER_STATUS_FLAG_ESTOP | UPPER_STATUS_FLAG_LINE_ENABLED | UPPER_STATUS_FLAG_SPEED_VALID_ALL;
@@ -273,8 +276,8 @@ static void test_status_v2_payload_layout_and_saturation(void)
     status.comm_health_flags        = UPPER_COMM_HEALTH_CRC_ERR | UPPER_COMM_HEALTH_TX_DROP;
 
     payload_len = UpperProtocol_BuildStatusPayload(&status, payload, (uint8_t)sizeof(payload));
-    require_int(payload_len == UPPER_PROTOCOL_STATUS_PAYLOAD_LEN, "status v2 build length");
-    require_int(payload[0] == UPPER_PROTOCOL_VERSION, "status v2 version");
+    require_int(payload_len == ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN, "status v2 build length");
+    require_int(payload[0] == ROBOT_LINK_PROTOCOL_VERSION, "status v2 version");
     require_int(payload[1] == status.status_flags, "status flags");
     require_int(payload[2] == CONTROL_SOURCE_ESP12F, "control source");
     require_int(payload[3] == 0x0FU, "enabled mask");
@@ -308,12 +311,13 @@ static void test_status_v2_payload_layout_and_saturation(void)
 
 static void test_imu_status_payload_extended_layout(void)
 {
-    upper_imu_status_payload_t imu                                            = {0};
-    uint8_t                    payload[UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN] = {0};
+    upper_imu_status_payload_t imu                                                 = {0};
+    uint8_t                    payload[ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN] = {0};
     uint8_t                    payload_len;
 
-    require_int(UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN == 99U, "imu payload extended length");
-    require_int(UPPER_PROTOCOL_MAX_PAYLOAD >= UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN, "imu payload fits max payload");
+    require_int(ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN == 99U, "imu payload extended length");
+    require_int(ROBOT_LINK_PROTOCOL_MAX_PAYLOAD >= ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
+                "imu payload fits max payload");
 
     imu.accel_g[0]            = 1.0f;
     imu.gyro_corrected_dps[2] = 3.0f;
@@ -323,15 +327,15 @@ static void test_imu_status_payload_extended_layout(void)
     imu.timestamp_ms          = 1234UL;
     imu.sensor_time           = 0x00302010UL;
     imu.sample_count          = 42UL;
-    imu.quality_flags         = IMU_BMI270_QUALITY_FIFO_OVERFLOW | IMU_BMI270_QUALITY_ACCEL_ANOMALY;
+    imu.quality_flags         = STATE_ESTIMATION_IMU_QUALITY_FIFO_OVERFLOW | STATE_ESTIMATION_IMU_QUALITY_ACCEL_ANOMALY;
     imu.quality_counters[0]   = 1UL;
     imu.quality_counters[6]   = 7UL;
     imu.status_flags          = UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_SENSOR_TIME;
     imu.temperature_c         = 25;
 
     payload_len = UpperProtocol_BuildImuStatusPayload(&imu, payload, (uint8_t)sizeof(payload));
-    require_int(payload_len == UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN, "imu extended build length");
-    require_int(payload[0] == UPPER_PROTOCOL_VERSION, "imu version");
+    require_int(payload_len == ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN, "imu extended build length");
+    require_int(payload[0] == ROBOT_LINK_PROTOCOL_VERSION, "imu version");
     require_close(read_float_le(&payload[1]), 1.0f, 0.0001f, "imu accel body x");
     require_close(read_float_le(&payload[33]), 90.0f, 0.0001f, "imu yaw");
     require_close(read_float_le(&payload[37]), 1.0f, 0.0001f, "imu quaternion w");
@@ -339,7 +343,8 @@ static void test_imu_status_payload_extended_layout(void)
     require_int(read_u32_le(&payload[53]) == 1234UL, "imu host timestamp");
     require_int(read_u32_le(&payload[57]) == 0x00302010UL, "imu sensor time");
     require_int(read_u32_le(&payload[61]) == 42UL, "imu sample count");
-    require_int(read_u32_le(&payload[65]) == (IMU_BMI270_QUALITY_FIFO_OVERFLOW | IMU_BMI270_QUALITY_ACCEL_ANOMALY),
+    require_int(read_u32_le(&payload[65])
+                    == (STATE_ESTIMATION_IMU_QUALITY_FIFO_OVERFLOW | STATE_ESTIMATION_IMU_QUALITY_ACCEL_ANOMALY),
                 "imu quality flags");
     require_int(read_u32_le(&payload[69]) == 1UL, "imu first quality counter");
     require_int(read_u32_le(&payload[93]) == 7UL, "imu last quality counter");
@@ -347,23 +352,23 @@ static void test_imu_status_payload_extended_layout(void)
     require_int((int8_t)payload[98] == 25, "imu temperature");
     imu.temperature_c = -41;
     require_int(UpperProtocol_BuildImuStatusPayload(&imu, payload, sizeof(payload))
-                    == UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
+                    == ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
                 "negative temperature vector builds");
     require_int((int8_t)payload[98] == -41, "imu negative temperature is direct celsius");
     imu.temperature_c = 87;
     require_int(UpperProtocol_BuildImuStatusPayload(&imu, payload, sizeof(payload))
-                    == UPPER_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
+                    == ROBOT_LINK_PROTOCOL_IMU_STATUS_PAYLOAD_LEN,
                 "positive temperature vector builds");
     require_int((int8_t)payload[98] == 87, "imu positive temperature is direct celsius");
 }
 
 static void test_diagnostic_payload_layout(void)
 {
-    upper_diagnostic_payload_t diagnostic                                     = {0};
-    uint8_t                    payload[UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN] = {0xA5U};
+    upper_diagnostic_payload_t diagnostic                                          = {0};
+    uint8_t                    payload[ROBOT_LINK_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN] = {0xA5U};
     uint8_t                    payload_len;
 
-    require_int(UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN == 28U, "diagnostic payload fixed length");
+    require_int(ROBOT_LINK_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN == 28U, "diagnostic payload fixed length");
     diagnostic.post_done                = 1U;
     diagnostic.imu_status_flags         = UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_CALIBRATED;
     diagnostic.post_error_flags         = 0x01020304UL;
@@ -374,9 +379,9 @@ static void test_diagnostic_payload_layout(void)
     diagnostic.uptime_ms                = 0x10203040UL;
 
     payload_len = UpperProtocol_BuildDiagnosticPayload(&diagnostic, payload, (uint8_t)sizeof(payload));
-    require_int(payload_len == UPPER_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN, "diagnostic build length");
-    require_int(payload[0] == UPPER_PROTOCOL_VERSION, "diagnostic protocol version");
-    require_int(payload[1] == UPPER_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION, "diagnostic schema version");
+    require_int(payload_len == ROBOT_LINK_PROTOCOL_DIAGNOSTIC_PAYLOAD_LEN, "diagnostic build length");
+    require_int(payload[0] == ROBOT_LINK_PROTOCOL_VERSION, "diagnostic protocol version");
+    require_int(payload[1] == ROBOT_LINK_PROTOCOL_DIAGNOSTIC_SCHEMA_VERSION, "diagnostic schema version");
     require_int(payload[2] == 1U, "diagnostic post done");
     require_int(payload[3] == diagnostic.imu_status_flags, "diagnostic imu status");
     require_int(read_u32_le(&payload[4]) == diagnostic.post_error_flags, "diagnostic post flags");
@@ -559,15 +564,15 @@ static void test_side_target_distribution(void)
 
 static void test_default_motor_layout(void)
 {
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M1) == 0U, "m1 disabled");
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M2) != 0U, "m2 enabled");
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M3) != 0U, "m3 enabled");
-    require_int(ChassisLayout_MotorEnabled(MOTOR_ID_M4) == 0U, "m4 disabled");
-    require_int(ChassisLayout_MotorSide(MOTOR_ID_M1) == MOTOR_SIDE_LEFT, "m1 left");
-    require_int(ChassisLayout_MotorSide(MOTOR_ID_M2) == MOTOR_SIDE_LEFT, "m2 left");
-    require_int(ChassisLayout_MotorSide(MOTOR_ID_M3) == MOTOR_SIDE_RIGHT, "m3 right");
-    require_int(ChassisLayout_MotorSide(MOTOR_ID_M4) == MOTOR_SIDE_RIGHT, "m4 right");
-    require_int(ChassisLayout_HasBothSides() != 0U, "both sides enabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M1) == 0U, "m1 disabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M2) != 0U, "m2 enabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M3) != 0U, "m3 enabled");
+    require_int(MotorHardwareLayout_MotorEnabled(MOTOR_ID_M4) == 0U, "m4 disabled");
+    require_int(MotorHardwareLayout_MotorSide(MOTOR_ID_M1) == MOTOR_SIDE_LEFT, "m1 left");
+    require_int(MotorHardwareLayout_MotorSide(MOTOR_ID_M2) == MOTOR_SIDE_LEFT, "m2 left");
+    require_int(MotorHardwareLayout_MotorSide(MOTOR_ID_M3) == MOTOR_SIDE_RIGHT, "m3 right");
+    require_int(MotorHardwareLayout_MotorSide(MOTOR_ID_M4) == MOTOR_SIDE_RIGHT, "m4 right");
+    require_int(MotorHardwareLayout_HasBothSides() != 0U, "both sides enabled");
 }
 
 static void test_encoder_wrap_diff(void)
@@ -617,19 +622,19 @@ static void test_encoder_interval_average_speed(void)
                   "zero interval returns zero");
 }
 
-static void test_motor_output_logic_phase_enable(void)
+static void test_motor_ph_en_mapper_phase_enable(void)
 {
     motor_output_phase_enable_t output;
 
-    output = MotorOutputLogic_ResolvePhaseEnable(300);
+    output = MotorPhEnMapper_ResolvePhaseEnable(300);
     require_int(output.en_permille == 300, "positive drive keeps PWM magnitude on EN");
     require_int(output.phase_high != 0U, "positive drive sets PH high");
 
-    output = MotorOutputLogic_ResolvePhaseEnable(-300);
+    output = MotorPhEnMapper_ResolvePhaseEnable(-300);
     require_int(output.en_permille == 300, "negative drive keeps PWM magnitude on EN");
     require_int(output.phase_high == 0U, "negative drive sets PH low");
 
-    output = MotorOutputLogic_ResolvePhaseEnable(0);
+    output = MotorPhEnMapper_ResolvePhaseEnable(0);
     require_int(output.en_permille == 0, "zero drive disables EN");
     require_int(output.phase_high == 0U, "zero drive leaves PH low");
 }
@@ -755,7 +760,7 @@ static void test_task_timing_next_wake(void)
 
 static void test_imu_state_contract(void)
 {
-    imu_bmi270_state_t state = {0};
+    bmi270_driver_state_t state = {0};
 
     require_int(CHASSIS_IMU_PERIOD_MS == 10U, "imu task period matches 100Hz ODR");
     require_int((sizeof(state.gyro_raw) / sizeof(state.gyro_raw[0])) == 3U, "gyro raw axis count");
@@ -998,7 +1003,7 @@ int main(void)
     test_encoder_wrap_diff();
     test_encoder_speed_window();
     test_encoder_interval_average_speed();
-    test_motor_output_logic_phase_enable();
+    test_motor_ph_en_mapper_phase_enable();
     test_encoder_delta_filter();
     test_encoder_reject_streak_rebuilds_window();
     test_task_timing_next_wake();

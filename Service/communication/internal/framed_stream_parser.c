@@ -33,18 +33,18 @@ frame_parser_result_t FrameParser_Push(frame_parser_t *parser, uint8_t byte, pro
     switch (parser->state)
     {
         case FRAME_PARSER_WAIT_HEAD0:
-            if (byte == UPPER_PROTOCOL_HEAD_0)
+            if (byte == ROBOT_LINK_PROTOCOL_HEAD_0)
             {
                 parser->state = FRAME_PARSER_WAIT_HEAD1;
             }
             break;
 
         case FRAME_PARSER_WAIT_HEAD1:
-            parser->state = (byte == UPPER_PROTOCOL_HEAD_1) ? FRAME_PARSER_WAIT_LEN : FRAME_PARSER_WAIT_HEAD0;
+            parser->state = (byte == ROBOT_LINK_PROTOCOL_HEAD_1) ? FRAME_PARSER_WAIT_LEN : FRAME_PARSER_WAIT_HEAD0;
             break;
 
         case FRAME_PARSER_WAIT_LEN:
-            if (byte == 0U || byte > UPPER_PROTOCOL_CMD_LEN(UPPER_PROTOCOL_MAX_PAYLOAD))
+            if (byte == 0U || byte > ROBOT_LINK_PROTOCOL_CMD_LEN(ROBOT_LINK_PROTOCOL_MAX_PAYLOAD))
             {
                 FrameParser_Reset(parser);
                 return FRAME_PARSER_LENGTH_ERROR;

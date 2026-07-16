@@ -1,35 +1,36 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "adc_monitor.h"
+#include "power_adc_driver.h"
 #include "bsp_config.h"
 #include "control_config.h"
 #include "bsp_config.h"
 #include "chassis_service.h"
 #include "command_management_service.h"
 #include "control_service.h"
-#include "encoder_driver.h"
-#include "imu_bmi270.h"
+#include "wheel_encoder_driver.h"
+#include "bmi270_driver.h"
 #include "param_service.h"
 #include "wheel_speed_pid_controller.h"
 #include "safety_management_service.h"
 #include "state_estimation_service.h"
 #include "power_management_service.h"
 
-static adc_monitor_state_t  fake_adc_state;
-static encoder_state_t      fake_encoder_state;
-static int16_t              fake_signed_pwm[MOTOR_ID_COUNT];
-static uint8_t              fake_fault_stop;
-static uint8_t              fake_primask;
-static uint8_t              fake_maintenance_lock;
-static uint32_t             fake_tick_ms;
-static uint8_t              fake_command_valid;
-static chassis_cmd_t        fake_command;
-static motor_driver_state_t fake_motor_state;
-static uint32_t             fake_encoder_fault_latch_count;
-static imu_bmi270_state_t   fake_imu_state;
-static uint32_t             fake_motion_generation;
+static power_adc_driver_state_t fake_adc_state;
+static wheel_encoder_state_t    fake_encoder_state;
+static int16_t                  fake_signed_pwm[MOTOR_ID_COUNT];
+static uint8_t                  fake_fault_stop;
+static uint8_t                  fake_primask;
+static uint8_t                  fake_maintenance_lock;
+static uint32_t                 fake_tick_ms;
+static uint8_t                  fake_command_valid;
+static chassis_cmd_t            fake_command;
+static motor_driver_state_t     fake_motor_state;
+static uint32_t                 fake_encoder_fault_latch_count;
+static bmi270_driver_state_t    fake_imu_state;
+static uint32_t                 fake_motion_generation;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -56,14 +57,15 @@ uint32_t osKernelGetTickCount(void)
     return fake_tick_ms;
 }
 
-void ImuBmi270_GetState(imu_bmi270_state_t *state)
+void Bmi270Driver_GetState(bmi270_driver_state_t *state)
 {
     *state = fake_imu_state;
 }
 
 uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
 {
-    *state = fake_imu_state;
+    _Static_assert(sizeof(*state) == sizeof(fake_imu_state), "IMU status test fixture layout mismatch");
+    memcpy(state, &fake_imu_state, sizeof(*state));
     return 1U;
 }
 
@@ -223,18 +225,19 @@ void SafetyManagement_LatchEncoderFeedbackFault(void)
     fake_fault_stop = 1U;
 }
 
-void EncoderDriver_GetState(encoder_state_t *state)
+void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
 {
     *state = fake_encoder_state;
 }
 
 uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *state)
 {
-    *state = fake_encoder_state;
+    _Static_assert(sizeof(*state) == sizeof(fake_encoder_state), "wheel status test fixture layout mismatch");
+    memcpy(state, &fake_encoder_state, sizeof(*state));
     return 1U;
 }
 
-float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
+float WheelEncoderDriver_GetMotorSpeedMps(motor_id_t motor)
 {
     if ((uint32_t)motor >= MOTOR_ID_COUNT)
     {
@@ -243,14 +246,15 @@ float EncoderDriver_GetMotorSpeedMps(motor_id_t motor)
     return fake_encoder_state.speed_mps[(uint32_t)motor];
 }
 
-void AdcMonitor_GetState(adc_monitor_state_t *state)
+void PowerAdcDriver_GetState(power_adc_driver_state_t *state)
 {
     *state = fake_adc_state;
 }
 
 uint32_t PowerManagement_GetStatus(power_management_status_t *state)
 {
-    *state = fake_adc_state;
+    _Static_assert(sizeof(*state) == sizeof(fake_adc_state), "power status test fixture layout mismatch");
+    memcpy(state, &fake_adc_state, sizeof(*state));
     return 1U;
 }
 
@@ -265,8 +269,8 @@ static void require_int(int condition, const char *message)
 
 static void reset_fake_chassis(void)
 {
-    fake_adc_state                 = (adc_monitor_state_t){0};
-    fake_encoder_state             = (encoder_state_t){0};
+    fake_adc_state                 = (power_adc_driver_state_t){0};
+    fake_encoder_state             = (wheel_encoder_state_t){0};
     fake_fault_stop                = 0U;
     fake_maintenance_lock          = 0U;
     fake_primask                   = 0U;
@@ -275,7 +279,7 @@ static void reset_fake_chassis(void)
     fake_command                   = (chassis_cmd_t){0};
     fake_motor_state               = (motor_driver_state_t){0};
     fake_encoder_fault_latch_count = 0UL;
-    fake_imu_state                 = (imu_bmi270_state_t){0};
+    fake_imu_state                 = (bmi270_driver_state_t){0};
     fake_motion_generation         = 0UL;
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
@@ -469,7 +473,7 @@ static void test_all_remote_sources_share_straight_line_controller_and_imu_degra
     }
 }
 
-static chassis_service_snapshot_t run_straight_with_imu(const imu_bmi270_state_t *imu)
+static chassis_service_snapshot_t run_straight_with_imu(const bmi270_driver_state_t *imu)
 {
     param_model_t              params;
     chassis_service_snapshot_t state;
@@ -489,7 +493,7 @@ static chassis_service_snapshot_t run_straight_with_imu(const imu_bmi270_state_t
 
 static void test_straight_heading_gate_distinguishes_imu_failures(void)
 {
-    imu_bmi270_state_t         imu = {0};
+    bmi270_driver_state_t      imu = {0};
     chassis_service_snapshot_t state;
 
     imu.online         = 1U;
@@ -503,7 +507,7 @@ static void test_straight_heading_gate_distinguishes_imu_failures(void)
     require_int(state.straight_heading_degraded != 0U, "stale IMU degrades");
 
     imu.last_update_ms = 1000U;
-    imu.quality_flags  = IMU_BMI270_QUALITY_ATTITUDE_INVALID;
+    imu.quality_flags  = STATE_ESTIMATION_IMU_QUALITY_ATTITUDE_INVALID;
     state              = run_straight_with_imu(&imu);
     require_int(state.straight_heading_degraded == 0U,
                 "attitude-invalid IMU not degraded during settle — gyro rate damping works");

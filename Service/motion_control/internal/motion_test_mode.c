@@ -1,6 +1,6 @@
 #include "motion_test_mode.h"
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "motor_output_coordinator.h"
 #include "platform_critical.h"
 #include "platform_time.h"
@@ -103,10 +103,10 @@ void MotionTestMode_SetRawSides(motion_test_mode_t *mode,
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
         int16_t forward =
-            (ChassisLayout_MotorSide((motor_id_t)index) == MOTOR_SIDE_LEFT) ? left_forward : right_forward;
+            (MotorHardwareLayout_MotorSide((motor_id_t)index) == MOTOR_SIDE_LEFT) ? left_forward : right_forward;
         int16_t reverse =
-            (ChassisLayout_MotorSide((motor_id_t)index) == MOTOR_SIDE_LEFT) ? left_reverse : right_reverse;
-        if (ChassisLayout_MotorEnabled((motor_id_t)index) == 0U)
+            (MotorHardwareLayout_MotorSide((motor_id_t)index) == MOTOR_SIDE_LEFT) ? left_reverse : right_reverse;
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)index) == 0U)
         {
             forward = 0;
             reverse = 0;
@@ -153,7 +153,7 @@ void MotionTestMode_SetRawMotor(motion_test_mode_t *mode,
         mode->raw_forward[index] = 0;
         mode->raw_reverse[index] = 0;
     }
-    if (ChassisLayout_MotorEnabled(motor) == 0U)
+    if (MotorHardwareLayout_MotorEnabled(motor) == 0U)
     {
         mode->raw_input_enabled = 0U;
         mode->open_loop_enabled = 0U;
@@ -195,10 +195,10 @@ void MotionTestMode_ApplyOpenLoop(const motion_test_mode_snapshot_t *test,
         chassis->motor_pid_active[index]    = 0U;
         chassis->motor_feedback_lost[index] = 0U;
         chassis->motor_error_mps[index]     = 0.0f;
-        if (ChassisLayout_MotorEnabled(motor) != 0U)
+        if (MotorHardwareLayout_MotorEnabled(motor) != 0U)
         {
-            output = (ChassisLayout_MotorSide(motor) == MOTOR_SIDE_LEFT) ? test->open_loop_side[MOTOR_SIDE_LEFT]
-                                                                         : test->open_loop_side[MOTOR_SIDE_RIGHT];
+            output = (MotorHardwareLayout_MotorSide(motor) == MOTOR_SIDE_LEFT) ? test->open_loop_side[MOTOR_SIDE_LEFT]
+                                                                               : test->open_loop_side[MOTOR_SIDE_RIGHT];
         }
         MotorOutputCoordinator_SetMotor(chassis, motor, output);
     }
@@ -221,7 +221,7 @@ void MotionTestMode_ApplyRaw(const motion_test_mode_snapshot_t *test,
         motor_id_t motor  = (motor_id_t)index;
         int16_t    output = 0;
 
-        if (ChassisLayout_MotorEnabled(motor) != 0U)
+        if (MotorHardwareLayout_MotorEnabled(motor) != 0U)
         {
             output =
                 MotorOutputCoordinator_Clamp((int32_t)test->raw_forward[index] - (int32_t)test->raw_reverse[index]);

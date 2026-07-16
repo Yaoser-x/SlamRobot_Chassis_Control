@@ -1,7 +1,7 @@
 #include "motion_maintenance.h"
 
 #include "motion_control_service.h"
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "motor_driver.h"
 #include "safety_management_service.h"
 #include "state_estimation_service.h"
@@ -26,7 +26,7 @@ static uint8_t MotionMaintenanceService_IsStationary(void)
         {
             return 0U;
         }
-        if (ChassisLayout_MotorEnabled((motor_id_t)i) != 0U
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U
             && (encoder_state.speed_valid[i] == 0U || encoder_state.speed_mps[i] < -maintenance_max_speed_mps
                 || encoder_state.speed_mps[i] > maintenance_max_speed_mps))
         {

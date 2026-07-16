@@ -5,7 +5,7 @@
  *   - 首次启动开放 F407_Chassis_Setup 设置密码，配置后创建 F407_Chassis
  *   - WebSocket 实时遥控 + 遥测回传
  *   - 手机网页操控界面（虚拟摇杆 + 速度/方向控制）
- *   - upper_protocol 帧协议与 STM32F407 USART2 通信
+ *   - robot_link_protocol 帧协议与 STM32F407 USART2 通信
  *
  * 硬件：
  *   ESP12F (ESP8266)  UART0 @ 115200 8N1
@@ -85,7 +85,7 @@ struct DiagnosticStatus {
 };
 
 // ============================================================================
-// 2. CRC-8/Dallas 查表（与 STM32 upper_protocol 一致）
+// 2. CRC-8/Dallas 查表（与 STM32 robot_link_protocol 一致）
 // ============================================================================
 
 static const uint8_t CRC8_TABLE[256] PROGMEM = {
@@ -199,7 +199,7 @@ static bool saveConfig(const String &password) {
 }
 
 // ============================================================================
-// 3. upper_protocol 帧协议（与 STM32 一致）
+// 3. robot_link_protocol 帧协议（与 STM32 一致）
 // ============================================================================
 
 #define PROTO_HEAD_0        0xA5

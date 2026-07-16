@@ -18,7 +18,7 @@ extern "C"
     /** Update whether current-zero accumulation is allowed from State and Motor facts. */
     void     PowerManagement_UpdateStationary(void);
     void     PowerManagement_RequestCurrentZeroCalibration(void);
-    void     PowerManagement_ApplyCurrentZeroCalibration(const uint16_t zero_raw[POWER_MEASUREMENT_MOTOR_COUNT]);
+    void     PowerManagement_ApplyCurrentZeroCalibration(const uint16_t zero_raw[POWER_MANAGEMENT_MOTOR_COUNT]);
     uint32_t PowerManagement_GetStatus(power_management_status_t *status);
 
 #ifdef __cplusplus

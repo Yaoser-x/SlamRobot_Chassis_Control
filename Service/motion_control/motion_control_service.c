@@ -9,7 +9,7 @@
 #include "platform_critical.h"
 #include "platform_time.h"
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 
 #include "differential_drive_kinematics.h"
 
@@ -113,7 +113,7 @@ static void MotionControl_SyncDriverFacts(void)
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
         chassis_state.motor_effective_output_permille[index] = motor_state.effective_pwm[index];
-        if (ChassisLayout_MotorEnabled((motor_id_t)index) != 0U)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)index) != 0U)
         {
             chassis_state.motor_enabled_mask |= (uint8_t)(1U << index);
         }
@@ -277,7 +277,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         wheel_target_planner_input_t  planner_input = {0};
         wheel_target_planner_result_t planner_result;
 
-        if (ChassisLayout_HasBothSides() == 0U)
+        if (MotorHardwareLayout_HasBothSides() == 0U)
         {
             CommandManagement_ClearAll();
             ChassisService_StopOutput();
@@ -302,15 +302,16 @@ static void ChassisService_StepImpl(uint32_t now_ms)
             state_estimation_imu_status_t imu_state;
 
             (void)StateEstimation_GetImu(&imu_state);
-            planner_input.imu_valid  = (imu_state.online != 0U && imu_state.gyro_calibrated != 0U
-                                       && (uint32_t)(now_ms - imu_state.last_update_ms) <= 100U
-                                       && (imu_state.quality_flags
-                                           & (IMU_BMI270_QUALITY_SPI_ERROR | IMU_BMI270_QUALITY_TIMESTAMP_ERROR
-                                              | IMU_BMI270_QUALITY_GYRO_SATURATION | IMU_BMI270_QUALITY_INIT_FAILED
-                                              | IMU_BMI270_QUALITY_PROFILE_MISMATCH))
-                                              == 0U)
-                                           ? 1U
-                                           : 0U;
+            planner_input.imu_valid =
+                (imu_state.online != 0U && imu_state.gyro_calibrated != 0U
+                 && (uint32_t)(now_ms - imu_state.last_update_ms) <= 100U
+                 && (imu_state.quality_flags
+                     & (STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR | STATE_ESTIMATION_IMU_QUALITY_TIMESTAMP_ERROR
+                        | STATE_ESTIMATION_IMU_QUALITY_GYRO_SATURATION | STATE_ESTIMATION_IMU_QUALITY_INIT_FAILED
+                        | STATE_ESTIMATION_IMU_QUALITY_PROFILE_MISMATCH))
+                        == 0U)
+                    ? 1U
+                    : 0U;
             planner_input.gyro_z_dps = imu_state.gyro_corrected_dps[2];
         }
         WheelTargetPlanner_Step(&target_planner, &planner_input, &planner_result);
@@ -352,7 +353,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
             int16_t permille;
             int16_t base_permille;
             int8_t  actuator_limit_direction = 0;
-            if (ChassisLayout_MotorEnabled((motor_id_t)i) == 0U)
+            if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) == 0U)
             {
                 WheelSpeedControlLoop_ResetMotor(&speed_loop, (motor_id_t)i);
                 chassis_state.motor_pid_active[i]    = 0U;

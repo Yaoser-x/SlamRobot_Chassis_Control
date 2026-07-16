@@ -1,10 +1,15 @@
 #include "power_management_service.h"
 
-#include "adc_monitor.h"
-#include "chassis_layout.h"
+#include "power_adc_driver.h"
+#include "motor_hardware_layout.h"
 #include "motor_driver.h"
 #include "platform_critical.h"
 #include "state_estimation_service.h"
+
+#include <string.h>
+
+_Static_assert(sizeof(power_management_status_t) == sizeof(power_adc_driver_state_t),
+               "Power Service and ADC driver snapshots must remain layout-compatible");
 
 static power_management_config_t power_config;
 static power_management_status_t power_status;
@@ -13,10 +18,12 @@ static uint8_t                   power_initialized;
 
 static void PowerManagement_Publish(void)
 {
+    power_adc_driver_state_t  raw;
     power_management_status_t next;
     platform_critical_state_t critical;
 
-    AdcMonitor_GetState(&next);
+    PowerAdcDriver_GetState(&raw);
+    memcpy(&next, &raw, sizeof(next));
     critical     = PlatformCritical_Enter();
     power_status = next;
     power_generation++;
@@ -25,6 +32,7 @@ static void PowerManagement_Publish(void)
 
 uint8_t PowerManagement_Init(const power_management_config_t *config)
 {
+    power_adc_driver_state_t  raw;
     power_management_status_t initial_status;
     platform_critical_state_t critical;
 
@@ -32,9 +40,10 @@ uint8_t PowerManagement_Init(const power_management_config_t *config)
     {
         return 0U;
     }
-    AdcMonitor_SetUpdatePeriodMs((uint32_t)config->update_period_ms);
-    AdcMonitor_Init();
-    AdcMonitor_GetState(&initial_status);
+    PowerAdcDriver_SetUpdatePeriodMs((uint32_t)config->update_period_ms);
+    PowerAdcDriver_Init();
+    PowerAdcDriver_GetState(&raw);
+    memcpy(&initial_status, &raw, sizeof(initial_status));
     critical          = PlatformCritical_Enter();
     power_config      = *config;
     power_status      = initial_status;
@@ -55,7 +64,7 @@ void PowerManagement_Update(void)
     {
         return;
     }
-    AdcMonitor_Update();
+    PowerAdcDriver_Update();
     PowerManagement_Publish();
 }
 
@@ -71,10 +80,10 @@ void PowerManagement_UpdateStationary(void)
     }
     (void)StateEstimation_GetWheel(&wheel);
     MotorDriver_GetState(&motor);
-    for (uint8_t index = 0U; index < POWER_MEASUREMENT_MOTOR_COUNT; ++index)
+    for (uint8_t index = 0U; index < POWER_MANAGEMENT_MOTOR_COUNT; ++index)
     {
         if (motor.effective_pwm[index] != 0
-            || (ChassisLayout_MotorEnabled((motor_id_t)index) != 0U
+            || (MotorHardwareLayout_MotorEnabled((motor_id_t)index) != 0U
                 && (wheel.speed_valid[index] == 0U || wheel.speed_mps[index] < -power_config.current_zero_max_speed_mps
                     || wheel.speed_mps[index] > power_config.current_zero_max_speed_mps)))
         {
@@ -82,18 +91,18 @@ void PowerManagement_UpdateStationary(void)
             break;
         }
     }
-    AdcMonitor_SetCurrentZeroStationary(stationary);
+    PowerAdcDriver_SetCurrentZeroStationary(stationary);
 }
 
 void PowerManagement_RequestCurrentZeroCalibration(void)
 {
-    AdcMonitor_RequestCurrentZeroCalibration();
+    PowerAdcDriver_RequestCurrentZeroCalibration();
     PowerManagement_Publish();
 }
 
-void PowerManagement_ApplyCurrentZeroCalibration(const uint16_t zero_raw[POWER_MEASUREMENT_MOTOR_COUNT])
+void PowerManagement_ApplyCurrentZeroCalibration(const uint16_t zero_raw[POWER_MANAGEMENT_MOTOR_COUNT])
 {
-    AdcMonitor_ApplyCurrentZeroCalibration(zero_raw);
+    PowerAdcDriver_ApplyCurrentZeroCalibration(zero_raw);
     PowerManagement_Publish();
 }
 

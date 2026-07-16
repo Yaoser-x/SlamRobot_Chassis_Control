@@ -7,10 +7,10 @@ static float SideAverage(float left, float right)
     return 0.5f * (left + right);
 }
 
-size_t DebugStraightTelemetry_FormatJson(char                          *buffer,
-                                         size_t                         buffer_size,
-                                         const motion_control_status_t *chassis,
-                                         const adc_monitor_state_t     *adc)
+size_t DebugStraightTelemetry_FormatJson(char                           *buffer,
+                                         size_t                          buffer_size,
+                                         const motion_control_status_t  *chassis,
+                                         const power_adc_driver_state_t *adc)
 {
     int written;
 
@@ -70,10 +70,10 @@ size_t DebugStraightTelemetry_FormatCsvHeader(char *buffer, size_t buffer_size)
     return (written > 0) ? (size_t)written : 0U;
 }
 
-size_t DebugStraightTelemetry_FormatCsv(char                          *buffer,
-                                        size_t                         buffer_size,
-                                        const motion_control_status_t *chassis,
-                                        const adc_monitor_state_t     *adc)
+size_t DebugStraightTelemetry_FormatCsv(char                           *buffer,
+                                        size_t                          buffer_size,
+                                        const motion_control_status_t  *chassis,
+                                        const power_adc_driver_state_t *adc)
 {
     int written;
 

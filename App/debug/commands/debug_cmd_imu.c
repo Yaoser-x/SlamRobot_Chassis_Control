@@ -1,7 +1,7 @@
 #include "debug_cmd_imu.h"
 
 #include "debug_console_writer.h"
-#include "imu_bmi270.h"
+#include "bmi270_driver.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -42,7 +42,7 @@ static void DebugCmdImu_PrintDiag(void)
     char              tx[DEBUG_CMD_IMU_TX_SIZE];
     imu_bmi270_diag_t diag;
 
-    if (ImuBmi270_Diagnose(&diag) == 0U)
+    if (Bmi270Driver_Diagnose(&diag) == 0U)
     {
         IMU_LOG("WARN", "bmi270 diag failed");
         return;
@@ -73,13 +73,13 @@ static void DebugCmdImu_PrintDiag(void)
 
 static void DebugCmdImu_Calibrate(int value)
 {
-    uint16_t           samples = (value > 0) ? (uint16_t)value : 0U;
-    imu_bmi270_state_t imu_state;
+    uint16_t              samples = (value > 0) ? (uint16_t)value : 0U;
+    bmi270_driver_state_t imu_state;
 
     IMU_LOG("INFO", "bmi270 gyro calibration request: keep still");
-    if (ImuBmi270_CalibrateGyro(samples, 10U) == 0U)
+    if (Bmi270Driver_CalibrateGyro(samples, 10U) == 0U)
     {
-        ImuBmi270_GetState(&imu_state);
+        Bmi270Driver_GetState(&imu_state);
         IMU_LOG("WARN",
                 "bmi270 gyro calibration failed reason=%s axis=%u samples=%u mean_dps=%.2f,%.2f,%.2f "
                 "span_dps=%.2f,%.2f,%.2f min_dps=%.2f,%.2f,%.2f max_dps=%.2f,%.2f,%.2f init=%u err=%u "
@@ -105,7 +105,7 @@ static void DebugCmdImu_Calibrate(int value)
                 imu_state.online);
         return;
     }
-    ImuBmi270_GetState(&imu_state);
+    Bmi270Driver_GetState(&imu_state);
     IMU_LOG("INFO",
             "bmi270 gyro calibration accepted state=%u samples=%u; use status/acal for progress",
             imu_state.gyro_auto_cal_state,
@@ -122,7 +122,7 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imutest") == 0)
     {
-        uint8_t probe_ok = ImuBmi270_ProbeNow();
+        uint8_t probe_ok = Bmi270Driver_ProbeNow();
         if (probe_ok != 0U)
         {
             IMU_LOG("INFO", "bmi270 probe ok");
@@ -140,14 +140,14 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imuinit") == 0)
     {
-        imu_bmi270_state_t state;
-        if (ImuBmi270_ConfigNow() != 0U)
+        bmi270_driver_state_t state;
+        if (Bmi270Driver_ConfigNow() != 0U)
         {
             IMU_LOG("INFO", "bmi270 init ok");
         }
         else
         {
-            ImuBmi270_GetState(&state);
+            Bmi270Driver_GetState(&state);
             IMU_LOG("WARN",
                     "bmi270 init failed init=%u err=%u chip=0x%02X online=%u",
                     state.init_state,
@@ -164,13 +164,13 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imucalclear") == 0)
     {
-        ImuBmi270_ClearCalibration();
+        Bmi270Driver_ClearCalibration();
         IMU_LOG("INFO", "bmi270 gyro calibration cleared");
         return 1U;
     }
     if (sscanf(line, "imu %d", &value) == 1)
     {
-        (void)ImuBmi270_SetEnabled((value != 0) ? 1U : 0U);
+        (void)Bmi270Driver_SetEnabled((value != 0) ? 1U : 0U);
         IMU_LOG("INFO", "imu %s", (value != 0) ? "enabled" : "disabled");
         return 1U;
     }

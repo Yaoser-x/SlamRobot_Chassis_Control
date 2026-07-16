@@ -57,7 +57,11 @@ jobs:
         run: |
           BIN="build/${{ matrix.preset }}/F407_V2.0.bin"
           ELF="build/${{ matrix.preset }}/F407_V2.0.elf"
-          MAX_BYTES=245760
+          if [ "${{ matrix.preset }}" = "Debug" ]; then
+            MAX_BYTES=262144
+          else
+            MAX_BYTES=245760
+          fi
           MAX_RAM_BYTES=114688
           ACTUAL_BYTES=$(stat -c%s "$BIN")
           read TEXT_BYTES DATA_BYTES BSS_BYTES _ < <(arm-none-eabi-size "$ELF" | tail -1)
@@ -140,9 +144,9 @@ jobs:
 
       - name: Five-layer architecture check
         run: |
-          python3 scripts/check_architecture_dependencies.py
-          python3 scripts/check_naming_conventions.py
-          python3 scripts/check_service_ownership.py
+          python3 scripts/check_architecture_dependencies.py --final
+          python3 scripts/check_naming_conventions.py --final
+          python3 scripts/check_service_ownership.py --final
 
       - name: Install clang-format
         run: |

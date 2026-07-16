@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate unique runtime motor-output ownership during Beta5 migration."""
+"""Validate final unique runtime motor-output ownership."""
 
 from __future__ import annotations
 
@@ -14,20 +14,12 @@ SOURCE_SUFFIXES = {".c", ".h"}
 MOTOR_OUTPUT_API = re.compile(
     r"\bMotorDriver_(?:Init|SetSpeedGetter|SetDirectionConfig|SetPermille|SetSidePermille|Stop|StopSide|StopAll)\s*\("
 )
-LEGACY_MOTION_OWNERS = {
-    "Service/chassis/chassis_maintenance_service.c",
-    "Service/chassis/chassis_output_service.c",
-    "Service/chassis/chassis_param_sync.c",
-    "Service/chassis/chassis_service.c",
-}
-
-
 def strip_comments(text: str) -> str:
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
     return re.sub(r"//[^\n]*", " ", text)
 
 
-def analyze(root: Path, final: bool = False) -> list[str]:
+def analyze(root: Path, final: bool = True) -> list[str]:
     root = Path(root).resolve()
     errors: list[str] = []
     for scan_root in SCAN_ROOTS:
@@ -41,8 +33,7 @@ def analyze(root: Path, final: bool = False) -> list[str]:
             code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
             for match in MOTOR_OUTPUT_API.finditer(code):
                 final_owner = relative.startswith("Service/motion_control/")
-                migration_owner = final_owner or relative in LEGACY_MOTION_OWNERS
-                if (final and not final_owner) or (not final and not migration_owner):
+                if not final_owner:
                     line = code.count("\n", 0, match.start()) + 1
                     errors.append(f"{relative}:{line}: runtime motor output API is owned only by Motion Control")
     return sorted(set(errors))
@@ -63,7 +54,7 @@ def main(final: bool | None = None) -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
-    print(f"Service ownership check passed ({'final' if final else 'migration'} motor output owner).")
+    print("Service ownership check passed (final motor output owner).")
     return 0
 
 

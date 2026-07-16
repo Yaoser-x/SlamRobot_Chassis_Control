@@ -1,6 +1,6 @@
 #include "motor_output_coordinator.h"
 
-#include "chassis_layout.h"
+#include "motor_hardware_layout.h"
 #include "motor_current_limiter.h"
 #include "motor_driver.h"
 #include "power_management_service.h"
@@ -65,7 +65,7 @@ void MotorOutputCoordinator_SetMotorWithPower(motion_control_status_t         *s
     {
         return;
     }
-    if (ChassisLayout_MotorEnabled(motor) == 0U)
+    if (MotorHardwareLayout_MotorEnabled(motor) == 0U)
     {
         snapshot->motor_current_limited[motor] = 0U;
         snapshot->motor_output_permille[motor] = 0;
@@ -97,7 +97,7 @@ uint8_t MotorOutputCoordinator_AnyActive(const motion_control_status_t *snapshot
     }
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
-        if (ChassisLayout_MotorEnabled((motor_id_t)index) != 0U && snapshot->motor_output_permille[index] != 0)
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)index) != 0U && snapshot->motor_output_permille[index] != 0)
         {
             return 1U;
         }

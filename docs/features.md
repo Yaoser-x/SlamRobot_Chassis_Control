@@ -114,7 +114,7 @@ firmware/esp12f/        ESP12F Arduino 固件源码
 ```
 控制源提交命令 → ControlService（优先级仲裁 + 独立超时 + reject-and-stop）
     → ChassisService_Step（每 10ms，motorTask 驱动）
-        → ChassisLayout 查表（电机启用/侧别/方向）
+        → MotorHardwareLayout 查表（电机启用/侧别/方向）
         → DifferentialDriveKinematics_ResolveDifferentialTargets（linear_x/angular_z → 左右轮目标速度）
         → 速度斜坡（加速/减速限制 + 方向反转状态机）
         → 直行补偿（轮速耦合 + IMU 航向保持）
@@ -175,8 +175,8 @@ v_right = linear_x + (angular_z × track_width / 2)
 
 ### 2.2 电机布局系统
 
-**模块：** `BSP/chassis_layout.c`
-**头文件：** `BSP/chassis_layout.h`
+**模块：** `BSP/motor_hardware_layout.c`
+**头文件：** `BSP/motor_hardware_layout.h`
 **配置：** `Domain/config/control_config.h / BSP/bsp_config.h`
 
 **编译期配置常量（control_config.h / bsp_config.h）：**
@@ -201,12 +201,12 @@ v_right = linear_x + (angular_z × track_width / 2)
 | `CHASSIS_M4_ENCODER_DIR` | 1 | M4 编码器方向 |
 
 **查表 API：**
-- `ChassisLayout_IsMotorEnabled(motor)` — 电机是否启用
-- `ChassisLayout_GetSide(motor)` — 返回 SIDE_LEFT / SIDE_RIGHT / SIDE_NONE
-- `ChassisLayout_GetMotorDir(motor)` — 返回 1 或 -1
-- `ChassisLayout_GetEncoderDir(motor)` — 返回 1 或 -1
-- `ChassisLayout_GetMotorCount()` — 启用的电机总数
-- `ChassisLayout_GetEnabledMask()` — 启用电机位掩码
+- `MotorHardwareLayout_IsMotorEnabled(motor)` — 电机是否启用
+- `MotorHardwareLayout_GetSide(motor)` — 返回 SIDE_LEFT / SIDE_RIGHT / SIDE_NONE
+- `MotorHardwareLayout_GetMotorDir(motor)` — 返回 1 或 -1
+- `MotorHardwareLayout_GetEncoderDir(motor)` — 返回 1 或 -1
+- `MotorHardwareLayout_GetMotorCount()` — 启用的电机总数
+- `MotorHardwareLayout_GetEnabledMask()` — 启用电机位掩码
 
 **V2.0 硬件映射（以 BSP 为准）：**
 
@@ -305,8 +305,8 @@ typedef struct {
 
 ### 2.6 电机输出逻辑
 
-**模块：** `BSP/motor/motor_output_logic.c`
-**头文件：** `BSP/motor/motor_output_logic.h`
+**模块：** `BSP/motor/motor_ph_en_mapper.c`
+**头文件：** `BSP/motor/motor_ph_en_mapper.h`
 
 **功能：** 将有符号 permille（-900~+900）分解为（绝对值 permille + 方向位）
 
@@ -316,7 +316,7 @@ typedef struct {
     uint8_t phase_high;    // 1=正转(forward), 0=反转(reverse)
 } motor_output_phase_enable_t;
 
-MotorOutputLogic_ResolvePhaseEnable(signed_permille)
+MotorPhEnMapper_ResolvePhaseEnable(signed_permille)
     → 正数: phase_high=1, en_permille=绝对值
     → 负数: phase_high=0, en_permille=绝对值
 ```
@@ -434,7 +434,7 @@ typedef struct {
 1. **重入防护：** 设置 `control_step_active` 标记，防止维护锁期间重入
 2. **刷新参数：** 检测 `ParamService` generation 变化，热重载 PID 参数
 3. **故障更新：** 读取 `MotorDriver_UpdateFaults()` 检查 nFAULT / Break
-4. **编码器更新：** 读取 `EncoderDriver_Update()` 获取各轮速度
+4. **编码器更新：** 读取 `WheelEncoderDriver_Update()` 获取各轮速度
 5. **安全检查：**
    - 维护锁激活 → 清除输出，等待解锁
    - ESTOP/Fault-Stop → 紧急停止
@@ -480,8 +480,8 @@ typedef struct {
 2. 复位任务计时系统
 3. 从 Flash 加载持久化参数
 4. 初始化 MotorDriver（启动资格验证 + MOE）
-5. 初始化 EncoderDriver（四路编码器定时器）
-6. 初始化 AdcMonitor（DMA + TIM8 触发）
+5. 初始化 WheelEncoderDriver（四路编码器定时器）
+6. 初始化 PowerAdcDriver（DMA + TIM8 触发）
 7. 初始化 IMU BMI270（SPI + 配置表上传）
 8. 初始化 IMU 校准门控
 9. 应用已保存的 IMU 校准数据
@@ -489,7 +489,7 @@ typedef struct {
 11. 初始化 SafetyService
 12. 初始化 ChassisService（含 PID、ControlService、CurrentGuard）
 13. 初始化 UpperUart（USART3 DMA RX）
-14. 初始化 LineUart（USART4 DMA RX）
+14. 初始化 LineSensorDriver（USART4 DMA RX）
 15. 初始化 LineControl
 16. 初始化 Ps2Control
 17. 初始化 Esp12fComm
@@ -655,7 +655,7 @@ typedef enum {
 
 **模块：** `Service/control/ps2_control_service.c`（~447 行）
 **头文件：** `Service/control/ps2_control_service.h`
-**硬件驱动：** `BSP/ps2/ps2_hw.c`
+**硬件驱动：** `BSP/ps2/ps2_controller_driver.c`
 
 **数据结构：**
 ```c
@@ -719,7 +719,7 @@ typedef struct {
 **关键 IMU 质量位掩码（以下任何一位置位则阻止定角宏）：**
 `SPI_ERROR | INIT_FAILED | FIFO_OVERFLOW | TIMESTAMP_ERROR | GYRO_SATURATION | ATTITUDE_INVALID | PROFILE_MISMATCH`
 
-**PS2 硬件协议（BSP/ps2/ps2_hw.c）：**
+**PS2 硬件协议（BSP/ps2/ps2_controller_driver.c）：**
 - 4 线 GPIO bit-bang SPI（无硬件 SPI 外设）：PS2_DO(CMD)、PS2_DI(DAT)、PS2_CLK、PS2_CS(ATT)
 - DWT 周期计数器精确时序：半周期 10µs → ~50kHz SPI 时钟
 - 9 字节帧协议：TX `[0x01, 0x42, ...]` → RX `[0xFF, MODE, 0x5A, BTN1, BTN2, RX, RY, LX, LY]`
@@ -854,8 +854,8 @@ typedef struct {
 
 ### 4.1 编码器系统
 
-**模块：** `BSP/encoder/encoder_driver.c` + `BSP/encoder/encoder_math.c`
-**头文件：** `BSP/encoder/encoder_driver.h` + `BSP/encoder/encoder_math.h`
+**模块：** `BSP/encoder/wheel_encoder_driver.c` + `BSP/encoder/encoder_math.c`
+**头文件：** `BSP/encoder/wheel_encoder_driver.h` + `BSP/encoder/encoder_math.h`
 
 **硬件配置：**
 
@@ -888,7 +888,7 @@ typedef struct {
     // 同侧一致性
     uint32_t side_consistency_flags; // ENCODER_SIDE_CONSISTENCY_*
     uint32_t last_update_ms;
-} encoder_state_t;
+} wheel_encoder_state_t;
 ```
 
 **侧一致性检查标志（6 个）：**
@@ -898,12 +898,12 @@ typedef struct {
 - `ENCODER_SIDE_CONSISTENCY_RIGHT_SPEED` / `_COUNT` / `_DIRECTION` — 同右
 
 **关键函数：**
-- `EncoderDriver_Init()` — 启动所有编码器定时器
-- `EncoderDriver_Update(now_ms)` — 读取计数器、计算增量/速度、异常检测、侧一致性交叉检查
-- `EncoderDriver_GetState(*state)` — 原子状态快照
-- `EncoderDriver_GetCountsPerRev()` — 返回 2464 (counts/rev)
-- `EncoderDriver_GetMotorSpeedMps(motor)` — 单电机速度查询
-- `EncoderDriver_DiffCount(now, last, period)` — 16/32 位计数器回绕安全差分
+- `WheelEncoderDriver_Init()` — 启动所有编码器定时器
+- `WheelEncoderDriver_Update(now_ms)` — 读取计数器、计算增量/速度、异常检测、侧一致性交叉检查
+- `WheelEncoderDriver_GetState(*state)` — 原子状态快照
+- `WheelEncoderDriver_GetCountsPerRev()` — 返回 2464 (counts/rev)
+- `WheelEncoderDriver_GetMotorSpeedMps(motor)` — 单电机速度查询
+- `WheelEncoderDriver_DiffCount(now, last, period)` — 16/32 位计数器回绕安全差分
 
 **编码器数学（encoder_math.c）：**
 - `EncoderMath_DiffCount(now, last, period)` — 回绕安全差分
@@ -925,8 +925,8 @@ typedef struct {
 
 ### 4.2 ADC 电流与电压采样
 
-**模块：** `BSP/adc/adc_monitor.c`
-**头文件：** `BSP/adc/adc_monitor.h`
+**模块：** `BSP/adc/power_adc_driver.c`
+**头文件：** `BSP/adc/power_adc_driver.h`
 
 **硬件配置：**
 - **ADC：** ADC1，5 通道扫描（4 路电机 IPROPI 电流 + 1 路电池分压）
@@ -947,13 +947,13 @@ typedef struct {
     float current_noise_a[4];         // 噪声（标准差）
     float battery_voltage;
     float left_current_a, right_current_a; // 侧平均
-    uint32_t valid_flags;             // ADC_MONITOR_VALID_SAMPLES_READY
-    uint32_t invalid_reason_flags;    // ADC_MONITOR_INVALID_*（8 种）
+    uint32_t valid_flags;             // POWER_ADC_DRIVER_VALID_SAMPLES_READY
+    uint32_t invalid_reason_flags;    // POWER_ADC_DRIVER_INVALID_*（8 种）
     uint32_t current_quality_flags[4]; // 零点不稳定/窗口太小/窗口尖峰
     // 诊断计数器
     uint32_t dma_half_count, dma_full_count;
     uint32_t dma_error_count, zero_cal_count;
-} adc_monitor_state_t;
+} power_adc_driver_state_t;
 ```
 
 **统计数据（每电机）：**
@@ -966,27 +966,27 @@ typedef struct {
 **低通滤波：** EMA α=`MOTOR_CURRENT_FILTER_ALPHA`（默认 0.25）
 
 **关键函数：**
-- `AdcMonitor_Init()` — 启动 ADC DMA + TIM8 触发
-- `AdcMonitor_Update()` — ISR 安全原子快照 + 统计计算（由 safetyTask 调用）
-- `AdcMonitor_GetState(*state)` — 原子状态读取
-- `AdcMonitor_RequestCurrentZeroCalibration()` — 启动零点校准
-- `AdcMonitor_ApplyCurrentZeroCalibration(zero_raw[4])` — 强设零点参考
-- `AdcMonitor_SetCurrentZeroStationary(stationary)` — 静止门控（零点累积需底盘停稳）
+- `PowerAdcDriver_Init()` — 启动 ADC DMA + TIM8 触发
+- `PowerAdcDriver_Update()` — ISR 安全原子快照 + 统计计算（由 safetyTask 调用）
+- `PowerAdcDriver_GetState(*state)` — 原子状态读取
+- `PowerAdcDriver_RequestCurrentZeroCalibration()` — 启动零点校准
+- `PowerAdcDriver_ApplyCurrentZeroCalibration(zero_raw[4])` — 强设零点参考
+- `PowerAdcDriver_SetCurrentZeroStationary(stationary)` — 静止门控（零点累积需底盘停稳）
 - `HAL_ADC_ConvCpltCallback()` / `HAL_ADC_ErrorCallback()` — ISR 处理
 
 **有效性标志：**
-- `ADC_MONITOR_VALID_SAMPLES_READY` — DMA 有足够样本
-- `ADC_MONITOR_VALID_CURRENT_ZERO_READY` — 零点校准完成
+- `POWER_ADC_DRIVER_VALID_SAMPLES_READY` — DMA 有足够样本
+- `POWER_ADC_DRIVER_VALID_CURRENT_ZERO_READY` — 零点校准完成
 
 **无效原因（8 种）：**
-`ADC_MONITOR_INVALID_NO_SAMPLES` / `_DMA_ERROR` / `_ZERO_NOT_CALIBRATED` / `_ZERO_STALE` / `_ZERO_UNSTABLE` / `_WINDOW_EMPTY` / `_ADC_OVERVOLTAGE` / `_TIMEOUT`
+`POWER_ADC_DRIVER_INVALID_NO_SAMPLES` / `_DMA_ERROR` / `_ZERO_NOT_CALIBRATED` / `_ZERO_STALE` / `_ZERO_UNSTABLE` / `_WINDOW_EMPTY` / `_ADC_OVERVOLTAGE` / `_TIMEOUT`
 
 **质量标志（3 种）：**
-`ADC_MONITOR_QUALITY_ZERO_UNSTABLE` / `_WINDOW_TOO_SMALL` / `_WINDOW_SPIKE`
+`POWER_ADC_DRIVER_QUALITY_ZERO_UNSTABLE` / `_WINDOW_TOO_SMALL` / `_WINDOW_SPIKE`
 
 ### 4.3 BMI270 IMU
 
-**模块：** `BSP/imu/imu_bmi270.c`（主驱动）、`imu_bmi270_calibration.c`（校准）、`imu_bmi270_config.c`（配置表）、`imu_bmi270_fifo.c`（FIFO 解析）、`imu_bmi270_math.c`（数学/融合）、`imu_bmi270_profile.c`（运行模式）、`imu_bmi270_time.c`（时间处理）
+**模块：** `BSP/imu/bmi270_driver.c`（主驱动）、`imu_bmi270_calibration.c`（校准）、`imu_bmi270_config.c`（配置表）、`imu_bmi270_fifo.c`（FIFO 解析）、`bmi270_driver_math.c`（数学/融合）、`imu_bmi270_profile.c`（运行模式）、`imu_bmi270_time.c`（时间处理）
 
 **硬件接口：**
 - SPI2，自定义 CS (IMU_CS)
@@ -1042,7 +1042,7 @@ typedef struct {
     uint32_t init_attempt_count, spi_error_count;
     // 陀螺校准状态
     imu_bmi270_gyro_cal_state_t gyro_cal;
-} imu_bmi270_state_t;
+} bmi270_driver_state_t;
 ```
 
 **质量标志（10 种）：**
@@ -1061,21 +1061,21 @@ typedef struct {
 | `IMU_BMI270_QUALITY_TEMPERATURE_INVALID` | 温度读数无效 |
 
 **关键函数（主驱动）：**
-- `ImuBmi270_Init()` — 清零状态，加载默认值
-- `ImuBmi270_SetEnabled(enabled)` / `ImuBmi270_SetProfile(profile)`
-- `ImuBmi270_ProbeNow()` — 读 chip ID（期望 0x24）
-- `ImuBmi270_ConfigNow()` — 全初始化：复位 → 加载 8192 字节配置文件 → 验证 profile 寄存器回读
-- `ImuBmi270_Update()` — 主更新：优先读 FIFO，失败则回退直接读寄存器
-- `ImuBmi270_OnDataReadyFromIsr()` — ISR 递增 DRDY 计数（通知 imuTask）
-- `ImuBmi270_Diagnose(*diag)` — SPI 健康检查 + bit-bang MISO pull 检测
-- `ImuBmi270_CalibrateGyro(samples, delay_ms)` — 手动陀螺校准请求
-- `ImuBmi270_ServiceCalibration(now_ms, stationary)` — 自动校准状态机服务
-- `ImuBmi270_ClearCalibration()` / `ImuBmi270_ApplyGyroBias(bias_dps)`
-- `ImuBmi270_ApplyCalibration(*cal)` / `ImuBmi270_GetCalibration(*cal)`
-- `ImuBmi270_GetState(*state)` — 原子读取
-- `ImuBmi270_RawFrameHasSignal(...)` — 全零检测（死传感器）
+- `Bmi270Driver_Init()` — 清零状态，加载默认值
+- `Bmi270Driver_SetEnabled(enabled)` / `Bmi270Driver_SetProfile(profile)`
+- `Bmi270Driver_ProbeNow()` — 读 chip ID（期望 0x24）
+- `Bmi270Driver_ConfigNow()` — 全初始化：复位 → 加载 8192 字节配置文件 → 验证 profile 寄存器回读
+- `Bmi270Driver_Update()` — 主更新：优先读 FIFO，失败则回退直接读寄存器
+- `Bmi270Driver_OnDataReadyFromIsr()` — ISR 递增 DRDY 计数（通知 imuTask）
+- `Bmi270Driver_Diagnose(*diag)` — SPI 健康检查 + bit-bang MISO pull 检测
+- `Bmi270Driver_CalibrateGyro(samples, delay_ms)` — 手动陀螺校准请求
+- `Bmi270Driver_ServiceCalibration(now_ms, stationary)` — 自动校准状态机服务
+- `Bmi270Driver_ClearCalibration()` / `Bmi270Driver_ApplyGyroBias(bias_dps)`
+- `Bmi270Driver_ApplyCalibration(*cal)` / `Bmi270Driver_GetCalibration(*cal)`
+- `Bmi270Driver_GetState(*state)` — 原子读取
+- `Bmi270Driver_RawFrameHasSignal(...)` — 全零检测（死传感器）
 
-**Mahony AHRS 融合（imu_bmi270_math.c）：**
+**Mahony AHRS 融合（bmi270_driver_math.c）：**
 - 算法：Mahony 互补滤波器
 - 输入：陀螺角速度 (dps) + 加速度 (g)
 - 输出：四元数 (w,x,y,z) + roll/pitch/yaw (degrees)
@@ -1159,8 +1159,8 @@ typedef struct {
 
 ### 4.5 巡线传感器
 
-**模块：** `BSP/line/line_uart.c`
-**头文件：** `BSP/line/line_uart.h`
+**模块：** `BSP/line/line_sensor_driver.c`
+**头文件：** `BSP/line/line_sensor_driver.h`
 
 **硬件：** HiWonder 八通道红外巡线模块，USART4 + DMA 循环缓冲（128 字节）
 
@@ -1189,16 +1189,16 @@ typedef struct {
     uint16_t last_frame_len;
     uint8_t last_frame[32];
     uint8_t tx_busy;
-} line_uart_state_t;
+} line_sensor_driver_state_t;
 ```
 
 **关键函数：**
-- `LineUart_Init()` — 启动 DMA RX
-- `LineUart_Update()` — 处理 DMA 循环缓冲区，解析帧
-- `LineUart_GetState(*state)` / `LineUart_GetSensorData(*data)` — 状态/数据查询
-- `LineUart_InitSensor()` — 发送 0x00 进入手动模式
-- `LineUart_RequestAnalog()` — 发送 0x02 触发模拟量查询
-- `LineUart_OnTxCplt()` / `LineUart_OnUartError()` — UART 事件处理
+- `LineSensorDriver_Init()` — 启动 DMA RX
+- `LineSensorDriver_Update()` — 处理 DMA 循环缓冲区，解析帧
+- `LineSensorDriver_GetState(*state)` / `LineSensorDriver_GetSensorData(*data)` — 状态/数据查询
+- `LineSensorDriver_InitSensor()` — 发送 0x00 进入手动模式
+- `LineSensorDriver_RequestAnalog()` — 发送 0x02 触发模拟量查询
+- `LineSensorDriver_OnTxCplt()` / `LineSensorDriver_OnUartError()` — UART 事件处理
 
 **关键常量：**
 | 常量 | 值 | 说明 |
@@ -1211,7 +1211,7 @@ typedef struct {
 
 ### 4.6 电池电压监测
 
-**模块：** 集成在 `BSP/adc/adc_monitor.c`、`Service/power_management/` 和 `Service/safety_management/` 中
+**模块：** 集成在 `BSP/adc/power_adc_driver.c`、`Service/power_management/` 和 `Service/safety_management/` 中
 
 **采样：**
 - ADC1 通道（VBAT_SENSE, PC4）
@@ -1235,8 +1235,8 @@ typedef struct {
 
 ### 5.1 Upper Protocol V2
 
-**模块：** `Service/communication/internal/upper_protocol.c`
-**头文件：** `Service/communication/internal/upper_protocol.h`
+**模块：** `Service/communication/internal/robot_link_protocol.c`
+**头文件：** `Service/communication/internal/robot_link_protocol.h`
 
 **帧格式：**
 ```
@@ -1293,8 +1293,8 @@ typedef struct {
 
 ### 5.2 USART3 上位机链路
 
-**模块：** `Service/communication/upper_uart_service.c`
-**头文件：** `Service/communication/upper_uart_service.h`
+**模块：** `Service/communication/host_communication_service.c`
+**头文件：** `Service/communication/host_communication_service.h`
 
 **硬件：** USART3 (PD8/PD9)，DMA 循环接收（128 字节环缓冲）
 
@@ -1324,15 +1324,15 @@ WAIT_HEAD0 → WAIT_HEAD1 → WAIT_LEN → WAIT_BODY → 帧完成 → CRC 校�
 - `last_valid_frame_ms` — 最近有效帧时间（供 OLED 在线检测）
 
 **关键函数：**
-- `UpperUartService_Init()` — 配置 DMA RX，重置解析状态
-- `UpperUartService_Update()` — 主循环（200Hz）：轮询 DMA 环缓冲、驱动 RX 状态机、发送周期帧
-- `UpperUartService_HandleFrame(cmd, *payload, len)` — 帧分发：SET_VELOCITY→ControlService, ESTOP, LINE_CTRL, CLEAR_FAULT
-- `UpperUartService_OnDmaHalf()` / `_OnDmaFull()` / `_OnTxComplete()` / `_OnUartError()` — HAL 回调
+- `HostCommunication_Init()` — 配置 DMA RX，重置解析状态
+- `HostCommunication_Update()` — 主循环（200Hz）：轮询 DMA 环缓冲、驱动 RX 状态机、发送周期帧
+- `HostCommunication_HandleFrame(cmd, *payload, len)` — 帧分发：SET_VELOCITY→ControlService, ESTOP, LINE_CTRL, CLEAR_FAULT
+- `HostCommunication_OnDmaHalf()` / `_OnDmaFull()` / `_OnTxComplete()` / `_OnUartError()` — HAL 回调
 
 ### 5.3 ESP12F WiFi 通信
 
-**模块：** `Service/communication/esp12f_service.c`
-**头文件：** `Service/communication/esp12f_service.h`
+**模块：** `Service/communication/wireless_communication_service.c`
+**头文件：** `Service/communication/wireless_communication_service.h`
 
 **硬件：** USART2 (PD5/PD6)，中断驱动环缓冲接收
 
@@ -1352,14 +1352,14 @@ typedef struct {
 ```
 
 **关键函数：**
-- `Esp12fService_Init()` — 初始化环缓冲，启动 RX
-- `Esp12fService_Update()` — 200Hz 主循环：跳过隔离/flash bridge 状态，帧间超时检测（100ms），轮询 RX 环，发送周期状态（100ms）和诊断（200ms）
-- `Esp12fService_HandleFrame(cmd, *payload, len)` — 同 Upper 分发：SET_VELOCITY(source=ESP12F), ESTOP, LINE_CTRL, CLEAR_FAULT
-- `Esp12fService_OnRxCplt()` — ISR 环缓冲入队
-- `Esp12fService_ResetModule()` — GPIO 复位 ESP（5ms RST 脉冲）
-- `Esp12fService_Isolate()` — 全隔离：禁用 USART2 IRQ/DMA，中止 UART，保持 ESP 复位
-- `Esp12fService_SetDownloadMode(enabled)` — 控制 ESP IO0（烧录模式）
-- `Esp12fService_GetState(*state)` — 诊断快照
+- `WirelessCommunication_Init()` — 初始化环缓冲，启动 RX
+- `WirelessCommunication_Update()` — 200Hz 主循环：跳过隔离/flash bridge 状态，帧间超时检测（100ms），轮询 RX 环，发送周期状态（100ms）和诊断（200ms）
+- `WirelessCommunication_HandleFrame(cmd, *payload, len)` — 同 Upper 分发：SET_VELOCITY(source=ESP12F), ESTOP, LINE_CTRL, CLEAR_FAULT
+- `WirelessCommunication_OnRxCplt()` — ISR 环缓冲入队
+- `WirelessCommunication_ResetModule()` — GPIO 复位 ESP（5ms RST 脉冲）
+- `WirelessCommunication_Isolate()` — 全隔离：禁用 USART2 IRQ/DMA，中止 UART，保持 ESP 复位
+- `WirelessCommunication_SetDownloadMode(enabled)` — 控制 ESP IO0（烧录模式）
+- `WirelessCommunication_GetState(*state)` — 诊断快照
 
 ### 5.4 ESP12F 通信透传桥
 
@@ -1518,7 +1518,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 **SafetyService_Update() 每 20ms（safetyTask）执行流程：**
 
 1. **任务超时更新：** 调用 ChassisTaskTiming_UpdateTimeouts，获取 task_timeout_mask
-2. **ADC 更新：** AdcMonitor_Update() → 电流/电压/有效性标志
+2. **ADC 更新：** PowerAdcDriver_Update() → 电流/电压/有效性标志
 3. **电机故障：** MotorDriver_UpdateFaults() → DRV nFAULT 状态
 4. **过流评估（带去抖）：**
    - 启动消隐：上电后 PWM=0 期间 ARM，激活后 blank 期
@@ -1586,17 +1586,17 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 **两阶段评估：**
 
-**阶段一 — 启动前（POST_Run，调度器启动前）：**
+**阶段一 — 启动前（PowerOnSelfTest_Run，调度器启动前）：**
 1. 探测 DRV nFAULT（所有 nFAULT 必须为高）
 2. 探测 IMU（BMI270 chip ID 必须为 0x24）
 3. 输出结果到 USART1
 
-**阶段二 — 延迟检查（POST_UpdateRuntime，safetyTask 驱动）：**
+**阶段二 — 延迟检查（PowerOnSelfTest_UpdateRuntime，safetyTask 驱动）：**
 1. 等待 ADC 电流零点就绪（超时 2000ms）
 2. 等待编码器速度有效（超时 2000ms）
 3. 最终结果输出
 
-**错误标志：** `POST_ERROR_DRV_FAULT` / `POST_ERROR_ADC` / `POST_ERROR_IMU` / `POST_ERROR_ENCODER`
+**错误标志：** `PowerOnSelfTest_ERROR_DRV_FAULT` / `PowerOnSelfTest_ERROR_ADC` / `PowerOnSelfTest_ERROR_IMU` / `PowerOnSelfTest_ERROR_ENCODER`
 
 ### 6.7 Reset Trace v4 崩溃追踪
 
@@ -1736,7 +1736,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 7.4 LED 状态指示
 
-**模块：** `BSP/led/led_status.c`
+**模块：** `BSP/led/status_led_driver.c`
 **硬件：** TEST_LED (PE6)
 
 **5 种闪烁模式：**
@@ -1824,14 +1824,14 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | # | Target | 覆盖模块 |
 |---|--------|---------|
 | 1 | `f407_v2_host` | 协议 V2、控制仲裁、ESTOP/fault-stop、差速、编码器差分、任务时序、IMU 状态 |
-| 2 | `chassis_layout_2wd` | 默认两驱布局 |
+| 2 | `motor_hardware_layout_2wd` | 默认两驱布局 |
 | 3 | `runtime_direction_apply` | 运行时电机/编码器方向覆盖 |
 | 4 | `straight_controller` | 双向 trim、gyro PI、饱和降速与 IMU 退化 |
 | 5 | `esp_link_policy` | ESP 链路策略（在线/离线/500ms 超时/neutral） |
 | 6 | `esp_frame_parser` | ESP 帧解析器（帧头/CRC/长度校验） |
-| 7 | `adc_monitor` | ADC 电流零点、M2/M3 映射、电流 EMA、电池 EMA |
-| 8 | `adc_monitor_stack_budget` | ADC monitor 任务栈预算（<=256 字节） |
-| 9 | `line_uart` | 巡线帧解析、校验失败、丢线恢复 |
+| 7 | `power_adc_driver` | ADC 电流零点、M2/M3 映射、电流 EMA、电池 EMA |
+| 8 | `power_adc_driver_stack_budget` | ADC monitor 任务栈预算（<=256 字节） |
+| 9 | `line_sensor_driver` | 巡线帧解析、校验失败、丢线恢复 |
 | 10 | `line_control` | LineControl enable generation、超时、安全撤销 |
 | 11 | `line_calibration` | 双表面标定：采集、均值、分离度、active_low |
 | 12 | `upper_uart` | USART3 协议解析、超时重置、CRC 错误 |
@@ -1850,7 +1850,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | 25 | `oled_ssd1306` | SSD1306 OLED 驱动 |
 | 26 | `imu_pipeline` | IMU 校准门控、FIFO 解析、Mahony 融合、坐标映射 |
 | 27 | `param_service` | ParamService 读写、校验、默认值、generation |
-| 28 | `encoder_driver` | Encoder 短临界区发布、运行时轮径 |
+| 28 | `wheel_encoder_driver` | Encoder 短临界区发布、运行时轮径 |
 | 29 | `flash_param` | Flash A/B 双区、CRC、schema 迁移、legacy 兼容 |
 | 30 | `power_on_self_test` | POST 快照评估、运行时就绪、超时 |
 | 31 | `oled_selfcheck` | OLED 自检逻辑（纯函数） |
@@ -1928,7 +1928,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 4. 故障检查：MotorDriver_UpdateFaults() → nFAULT / Break 状态
 
-5. 编码器更新：EncoderDriver_Update(now_ms) → 四轮速度
+5. 编码器更新：WheelEncoderDriver_Update(now_ms) → 四轮速度
 
 6. 安全检查：
    ├── 维护锁激活 → 清零输出，跳过控制
@@ -1964,7 +1964,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 14. 反馈丢失检测：启用编码器无效 + 非零请求 150ms 内无运动 → 整车停车
 
 15. PWM 输出：MotorDriver_SetPermille(motor, permille)
-    → MotorOutputLogic_ResolvePhaseEnable → (abs_permille, phase_bit)
+    → MotorPhEnMapper_ResolvePhaseEnable → (abs_permille, phase_bit)
     → TIM1 CCRx + GPIO PH 输出
 ```
 
@@ -1994,7 +1994,7 @@ BMI270 INT1 (PE0) ──(上升沿)──→ EXTI0 ISR
   └── osThreadFlagsSet(imuTask, DRDY_BIT)
        └── imuTask 唤醒
 
-ImuBmi270_Update():
+Bmi270Driver_Update():
   ├── 尝试 FIFO 读取（最多 8 帧）
   │   └── ImuBmi270Fifo_Parse() → accel_raw[] + gyro_raw[] + sensor_time
   ├── FIFO 失败时回退直接寄存器读取
@@ -2022,7 +2022,7 @@ Mahony AHRS：
 
 自动校准门控：
   ImuCalibrationGate_Update() → 检测静止（PWM=0 + 速度<0.02 + 加速度稳定 + 陀螺稳定）
-    → 满足 100 样本 → ImuBmi270_ServiceCalibration() 触发自动校准
+    → 满足 100 样本 → Bmi270Driver_ServiceCalibration() 触发自动校准
     → 累积 500 样本 → ImuBmi270Calibration_GyroBiasAtTemperature() → 保存到 Flash
 ```
 
