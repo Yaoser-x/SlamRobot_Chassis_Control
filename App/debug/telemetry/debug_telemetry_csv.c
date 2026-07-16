@@ -19,7 +19,7 @@ void DebugTelemetryCsv_Print(uint32_t now_ms, const debug_full_log_snapshot_t *s
     motion_control_status_t        chassis_state = snapshot->chassis;
     safety_management_status_t     monitor_state = snapshot->monitor;
     motor_driver_state_t           motor_state   = snapshot->motor;
-    bmi270_driver_state_t          imu_state     = snapshot->imu;
+    state_estimation_imu_status_t  imu_state     = snapshot->imu;
     teleoperation_status_t         ps2_state     = snapshot->ps2;
     line_sensor_driver_state_t     line_state    = snapshot->line;
     wireless_communication_state_t esp_state     = snapshot->esp;

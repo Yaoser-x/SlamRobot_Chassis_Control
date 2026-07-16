@@ -12,8 +12,7 @@ static void require_int(int condition, const char *message)
     }
 }
 
-static void
-feed_constant(line_sensor_calibration_t *calibration, line_sensor_calibration_surface_t surface, uint16_t base)
+static void feed_constant(line_calibration_model_t *calibration, line_calibration_surface_t surface, uint16_t base)
 {
     uint16_t raw[LINE_CALIBRATION_CHANNELS];
 
@@ -30,13 +29,13 @@ feed_constant(line_sensor_calibration_t *calibration, line_sensor_calibration_su
 
 static void test_black_line_white_floor_calibrates_active_low(void)
 {
-    line_sensor_calibration_t calibration;
-    uint16_t                  thresholds[LINE_CALIBRATION_CHANNELS];
-    uint8_t                   active_low = 0U;
+    line_calibration_model_t calibration;
+    uint16_t                 thresholds[LINE_CALIBRATION_CHANNELS];
+    uint8_t                  active_low = 0U;
 
     LineSensorCalibration_Init(&calibration);
-    feed_constant(&calibration, LINE_CALIBRATION_SURFACE_FLOOR, 900U);
-    feed_constant(&calibration, LINE_CALIBRATION_SURFACE_LINE, 200U);
+    feed_constant(&calibration, LINE_CALIBRATION_MODEL_SURFACE_FLOOR, 900U);
+    feed_constant(&calibration, LINE_CALIBRATION_MODEL_SURFACE_LINE, 200U);
     require_int(LineSensorCalibration_Apply(&calibration, thresholds, &active_low) != 0U, "separated surfaces apply");
     require_int(active_low == 1U, "lower black line values select active-low polarity");
     require_int(thresholds[0] == 551U, "threshold is midpoint of sample means");
@@ -44,13 +43,13 @@ static void test_black_line_white_floor_calibrates_active_low(void)
 
 static void test_low_separation_is_rejected(void)
 {
-    line_sensor_calibration_t calibration;
-    uint16_t                  thresholds[LINE_CALIBRATION_CHANNELS];
-    uint8_t                   active_low;
+    line_calibration_model_t calibration;
+    uint16_t                 thresholds[LINE_CALIBRATION_CHANNELS];
+    uint8_t                  active_low;
 
     LineSensorCalibration_Init(&calibration);
-    feed_constant(&calibration, LINE_CALIBRATION_SURFACE_FLOOR, 500U);
-    feed_constant(&calibration, LINE_CALIBRATION_SURFACE_LINE, 480U);
+    feed_constant(&calibration, LINE_CALIBRATION_MODEL_SURFACE_FLOOR, 500U);
+    feed_constant(&calibration, LINE_CALIBRATION_MODEL_SURFACE_LINE, 480U);
     require_int(LineSensorCalibration_Apply(&calibration, thresholds, &active_low) == 0U,
                 "ambiguous surfaces are rejected");
     require_int(calibration.fail_mask == 0xFFU, "all ambiguous channels are reported");

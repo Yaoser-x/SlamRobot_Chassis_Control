@@ -1,5 +1,5 @@
 #include "robot_config.h"
-#include "app_imu_calibration.h"
+#include "imu_calibration_coordinator.h"
 #include "power_adc_driver.h"
 #include "motor_hardware_layout.h"
 #include "wheel_encoder_driver.h"
@@ -8,24 +8,30 @@
 #include "motion_control_service.h"
 #include "motor_driver.h"
 #include "parameter_management_service.h"
-#include "param_persistence.h"
+#include "parameter_persistence_backend.h"
 #include "power_management_service.h"
 #include "state_estimation_service.h"
+#include "imu_estimation_pipeline.h"
+#include "wheel_estimation_pipeline.h"
 #include "system_monitoring_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-static wheel_encoder_state_t         fake_wheel;
-static bmi270_driver_state_t         fake_imu;
-static power_adc_driver_state_t      fake_adc;
-static motor_driver_state_t          fake_motor;
-static wheel_encoder_driver_config_t last_wheel_encoder_config;
-static bmi270_calibration_t          fake_calibration;
-static uint8_t                       fake_zero_stationary;
-static uint32_t                      external_call_in_critical_count;
-static uint32_t                      persistence_save_count;
-static flash_param_bundle_t          last_saved_bundle;
+static wheel_encoder_sample_t          fake_wheel_raw;
+static state_estimation_wheel_status_t fake_wheel;
+static bmi270_driver_state_t           fake_imu_device;
+static state_estimation_imu_status_t   fake_imu;
+static bmi270_sample_t                 fake_imu_sample;
+static uint8_t                         fake_imu_sample_pending;
+static power_adc_driver_state_t        fake_adc;
+static motor_driver_state_t            fake_motor;
+static float                           last_wheel_radius_m;
+static imu_calibration_t               fake_calibration;
+static uint8_t                         fake_zero_stationary;
+static uint32_t                        external_call_in_critical_count;
+static uint32_t                        persistence_save_count;
+static flash_param_bundle_t            last_saved_bundle;
 
 static void require_int(int condition, const char *message)
 {
@@ -47,56 +53,119 @@ static void record_external_call(void)
 void WheelEncoderDriver_Init(void)
 {
     record_external_call();
-    fake_wheel                    = (wheel_encoder_state_t){0};
-    fake_wheel.count[MOTOR_ID_M2] = 17;
+    fake_wheel_raw                    = (wheel_encoder_sample_t){0};
+    fake_wheel_raw.count[MOTOR_ID_M2] = 17U;
 }
 
-void WheelEncoderDriver_Update(uint32_t now_ms, const wheel_encoder_driver_config_t *config)
+void WheelEncoderDriver_Read(wheel_encoder_sample_t *sample)
 {
     record_external_call();
-    last_wheel_encoder_config = *config;
+    *sample = fake_wheel_raw;
+}
+
+void WheelEstimationPipeline_Init(void)
+{
+    fake_wheel                    = (state_estimation_wheel_status_t){0};
+    fake_wheel.count[MOTOR_ID_M2] = (int32_t)fake_wheel_raw.count[MOTOR_ID_M2];
+}
+
+void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
+                                    uint32_t                         now_ms,
+                                    float                            wheel_radius_m,
+                                    const int8_t                     encoder_dir[STATE_ESTIMATION_MOTOR_COUNT],
+                                    state_estimation_wheel_status_t *status)
+{
+    (void)encoder_dir;
+    record_external_call();
+    last_wheel_radius_m       = wheel_radius_m;
     fake_wheel.last_update_ms = now_ms;
-}
-
-void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
-{
-    record_external_call();
-    *state = fake_wheel;
+    for (uint8_t index = 0U; index < STATE_ESTIMATION_MOTOR_COUNT; ++index)
+    {
+        fake_wheel.count[index] = (int32_t)sample->count[index];
+    }
+    *status = fake_wheel;
 }
 
 void Bmi270Driver_Init(void)
 {
     record_external_call();
-    fake_imu            = (bmi270_driver_state_t){0};
-    fake_imu.chip_id    = 0x24U;
-    fake_imu.init_state = STATE_ESTIMATION_IMU_INIT_STATE_SAMPLING;
+    fake_imu_device            = (bmi270_driver_state_t){0};
+    fake_imu_device.chip_id    = 0x24U;
+    fake_imu_device.init_state = BMI270_DRIVER_INIT_SAMPLING;
+    fake_imu_sample            = (bmi270_sample_t){0};
+    fake_imu_sample.accel_g[2] = 1.0f;
+    fake_imu_sample_pending    = 0U;
 }
 
 uint8_t Bmi270Driver_Update(void)
 {
     record_external_call();
-    fake_imu.last_update_ms += 10U;
-    fake_imu.sample_count++;
+    fake_imu_device.last_update_ms += 10U;
+    fake_imu_device.sample_count++;
+    fake_imu_sample.timestamp_ms = fake_imu_device.last_update_ms;
+    fake_imu_sample_pending      = 1U;
+    return 1U;
+}
+
+uint8_t Bmi270Driver_TakeSample(bmi270_sample_t *sample)
+{
+    if (fake_imu_sample_pending == 0U)
+    {
+        return 0U;
+    }
+    *sample                 = fake_imu_sample;
+    fake_imu_sample_pending = 0U;
     return 1U;
 }
 
 void Bmi270Driver_OnDataReadyFromIsr(void)
 {
     record_external_call();
-    fake_imu.drdy_count++;
+    fake_imu_device.drdy_count++;
 }
 
-void Bmi270Driver_ServiceCalibration(uint32_t now_ms, uint8_t stationary)
+void Bmi270Driver_GetState(bmi270_driver_state_t *state)
 {
     record_external_call();
+    *state = fake_imu_device;
+}
+
+void ImuEstimationPipeline_Init(void)
+{
+    fake_imu                 = (state_estimation_imu_status_t){0};
+    fake_imu.chip_id         = fake_imu_device.chip_id;
+    fake_imu.init_state      = STATE_ESTIMATION_IMU_INIT_STATE_SAMPLING;
+    fake_imu.body_accel_g[2] = 1.0f;
+}
+
+void ImuEstimationPipeline_Process(const bmi270_sample_t         *sample,
+                                   const bmi270_driver_state_t   *device,
+                                   state_estimation_imu_status_t *status)
+{
+    fake_imu.chip_id        = device->chip_id;
+    fake_imu.last_update_ms = sample->timestamp_ms;
+    fake_imu.sample_count   = device->sample_count;
+    for (uint8_t axis = 0U; axis < 3U; ++axis)
+    {
+        fake_imu.body_accel_g[axis]       = sample->accel_g[axis];
+        fake_imu.gyro_corrected_dps[axis] = sample->gyro_dps[axis];
+    }
+    *status = fake_imu;
+}
+
+void ImuEstimationPipeline_ServiceCalibration(uint32_t                       now_ms,
+                                              uint8_t                        stationary,
+                                              state_estimation_imu_status_t *status)
+{
     (void)now_ms;
     if (stationary != 0U)
     {
+        status->gyro_calibrated  = 1U;
         fake_imu.gyro_calibrated = 1U;
     }
 }
 
-uint8_t Bmi270Driver_ApplyCalibration(const bmi270_calibration_t *calibration)
+uint8_t ImuEstimationPipeline_ApplyCalibration(const imu_calibration_t *calibration)
 {
     record_external_call();
     if (calibration == 0)
@@ -108,22 +177,24 @@ uint8_t Bmi270Driver_ApplyCalibration(const bmi270_calibration_t *calibration)
     return 1U;
 }
 
-void Bmi270Driver_GetCalibration(bmi270_calibration_t *calibration)
+void ImuEstimationPipeline_GetCalibration(imu_calibration_t *calibration)
 {
     record_external_call();
     *calibration = fake_calibration;
 }
 
-void Bmi270Driver_ClearCalibration(void)
+void ImuEstimationPipeline_ClearCalibration(void)
 {
     record_external_call();
-    fake_calibration = (bmi270_calibration_t){0};
+    fake_calibration = (imu_calibration_t){0};
 }
 
-void Bmi270Driver_GetState(bmi270_driver_state_t *state)
+uint8_t ImuEstimationPipeline_BeginCalibration(uint16_t samples, uint16_t interval_ms, uint8_t automatic)
 {
-    record_external_call();
-    *state = fake_imu;
+    (void)samples;
+    (void)interval_ms;
+    (void)automatic;
+    return 1U;
 }
 
 void PowerAdcDriver_Init(void)
@@ -221,6 +292,39 @@ flash_param_status_t ParamPersistence_Load(flash_param_bundle_t *bundle)
     return FLASH_PARAM_STATUS_EMPTY;
 }
 
+static uint8_t fake_get_calibration_motion(int16_t output_permille[4], uint8_t *enabled_mask)
+{
+    motion_control_status_t status;
+
+    (void)MotionControl_GetStatus(&status);
+    for (uint8_t index = 0U; index < 4U; ++index)
+    {
+        output_permille[index] = status.motor_effective_output_permille[index];
+    }
+    *enabled_mask = status.motor_enabled_mask;
+    return 1U;
+}
+
+static uint8_t fake_begin_calibration_maintenance(void)
+{
+    return (MotionControl_BeginMaintenance() == MOTION_CONTROL_MAINTENANCE_OK) ? 1U : 0U;
+}
+
+static uint8_t fake_persist_calibration(const imu_calibration_t *calibration, uint8_t persist_current_zero)
+{
+    ParameterManagement_SetCurrentZeroPersistence(persist_current_zero);
+    ParameterManagement_SetImuCalibration(calibration);
+    return ParameterManagement_Save();
+}
+
+static const state_estimation_calibration_ports_t fake_calibration_ports = {
+    .get_motion_facts             = fake_get_calibration_motion,
+    .begin_maintenance            = fake_begin_calibration_maintenance,
+    .end_maintenance              = MotionControl_EndMaintenance,
+    .persist                      = fake_persist_calibration,
+    .set_current_zero_persistence = ParameterManagement_SetCurrentZeroPersistence,
+};
+
 static void test_parameter_owner_uses_injected_factory_and_monotonic_generation(void)
 {
     const robot_config_t         *robot = RobotConfig_GetDefault();
@@ -253,10 +357,10 @@ static void test_state_generations_and_freshness_are_independent(void)
     uint32_t                        wheel_generation;
 
     require_int(StateEstimation_Init(&robot->state) != 0U, "state config accepted");
-    require_int(StateEstimation_GetWheel(&wheel) == 0UL && wheel.count[MOTOR_ID_M2] == 17,
-                "wheel initialization state is visible without a runtime generation");
-    require_int(StateEstimation_GetImu(&imu) == 0UL && imu.chip_id == 0x24U,
-                "IMU initialization state is visible without a runtime generation");
+    require_int(StateEstimation_GetWheel(&wheel) == 0UL && wheel.count[MOTOR_ID_M2] == 0,
+                "wheel estimate stays empty until the first raw sample is mapped");
+    require_int(StateEstimation_GetImu(&imu) == 0UL && imu.chip_id == 0U,
+                "IMU estimate stays empty until the first raw sample is mapped");
     fake_wheel.speed_valid_all          = 1U;
     fake_wheel.speed_valid[MOTOR_ID_M2] = 1U;
     fake_wheel.speed_valid[MOTOR_ID_M3] = 1U;
@@ -265,9 +369,9 @@ static void test_state_generations_and_freshness_are_independent(void)
     StateEstimation_UpdateWheel(100U);
     wheel_generation = StateEstimation_GetWheel(&wheel);
     require_int(wheel_generation == 1UL && wheel.last_update_ms == 100U, "wheel publish generation one");
-    require_int(last_wheel_encoder_config.wheel_radius_m == 0.035f, "wheel conversion consumes parameter snapshot");
+    require_int(last_wheel_radius_m == 0.035f, "wheel conversion consumes parameter snapshot");
 
-    fake_imu.last_update_ms = 90U;
+    fake_imu_device.last_update_ms = 90U;
     require_int(StateEstimation_RunImuCycle() != 0U, "IMU cycle updates");
     (void)StateEstimation_GetStatus(120U, &status);
     require_int(status.wheel_generation == 1UL && status.imu_generation == 1UL,
@@ -335,7 +439,7 @@ static void run_stationary_auto_calibration(uint32_t start_ms)
     for (uint32_t sample = 0U; sample < 110U; ++sample)
     {
         (void)StateEstimation_RunImuCycle();
-        AppImuCalibration_ProcessSample(start_ms + sample * 10U);
+        ImuCalibrationCoordinator_ProcessSample(start_ms + sample * 10U);
     }
 }
 
@@ -344,18 +448,18 @@ static void test_persistence_policy_is_not_a_dead_config_field(void)
     param_model_t runtime_params;
 
     persistence_save_count = 0UL;
-    AppImuCalibration_Init(1U, 0U, 1U);
+    ImuCalibrationCoordinator_Init(&fake_calibration_ports, 1U, 0U, 1U);
     run_stationary_auto_calibration(1000U);
-    AppImuCalibration_ProcessPersistence(3000U);
+    ImuCalibrationCoordinator_ProcessPersistence(3000U);
     require_int(persistence_save_count == 0UL, "disabled IMU persistence does not write Flash");
 
     (void)ParameterManagement_GetSnapshot(&runtime_params);
     runtime_params.current_zero_raw[MOTOR_ID_M2] = 321U;
     runtime_params.current_zero_valid            = 1U;
     require_int(ParameterManagement_Set(&runtime_params) != 0U, "existing RAM current zero accepted");
-    AppImuCalibration_Init(1U, 1U, 0U);
+    ImuCalibrationCoordinator_Init(&fake_calibration_ports, 1U, 1U, 0U);
     run_stationary_auto_calibration(4000U);
-    AppImuCalibration_ProcessPersistence(6000U);
+    ImuCalibrationCoordinator_ProcessPersistence(6000U);
     require_int(persistence_save_count == 1UL, "enabled IMU persistence writes exactly once");
     require_int(last_saved_bundle.params.current_zero_valid == 0U,
                 "disabled current-zero persistence omits current calibration");

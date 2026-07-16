@@ -83,6 +83,38 @@ class AnalysisTests(unittest.TestCase):
             errors = architecture.analyze(root)
             self.assertTrue(any("App BSP include" in error for error in errors), errors)
 
+    def test_cmake_rejects_public_algorithm_link_from_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "CMakeLists.txt",
+                "target_link_libraries(f407_service\n"
+                "    PUBLIC f407_algorithm\n"
+                ")\n"
+                "target_link_libraries(f407_app_adapters\n"
+                "    PRIVATE f407_service\n"
+                ")\n",
+            )
+            errors = architecture.cmake_dependency_errors(root)
+            self.assertIn("CMakeLists.txt: f407_service must link f407_algorithm privately", errors)
+
+    def test_cmake_rejects_algorithm_link_from_app_adapters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "CMakeLists.txt",
+                "target_link_libraries(f407_service\n"
+                "    PRIVATE f407_algorithm\n"
+                ")\n"
+                "target_link_libraries(f407_app_adapters\n"
+                "    PRIVATE f407_service f407_algorithm\n"
+                ")\n",
+            )
+            errors = architecture.cmake_dependency_errors(root)
+            self.assertIn("CMakeLists.txt: f407_app_adapters must not link f407_algorithm", errors)
+
     def test_final_architecture_rejects_service_cycle_and_forbidden_edge(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

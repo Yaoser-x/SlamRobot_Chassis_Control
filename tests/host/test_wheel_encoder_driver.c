@@ -1,4 +1,5 @@
 #include "wheel_encoder_driver.h"
+#include "wheel_estimation_pipeline.h"
 
 #include "motor_hardware_layout.h"
 #include "param_service.h"
@@ -18,21 +19,25 @@ TIM_HandleTypeDef htim3 = {.Instance = &tim3_instance};
 TIM_HandleTypeDef htim4 = {.Instance = &tim4_instance};
 TIM_HandleTypeDef htim5 = {.Instance = &tim5_instance};
 
-static uint32_t fake_primask;
-static uint32_t layout_calls_while_masked;
+static uint32_t                        fake_primask;
+static uint32_t                        layout_calls_while_masked;
+static state_estimation_wheel_status_t wheel_status;
+
+static void WheelEncoderDriverTest_Init(void)
+{
+    WheelEncoderDriver_Init();
+    WheelEstimationPipeline_Init();
+    wheel_status = (state_estimation_wheel_status_t){0};
+}
 
 static void WheelEncoderDriverTest_Update(uint32_t now_ms)
 {
-    param_model_t                 params;
-    wheel_encoder_driver_config_t config;
+    param_model_t          params;
+    wheel_encoder_sample_t sample;
 
     (void)ParamService_GetSnapshot(&params);
-    config.wheel_radius_m = params.wheel_radius_m;
-    for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
-    {
-        config.encoder_dir[index] = params.encoder_dir[index];
-    }
-    WheelEncoderDriver_Update(now_ms, &config);
+    WheelEncoderDriver_Read(&sample);
+    WheelEstimationPipeline_Update(&sample, now_ms, params.wheel_radius_m, params.encoder_dir, &wheel_status);
 }
 
 static void require_int(int condition, const char *message)
@@ -113,16 +118,16 @@ static void set_all_counters(uint32_t count)
 
 static void test_update_publishes_after_unmasked_calculation(void)
 {
-    wheel_encoder_state_t state;
+    state_estimation_wheel_status_t state;
 
     ParamService_SetDefaults();
-    WheelEncoderDriver_Init();
+    WheelEncoderDriverTest_Init();
     set_all_counters(10U);
     WheelEncoderDriverTest_Update(10U);
     layout_calls_while_masked = 0U;
     set_all_counters(20U);
     WheelEncoderDriverTest_Update(20U);
-    WheelEncoderDriver_GetState(&state);
+    state = wheel_status;
 
     require_int(state.speed_valid_all != 0U, "encoder state becomes valid");
     require_int(layout_calls_while_masked == 0U,
@@ -132,42 +137,42 @@ static void test_update_publishes_after_unmasked_calculation(void)
 
 static void test_runtime_encoder_direction_reverses_delta(void)
 {
-    wheel_encoder_state_t state;
-    param_model_t         params;
+    state_estimation_wheel_status_t state;
+    param_model_t                   params;
 
     ParamService_Defaults(&params);
     params.encoder_dir[MOTOR_ID_M2] = -1;
     require_int(ParamService_Set(&params) != 0U, "runtime encoder direction accepted");
-    WheelEncoderDriver_Init();
+    WheelEncoderDriverTest_Init();
     set_all_counters(100U);
     WheelEncoderDriverTest_Update(10U);
     tim4_instance.CNT = 110U;
     WheelEncoderDriverTest_Update(20U);
-    WheelEncoderDriver_GetState(&state);
+    state = wheel_status;
     require_int(state.delta[MOTOR_ID_M2] == -10, "runtime encoder direction reverses delta");
     ParamService_SetDefaults();
 }
 
 static void test_runtime_wheel_radius_changes_speed_generation(void)
 {
-    wheel_encoder_state_t before;
-    wheel_encoder_state_t after;
-    param_model_t         params;
+    state_estimation_wheel_status_t before;
+    state_estimation_wheel_status_t after;
+    param_model_t                   params;
 
     ParamService_SetDefaults();
-    WheelEncoderDriver_Init();
+    WheelEncoderDriverTest_Init();
     set_all_counters(10U);
     WheelEncoderDriverTest_Update(10U);
     set_all_counters(20U);
     WheelEncoderDriverTest_Update(20U);
-    WheelEncoderDriver_GetState(&before);
+    before = wheel_status;
 
     (void)ParamService_GetSnapshot(&params);
     params.wheel_radius_m = 0.070f;
     require_int(ParamService_Set(&params) != 0U, "runtime wheel radius accepted");
     set_all_counters(30U);
     WheelEncoderDriverTest_Update(30U);
-    WheelEncoderDriver_GetState(&after);
+    after = wheel_status;
 
     require_int(before.speed_mps[MOTOR_ID_M1] > 0.0f, "baseline speed is positive");
     require_close(after.speed_mps[MOTOR_ID_M1],

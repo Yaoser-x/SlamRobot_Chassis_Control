@@ -9,11 +9,11 @@
 
 void DebugTelemetryJson_Print(uint32_t now_ms, const debug_full_log_snapshot_t *snapshot)
 {
-    char                     tx[DEBUG_TELEMETRY_JSON_TX_SIZE];
-    motion_control_status_t  chassis = snapshot->chassis;
-    bmi270_driver_state_t    imu     = snapshot->imu;
-    power_adc_driver_state_t adc     = snapshot->adc;
-    size_t                   pos =
+    char                          tx[DEBUG_TELEMETRY_JSON_TX_SIZE];
+    motion_control_status_t       chassis = snapshot->chassis;
+    state_estimation_imu_status_t imu     = snapshot->imu;
+    power_adc_driver_state_t      adc     = snapshot->adc;
+    size_t                        pos =
         (size_t)snprintf(tx,
                          sizeof(tx),
                          "{\"t_ms\":%lu,\"pid_error_mps\":[%.5f,%.5f,%.5f,%.5f],"

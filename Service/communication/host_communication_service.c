@@ -1,6 +1,6 @@
 #include "host_communication_service.h"
 #include "remote_command_dispatcher.h"
-#include "framed_stream_parser.h"
+#include "frame_stream_parser.h"
 #include "telemetry_encoder.h"
 #include "platform_critical.h"
 #include "platform_time.h"

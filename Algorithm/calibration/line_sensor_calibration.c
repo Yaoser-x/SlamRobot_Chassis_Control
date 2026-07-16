@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-void LineSensorCalibration_Init(line_sensor_calibration_t *calibration)
+void LineSensorCalibration_Init(line_calibration_model_t *calibration)
 {
     if (calibration != 0)
     {
@@ -10,9 +10,8 @@ void LineSensorCalibration_Init(line_sensor_calibration_t *calibration)
     }
 }
 
-uint8_t LineSensorCalibration_Begin(line_sensor_calibration_t        *calibration,
-                                    line_sensor_calibration_surface_t surface,
-                                    uint16_t                          samples)
+uint8_t
+LineSensorCalibration_Begin(line_calibration_model_t *calibration, line_calibration_surface_t surface, uint16_t samples)
 {
     uint8_t index = (uint8_t)surface;
 
@@ -34,7 +33,7 @@ uint8_t LineSensorCalibration_Begin(line_sensor_calibration_t        *calibratio
     return 1U;
 }
 
-void LineSensorCalibration_Feed(line_sensor_calibration_t *calibration, const uint16_t raw[LINE_CALIBRATION_CHANNELS])
+void LineSensorCalibration_Feed(line_calibration_model_t *calibration, const uint16_t raw[LINE_CALIBRATION_CHANNELS])
 {
     uint8_t index;
 
@@ -63,9 +62,9 @@ void LineSensorCalibration_Feed(line_sensor_calibration_t *calibration, const ui
     }
 }
 
-uint8_t LineSensorCalibration_Apply(line_sensor_calibration_t *calibration,
-                                    uint16_t                   thresholds[LINE_CALIBRATION_CHANNELS],
-                                    uint8_t                   *active_low)
+uint8_t LineSensorCalibration_Apply(line_calibration_model_t *calibration,
+                                    uint16_t                  thresholds[LINE_CALIBRATION_CHANNELS],
+                                    uint8_t                  *active_low)
 {
     uint32_t floor_total = 0UL;
     uint32_t line_total  = 0UL;

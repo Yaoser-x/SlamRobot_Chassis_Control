@@ -1,4 +1,5 @@
 #include "debug_system_status.h"
+#include "state_estimation_service.h"
 
 #include "power_adc_driver.h"
 #include "motor_hardware_layout.h"
@@ -106,25 +107,25 @@ void DebugSystemStatus_PrintResetTrace(void)
 
 void DebugSystemStatus_Print(void)
 {
-    char                           tx[DEBUG_SYSTEM_STATUS_TX_SIZE];
-    power_adc_driver_state_t       adc_state;
-    wheel_encoder_state_t          encoder_state;
-    motion_control_status_t        chassis_state;
-    safety_management_status_t     monitor_state;
-    bmi270_driver_state_t          imu_state;
-    teleoperation_status_t         ps2_state;
-    line_sensor_driver_state_t     line_state;
-    wireless_communication_state_t esp_state;
-    motor_driver_state_t           motor_state;
-    power_on_self_test_result_t    post_result;
-    param_model_t                  params;
-    uint32_t                       encoder_hw_count[MOTOR_ID_COUNT];
+    char                            tx[DEBUG_SYSTEM_STATUS_TX_SIZE];
+    power_adc_driver_state_t        adc_state;
+    state_estimation_wheel_status_t encoder_state;
+    motion_control_status_t         chassis_state;
+    safety_management_status_t      monitor_state;
+    state_estimation_imu_status_t   imu_state;
+    teleoperation_status_t          ps2_state;
+    line_sensor_driver_state_t      line_state;
+    wireless_communication_state_t  esp_state;
+    motor_driver_state_t            motor_state;
+    power_on_self_test_result_t     post_result;
+    param_model_t                   params;
+    uint32_t                        encoder_hw_count[MOTOR_ID_COUNT];
 
     PowerAdcDriver_GetState(&adc_state);
-    WheelEncoderDriver_GetState(&encoder_state);
+    (void)StateEstimation_GetWheel(&encoder_state);
     (void)MotionControl_GetStatus(&chassis_state);
     (void)SafetyManagement_GetStatus(&monitor_state);
-    Bmi270Driver_GetState(&imu_state);
+    (void)StateEstimation_GetImu(&imu_state);
     (void)Teleoperation_GetStatus(&ps2_state);
     LineSensorDriver_GetState(&line_state);
     WirelessCommunication_GetState(&esp_state);

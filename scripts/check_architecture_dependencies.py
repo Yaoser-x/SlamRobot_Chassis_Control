@@ -29,10 +29,7 @@ FINAL_SERVICE_DEPENDENCIES = {
     "command_management": {"parameter_management"},
     "teleoperation": {"state_estimation", "line_following", "command_management", "parameter_management"},
     "line_following": {"safety_management", "command_management", "parameter_management"},
-    "communication": {
-        "command_management", "line_following", "motion_control", "parameter_management", "power_management",
-        "safety_management", "state_estimation", "system_monitoring", "teleoperation",
-    },
+    "communication": {"command_management", "line_following", "safety_management", "system_monitoring"},
     "parameter_management": set(),
     "system_monitoring": set(),
 }
@@ -193,6 +190,24 @@ def app_adapter_sources(root: Path) -> set[str]:
     return set(re.findall(r"\bApp/[a-zA-Z0-9_./-]+\.(?:c|h)\b", match.group(1))) if match else set()
 
 
+def cmake_dependency_errors(root: Path) -> list[str]:
+    cmake_path = root / "CMakeLists.txt"
+    if not cmake_path.is_file():
+        return ["CMakeLists.txt: required layer target definition is missing"]
+    cmake = cmake_path.read_text(encoding="utf-8", errors="replace")
+    errors: list[str] = []
+
+    service_link = re.search(r"target_link_libraries\(f407_service\s+(.*?)\n\)", cmake, re.DOTALL)
+    if service_link is None or not re.search(r"\bPRIVATE\s+f407_algorithm\b", service_link.group(1)):
+        errors.append("CMakeLists.txt: f407_service must link f407_algorithm privately")
+    adapter_link = re.search(r"target_link_libraries\(f407_app_adapters\s+(.*?)\n\)", cmake, re.DOTALL)
+    if adapter_link is None:
+        errors.append("CMakeLists.txt: f407_app_adapters link boundary is missing")
+    elif re.search(r"\bf407_algorithm\b", adapter_link.group(1)):
+        errors.append("CMakeLists.txt: f407_app_adapters must not link f407_algorithm")
+    return errors
+
+
 def analyze(root: Path, final: bool = True) -> list[str]:
     root = Path(root).resolve()
     errors: list[str] = []
@@ -263,6 +278,7 @@ def analyze(root: Path, final: bool = True) -> list[str]:
                 errors.append(f"{relative}:{line}: removed legacy symbol/path {match.group(0)}")
 
     errors.extend(final_service_graph_errors(root))
+    errors.extend(cmake_dependency_errors(root))
     return sorted(set(errors))
 
 

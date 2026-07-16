@@ -8,9 +8,9 @@
 
 typedef enum
 {
-    LINE_CALIBRATION_SURFACE_FLOOR = 0,
-    LINE_CALIBRATION_SURFACE_LINE  = 1
-} line_sensor_calibration_surface_t;
+    LINE_CALIBRATION_MODEL_SURFACE_FLOOR = 0,
+    LINE_CALIBRATION_MODEL_SURFACE_LINE  = 1
+} line_calibration_surface_t;
 
 typedef struct
 {
@@ -23,19 +23,19 @@ typedef struct
     uint8_t  surface;
     uint8_t  ready_mask;
     uint8_t  fail_mask;
-} line_sensor_calibration_t;
+} line_calibration_model_t;
 
 /** Reset all collected line calibration samples. */
-void LineSensorCalibration_Init(line_sensor_calibration_t *calibration);
+void LineSensorCalibration_Init(line_calibration_model_t *calibration);
 /** Start collecting one surface with a bounded sample count. */
-uint8_t LineSensorCalibration_Begin(line_sensor_calibration_t        *calibration,
-                                    line_sensor_calibration_surface_t surface,
-                                    uint16_t                          samples);
+uint8_t LineSensorCalibration_Begin(line_calibration_model_t  *calibration,
+                                    line_calibration_surface_t surface,
+                                    uint16_t                   samples);
 /** Feed one eight-channel raw sample into the active collection. */
-void LineSensorCalibration_Feed(line_sensor_calibration_t *calibration, const uint16_t raw[LINE_CALIBRATION_CHANNELS]);
+void LineSensorCalibration_Feed(line_calibration_model_t *calibration, const uint16_t raw[LINE_CALIBRATION_CHANNELS]);
 /** Build per-channel thresholds and reject insufficient separation. */
-uint8_t LineSensorCalibration_Apply(line_sensor_calibration_t *calibration,
-                                    uint16_t                   thresholds[LINE_CALIBRATION_CHANNELS],
-                                    uint8_t                   *active_low);
+uint8_t LineSensorCalibration_Apply(line_calibration_model_t *calibration,
+                                    uint16_t                  thresholds[LINE_CALIBRATION_CHANNELS],
+                                    uint8_t                  *active_low);
 
 #endif /* LINE_CALIBRATION_H */

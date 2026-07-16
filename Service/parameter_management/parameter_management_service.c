@@ -5,14 +5,14 @@
 #include <stddef.h>
 #include <string.h>
 
-static param_model_t            current_params;
-static param_model_t            factory_params;
-static uint8_t                  current_params_initialized;
-static uint8_t                  factory_params_initialized;
-static uint32_t                 current_params_generation;
-static imu_bmi270_calibration_t current_imu_calibration;
-static uint8_t                  current_flash_loaded;
-static uint8_t                  persist_current_zero;
+static param_model_t     current_params;
+static param_model_t     factory_params;
+static uint8_t           current_params_initialized;
+static uint8_t           factory_params_initialized;
+static uint32_t          current_params_generation;
+static imu_calibration_t current_imu_calibration;
+static uint8_t           current_flash_loaded;
+static uint8_t           persist_current_zero;
 
 typedef struct
 {
@@ -40,7 +40,7 @@ uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
     primask                    = PlatformCritical_Enter();
     factory_params             = config->factory_defaults;
     current_params             = config->factory_defaults;
-    current_imu_calibration    = (imu_bmi270_calibration_t){0};
+    current_imu_calibration    = (imu_calibration_t){0};
     current_flash_loaded       = 0U;
     persist_current_zero       = config->persist_current_zero;
     factory_params_initialized = 1U;
@@ -114,7 +114,7 @@ uint32_t ParameterManagement_GetStatus(parameter_management_status_t *status)
     return status->generation;
 }
 
-void ParameterManagement_SetImuCalibration(const imu_bmi270_calibration_t *calibration)
+void ParameterManagement_SetImuCalibration(const imu_calibration_t *calibration)
 {
     uint32_t primask;
 
@@ -127,7 +127,7 @@ void ParameterManagement_SetImuCalibration(const imu_bmi270_calibration_t *calib
     PlatformCritical_Exit(primask);
 }
 
-uint8_t ParameterManagement_GetImuCalibration(imu_bmi270_calibration_t *calibration)
+uint8_t ParameterManagement_GetImuCalibration(imu_calibration_t *calibration)
 {
     uint32_t primask;
 

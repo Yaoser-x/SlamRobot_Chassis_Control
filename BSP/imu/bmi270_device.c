@@ -1,7 +1,7 @@
 #include "bmi270_device.h"
 
 #include "bmi270_registers.h"
-#include "imu_bmi270_config.h"
+#include "bmi270_config.h"
 #include "main.h"
 
 #include <string.h>

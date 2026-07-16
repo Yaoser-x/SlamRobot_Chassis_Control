@@ -8,7 +8,7 @@ extern "C"
 {
 #endif
 
-#define IMU_BMI270_CALIBRATION_VERSION 1UL
+#define IMU_CALIBRATION_VERSION 1UL
 
     typedef struct
     {
@@ -20,7 +20,7 @@ extern "C"
         float    temperature_gyro_slope_dps_per_c[3];
         float    sensor_to_body[3][3];
         uint32_t crc;
-    } imu_bmi270_calibration_t;
+    } imu_calibration_model_t;
 
     typedef enum
     {
@@ -46,14 +46,14 @@ extern "C"
         uint8_t  has_last_sample;
     } imu_bmi270_gyro_cal_accumulator_t;
 
-    void     ImuBmi270Calibration_Default(imu_bmi270_calibration_t *calibration);
-    uint32_t ImuBmi270Calibration_Crc(const imu_bmi270_calibration_t *calibration);
-    uint8_t  ImuBmi270Calibration_Validate(const imu_bmi270_calibration_t *calibration);
+    void     ImuBmi270Calibration_Default(imu_calibration_model_t *calibration);
+    uint32_t ImuBmi270Calibration_Crc(const imu_calibration_model_t *calibration);
+    uint8_t  ImuBmi270Calibration_Validate(const imu_calibration_model_t *calibration);
     /** Return the calibrated gyro bias at the measured temperature. */
-    float ImuBmi270Calibration_GyroBiasAtTemperature(const imu_bmi270_calibration_t *calibration,
-                                                     uint8_t                         axis,
-                                                     float                           temperature_c,
-                                                     uint8_t                         temperature_valid);
+    float ImuBmi270Calibration_GyroBiasAtTemperature(const imu_calibration_model_t *calibration,
+                                                     uint8_t                        axis,
+                                                     float                          temperature_c,
+                                                     uint8_t                        temperature_valid);
 
     /** Reset a gyro calibration accumulator to idle. */
     void ImuBmi270GyroCalAccumulator_Init(imu_bmi270_gyro_cal_accumulator_t *accumulator);

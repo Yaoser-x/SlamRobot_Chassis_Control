@@ -13,6 +13,7 @@
 #include "power_on_self_test_service.h"
 #include "safety_management_service.h"
 #include "communication_publish_model_types.h"
+#include "state_estimation_status.h"
 #include "host_communication_service.h"
 #include "robot_link_protocol.h"
 #include "usart.h"
@@ -32,7 +33,7 @@ static uint8_t                       tx_last_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME
 static uint16_t                      tx_last_size;
 static UART_HandleTypeDef           *tx_last_uart;
 static uint32_t                      fake_tick;
-static bmi270_driver_state_t         fake_imu_state;
+static state_estimation_imu_status_t fake_imu_state;
 static power_adc_driver_state_t      fake_adc_state;
 static power_on_self_test_result_t   fake_post_result;
 static uint32_t                      fake_primask;
@@ -197,14 +198,6 @@ void ChassisService_GetState(chassis_service_snapshot_t *state)
     }
 }
 
-void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
-{
-    if (state != 0)
-    {
-        *state = (wheel_encoder_state_t){0};
-    }
-}
-
 void MotorDriver_GetState(motor_driver_state_t *state)
 {
     if (state != 0)
@@ -226,14 +219,6 @@ void PowerOnSelfTest_GetResult(power_on_self_test_result_t *result)
 uint8_t MotorHardwareLayout_MotorEnabled(motor_id_t motor)
 {
     return (motor == MOTOR_ID_M2 || motor == MOTOR_ID_M3) ? 1U : 0U;
-}
-
-void Bmi270Driver_GetState(bmi270_driver_state_t *state)
-{
-    if (state != 0)
-    {
-        *state = fake_imu_state;
-    }
 }
 
 static void RefreshFakePublishModel(void)
@@ -283,7 +268,7 @@ static void reset_host_uart_state(void)
     tx_last_size     = 0U;
     tx_last_uart     = 0;
     fake_tick        = 0U;
-    fake_imu_state   = (bmi270_driver_state_t){0};
+    fake_imu_state   = (state_estimation_imu_status_t){0};
     fake_adc_state   = (power_adc_driver_state_t){0};
     fake_post_result = (power_on_self_test_result_t){0};
     fake_primask     = 0U;

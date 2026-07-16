@@ -986,20 +986,20 @@ typedef struct {
 
 ### 4.3 BMI270 IMU
 
-**模块：** `BSP/imu/bmi270_driver.c`（主驱动）、`imu_bmi270_calibration.c`（校准）、`imu_bmi270_config.c`（配置表）、`imu_bmi270_fifo.c`（FIFO 解析）、`bmi270_driver_math.c`（数学/融合）、`imu_bmi270_profile.c`（运行模式）、`imu_bmi270_time.c`（时间处理）
+**模块：** `BSP/imu/bmi270_driver.c`（原始采样）、`bmi270_config.c`（配置表）、`bmi270_fifo_reader.c`（FIFO 解析）、`bmi270_profile.c`（运行模式）；滤波、时间戳与姿态估计分别由 `Algorithm/filtering/imu_signal_filter.c`、`Algorithm/estimation/imu_timestamp_tracker.c`、`Algorithm/estimation/attitude_estimator.c` 提供，并由 StateEstimation 编排。
 
 **硬件接口：**
 - SPI2，自定义 CS (IMU_CS)
 - INT1 数据就绪中断（EXTI0, PE0）
 - 支持 bit-bang 回退诊断（MISO pull 检测）
 
-**配置表（imu_bmi270_config.c）：**
+**配置表（bmi270_config.c）：**
 - Bosch SensorAPI v2.86.1 官方配置文件
 - 8192 字节，写入 BMI270 内部 feature engine RAM
 - ODR: 100Hz（acc + gyro）
 - 量程：加速度 ±2g (LSB=16384/G)，陀螺 ±500dps (LSB=65.6/dps)
 
-**三种运行 Profile（imu_bmi270_profile.c）：**
+**三种运行 Profile（bmi270_profile.c）：**
 
 | Profile | 加速度 | 陀螺 | FIFO 水位 | fifo_downs | 说明 |
 |---------|--------|------|-----------|-----------|------|
@@ -1007,12 +1007,12 @@ typedef struct {
 | PERFORMANCE | 100Hz, 2g | 100Hz, 500dps | 96 bytes | 0x88 (filtered) | 默认 |
 | DEBUG | 100Hz, 2g | 100Hz, 500dps | 32 bytes | 0x00 (unfiltered) | 原始数据 |
 
-**FIFO 解析（imu_bmi270_fifo.c）：**
+**FIFO 解析（bmi270_fifo_reader.c）：**
 - 帧头类型：`0x84` (Accel 6B) / `0x88` (Gyro 6B) / `0x8C` (Accel+Gyro 12B) / `0x44` (SensorTime 3B) / `0x40` (Skip) / `0x48` (Config Change) / `0x80` (Overread)
 - 每批最多解析 8 个样本
 - 跟踪跳过帧计数和 overflow 标志
 
-**传感器时间（imu_bmi270_time.c）：**
+**传感器时间（Algorithm/estimation/imu_timestamp_tracker.c）：**
 - 24-bit 微秒计数器 @ 25.6kHz
 - `IMU_BMI270_SENSOR_TIME_TICKS_PER_SEC` = 25600.0
 - 24-bit 溢出安全差分计算
@@ -1797,7 +1797,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 8.2 Flash 参数持久化
 
-**模块：** `BSP/flash/flash_param.c`
+**模块：** `Service/parameter_management/internal/flash_parameter_image.c`、`flash_parameter_codec.c`、`flash_parameter_migration.c`、`flash_parameter_slot_store.c`；底层写入由 `BSP/flash/flash_storage.c` 提供。
 **硬件：** STM32F407 内部 Flash，Sector 6 (0x08040000) + Sector 7 (0x08060000)，各 128KB
 
 **A/B 双区交替写入：** 每次保存写到与当前有效区不同的区。加载时选 sequence 号更大且 CRC32 校验通过的区。双区均损坏时退化为默认值。
@@ -1805,7 +1805,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 **镜像格式（Schema V4）：**
 ```
 [MAGIC: 0x464B3037 (4B)] [SCHEMA_VERSION: 4 (4B)] [SEQUENCE (4B)]
-[PAYLOAD_SIZE (4B)] [param_model_t + imu_bmi270_calibration_t]
+[PAYLOAD_SIZE (4B)] [param_model_t + imu_calibration_t]
 [CRC32 (4B)] [COMMIT_MARKER: 0xC01117ED (4B)]
 ```
 

@@ -1,7 +1,7 @@
 #ifndef FLASH_PARAM_SCHEMA_H
 #define FLASH_PARAM_SCHEMA_H
 
-#include "flash_param.h"
+#include "flash_parameter_image.h"
 #include "parameter_management_service.h"
 
 typedef struct
@@ -27,8 +27,8 @@ typedef struct
 
 typedef struct
 {
-    param_model_v1_t         params;
-    imu_bmi270_calibration_t imu_calibration;
+    param_model_v1_t  params;
+    imu_calibration_t imu_calibration;
 } flash_param_bundle_v2_t;
 
 typedef struct
@@ -69,8 +69,8 @@ typedef struct
 
 typedef struct
 {
-    param_service_v2_t       params;
-    imu_bmi270_calibration_t imu_calibration;
+    param_service_v2_t params;
+    imu_calibration_t  imu_calibration;
 } flash_param_bundle_v3_t;
 
 typedef struct

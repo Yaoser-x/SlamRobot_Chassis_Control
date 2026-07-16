@@ -85,7 +85,7 @@ static uint8_t DebugCmdParam_Save(const char *line)
 {
     param_model_t             params;
     power_management_status_t power;
-    imu_bmi270_calibration_t  calibration;
+    imu_calibration_t         calibration;
 
     if (strcmp(line, "set save") != 0)
     {
@@ -123,7 +123,7 @@ static uint8_t DebugCmdParam_Save(const char *line)
 
 static uint8_t DebugCmdParam_Reset(const char *line)
 {
-    imu_bmi270_calibration_t calibration;
+    imu_calibration_t calibration;
 
     if (strcmp(line, "set reset") != 0)
     {
@@ -136,7 +136,7 @@ static uint8_t DebugCmdParam_Reset(const char *line)
     }
     if (ParameterManagement_ResetAndSaveDefaults() != 0U)
     {
-        ImuBmi270Calibration_Default(&calibration);
+        ParameterImuCalibration_Default(&calibration);
         (void)StateEstimation_ApplyImuCalibration(&calibration);
         StateEstimation_ClearImuCalibration();
         PowerManagement_RequestCurrentZeroCalibration();

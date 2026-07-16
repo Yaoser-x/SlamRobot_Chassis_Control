@@ -15,7 +15,7 @@ static uint32_t ImuBmi270Calibration_Fnv1a(const uint8_t *data, uint32_t len)
     return hash;
 }
 
-void ImuBmi270Calibration_Default(imu_bmi270_calibration_t *calibration)
+void ImuBmi270Calibration_Default(imu_calibration_model_t *calibration)
 {
     if (calibration == 0)
     {
@@ -23,7 +23,7 @@ void ImuBmi270Calibration_Default(imu_bmi270_calibration_t *calibration)
     }
 
     memset(calibration, 0, sizeof(*calibration));
-    calibration->version = IMU_BMI270_CALIBRATION_VERSION;
+    calibration->version = IMU_CALIBRATION_VERSION;
     for (uint8_t i = 0U; i < 3U; ++i)
     {
         calibration->accel_scale[i]       = 1.0f;
@@ -32,9 +32,9 @@ void ImuBmi270Calibration_Default(imu_bmi270_calibration_t *calibration)
     calibration->crc = ImuBmi270Calibration_Crc(calibration);
 }
 
-uint32_t ImuBmi270Calibration_Crc(const imu_bmi270_calibration_t *calibration)
+uint32_t ImuBmi270Calibration_Crc(const imu_calibration_model_t *calibration)
 {
-    imu_bmi270_calibration_t copy;
+    imu_calibration_model_t copy;
 
     if (calibration == 0)
     {
@@ -46,19 +46,19 @@ uint32_t ImuBmi270Calibration_Crc(const imu_bmi270_calibration_t *calibration)
     return ImuBmi270Calibration_Fnv1a((const uint8_t *)&copy, (uint32_t)sizeof(copy));
 }
 
-uint8_t ImuBmi270Calibration_Validate(const imu_bmi270_calibration_t *calibration)
+uint8_t ImuBmi270Calibration_Validate(const imu_calibration_model_t *calibration)
 {
-    if (calibration == 0 || calibration->version != IMU_BMI270_CALIBRATION_VERSION)
+    if (calibration == 0 || calibration->version != IMU_CALIBRATION_VERSION)
     {
         return 0U;
     }
     return (calibration->crc == ImuBmi270Calibration_Crc(calibration)) ? 1U : 0U;
 }
 
-float ImuBmi270Calibration_GyroBiasAtTemperature(const imu_bmi270_calibration_t *calibration,
-                                                 uint8_t                         axis,
-                                                 float                           temperature_c,
-                                                 uint8_t                         temperature_valid)
+float ImuBmi270Calibration_GyroBiasAtTemperature(const imu_calibration_model_t *calibration,
+                                                 uint8_t                        axis,
+                                                 float                          temperature_c,
+                                                 uint8_t                        temperature_valid)
 {
     float bias;
 

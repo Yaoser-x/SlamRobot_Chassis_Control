@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "imu_bmi270_profile.h"
+#include "bmi270_profile.h"
 
 typedef struct
 {

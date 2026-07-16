@@ -28,15 +28,15 @@ uint32_t ParameterManagement_GetSnapshot(param_model_t *params)
     return 1U;
 }
 
-static uint32_t                 fake_primask;
-static uint32_t                 fake_tick_ms;
-static power_adc_driver_state_t fake_adc_state;
-static wheel_encoder_state_t    fake_encoder_state;
-static motor_driver_state_t     fake_motor_state;
-static command_source_t         fake_active_source;
-static uint8_t                  fake_gate_allowed;
-static uint8_t                  fake_gate_closed_count;
-static uint8_t                  fake_break_clear_allowed;
+static uint32_t                        fake_primask;
+static uint32_t                        fake_tick_ms;
+static power_adc_driver_state_t        fake_adc_state;
+static state_estimation_wheel_status_t fake_encoder_state;
+static motor_driver_state_t            fake_motor_state;
+static command_source_t                fake_active_source;
+static uint8_t                         fake_gate_allowed;
+static uint8_t                         fake_gate_closed_count;
+static uint8_t                         fake_break_clear_allowed;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -84,15 +84,9 @@ uint32_t PowerManagement_GetStatus(power_management_status_t *status)
     return 1UL;
 }
 
-void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
-{
-    *state = fake_encoder_state;
-}
-
 uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status)
 {
-    _Static_assert(sizeof(*status) == sizeof(fake_encoder_state), "wheel status test fixture layout mismatch");
-    memcpy(status, &fake_encoder_state, sizeof(*status));
+    *status = fake_encoder_state;
     return 1UL;
 }
 
@@ -166,7 +160,7 @@ static void reset_fake_monitor(void)
     fake_primask                                   = 0U;
     fake_tick_ms                                   = 1000U;
     fake_adc_state                                 = (power_adc_driver_state_t){0};
-    fake_encoder_state                             = (wheel_encoder_state_t){0};
+    fake_encoder_state                             = (state_estimation_wheel_status_t){0};
     fake_motor_state                               = (motor_driver_state_t){0};
     fake_active_source                             = COMMAND_SOURCE_DEBUG;
     fake_gate_allowed                              = 1U;

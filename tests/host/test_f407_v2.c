@@ -11,7 +11,7 @@
 #include "command_management_service.h"
 #include "system_monitoring_service.h"
 #include "control_service.h"
-#include "wheel_speed_filter.h"
+#include "wheel_speed_estimator.h"
 #include "bmi270_driver.h"
 #include "motor_ph_en_mapper.h"
 #include "param_service.h"
@@ -760,7 +760,7 @@ static void test_task_timing_next_wake(void)
 
 static void test_imu_state_contract(void)
 {
-    bmi270_driver_state_t state = {0};
+    state_estimation_imu_status_t state = {0};
 
     require_int(CHASSIS_IMU_PERIOD_MS == 10U, "imu task period matches 100Hz ODR");
     require_int((sizeof(state.gyro_raw) / sizeof(state.gyro_raw[0])) == 3U, "gyro raw axis count");

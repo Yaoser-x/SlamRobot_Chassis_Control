@@ -1,4 +1,5 @@
-#include "communication_publish_model_service.h"
+#include "system_publish_snapshot_service.h"
+#include "system_publish_snapshot_provider.h"
 #include "power_on_self_test_service.h"
 
 #include "command_management_service.h"
@@ -151,7 +152,7 @@ int main(void)
     };
 
     SeedInputs();
-    assert(CommunicationPublishModel_Init(&config) != 0U);
+    assert(CommunicationPublishModel_Init(&config, AppSystemPublishSnapshot_Collect) != 0U);
     assert(CommunicationPublishModel_Get(0) == 0U);
     assert(CommunicationPublishModel_Get(&snapshot) == 0U);
     CommunicationPublishModel_Update(1000U);

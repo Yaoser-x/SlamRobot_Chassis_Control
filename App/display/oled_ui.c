@@ -5,7 +5,7 @@
 #include "oled_ui.h"
 
 #include "robot_config.h"
-#include "communication_publish_model_service.h"
+#include "system_publish_snapshot_service.h"
 #include "oled_page_runtime.h"
 #include "oled_page_selfcheck.h"
 #include "oled_page_welcome.h"

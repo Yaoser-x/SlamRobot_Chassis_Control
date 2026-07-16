@@ -4,7 +4,7 @@
 
 #include "bmi270_device.h"
 #include "bmi270_registers.h"
-#include "imu_bmi270_config.h"
+#include "bmi270_config.h"
 
 static uint8_t  registers[256];
 static uint32_t burst_bytes;

@@ -1,10 +1,10 @@
 #include "imu_calibration.h"
-#include "bmi270_signal_filter.h"
-#include "imu_bmi270_fifo.h"
+#include "attitude_estimator.h"
+#include "imu_signal_filter.h"
+#include "bmi270_fifo_reader.h"
 #include "bmi270_driver.h"
-#include "bmi270_driver_math.h"
-#include "imu_bmi270_profile.h"
-#include "bmi270_timestamp.h"
+#include "bmi270_profile.h"
+#include "imu_timestamp_tracker.h"
 #include "imu_calibration_guard.h"
 
 #include <math.h>
@@ -137,8 +137,8 @@ static void test_temperature_conversion_uses_direct_celsius(void)
 
 static void test_temperature_compensation_uses_calibration_slope(void)
 {
-    imu_bmi270_calibration_t calibration;
-    float                    bias;
+    imu_calibration_model_t calibration;
+    float                   bias;
 
     ImuBmi270Calibration_Default(&calibration);
     calibration.gyro_bias_dps[0]                    = 1.0f;
@@ -291,13 +291,13 @@ static void test_profile_register_values_are_named_and_checkable(void)
 
 static void test_coordinate_mapping_and_calibration_defaults(void)
 {
-    imu_bmi270_calibration_t calibration;
-    float                    sensor[3] = {1.0f, -2.0f, 3.0f};
-    float                    body[3]   = {0.0f, 0.0f, 0.0f};
-    float                    ros[3]    = {0.0f, 0.0f, 0.0f};
+    imu_calibration_model_t calibration;
+    float                   sensor[3] = {1.0f, -2.0f, 3.0f};
+    float                   body[3]   = {0.0f, 0.0f, 0.0f};
+    float                   ros[3]    = {0.0f, 0.0f, 0.0f};
 
     ImuBmi270Calibration_Default(&calibration);
-    require_int(calibration.version == IMU_BMI270_CALIBRATION_VERSION, "default calibration has version");
+    require_int(calibration.version == IMU_CALIBRATION_VERSION, "default calibration has version");
     require_int(ImuBmi270Calibration_Validate(&calibration) == 1U, "default calibration validates CRC");
 
     ImuBmi270Coordinate_Apply(calibration.sensor_to_body, sensor, body);

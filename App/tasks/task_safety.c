@@ -1,8 +1,7 @@
 #include "app_tasks.h"
 
 #include "robot_config.h"
-#include "app_imu_calibration.h"
-#include "communication_publish_model_service.h"
+#include "system_publish_snapshot_service.h"
 #include "command_management_service.h"
 #include "platform_time.h"
 #include "platform_watchdog.h"
@@ -11,6 +10,7 @@
 #include "platform_reset_trace.h"
 #include "safety_management_service.h"
 #include "system_monitoring_service.h"
+#include "state_estimation_service.h"
 
 void Task_Safety(void *argument)
 {
@@ -38,7 +38,7 @@ void Task_Safety(void *argument)
         {
             PlatformWatchdog_Feed();
         }
-        AppImuCalibration_ProcessPersistence(now_ms);
+        StateEstimation_ServiceCalibrationPersistence(now_ms);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_SAFETY,
                                     &next_wake,
                                     RobotConfig_GetDefault()->tasks[APP_TASK_SAFETY].period_ms);

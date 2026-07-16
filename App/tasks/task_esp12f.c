@@ -1,7 +1,7 @@
 #include "app_tasks.h"
 
 #include "robot_config.h"
-#include "communication_publish_model_service.h"
+#include "system_publish_snapshot_service.h"
 #include "esp12f_flash_bridge.h"
 #include "wireless_communication_service.h"
 #include "platform_time.h"

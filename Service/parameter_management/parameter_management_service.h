@@ -27,9 +27,9 @@ extern "C"
     /** Validate and publish one complete RAM override. */
     uint8_t ParameterManagement_Set(const param_model_t *params);
     /** Replace the calibration portion of the schema-4 persistence bundle in RAM. */
-    void ParameterManagement_SetImuCalibration(const imu_bmi270_calibration_t *calibration);
+    void ParameterManagement_SetImuCalibration(const imu_calibration_t *calibration);
     /** Read the calibration loaded from or staged for schema-4 persistence. */
-    uint8_t ParameterManagement_GetImuCalibration(imu_bmi270_calibration_t *calibration);
+    uint8_t ParameterManagement_GetImuCalibration(imu_calibration_t *calibration);
     /** Update whether current-zero fields are included in the next explicit save. */
     void ParameterManagement_SetCurrentZeroPersistence(uint8_t enabled);
     /** Load and publish the complete schema-4 bundle from Flash. */

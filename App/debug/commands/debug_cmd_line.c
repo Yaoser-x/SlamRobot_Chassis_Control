@@ -1,6 +1,5 @@
 #include "debug_cmd_line.h"
 
-#include "app_line_sensor_calibration.h"
 #include "motion_control_service.h"
 #include "debug_console_writer.h"
 #include "line_following_service.h"
@@ -136,7 +135,7 @@ static void DebugCmdLine_HandleCalibration(const char *line)
     {
         line_sensor_calibration_surface_t surface =
             (strcmp(action, "floor") == 0) ? LINE_CALIBRATION_SURFACE_FLOOR : LINE_CALIBRATION_SURFACE_LINE;
-        if (AppLineSensorCalibration_Begin(surface, (uint16_t)samples) != 0U)
+        if (LineFollowing_CalibrationBeginCoordinated(surface, (uint16_t)samples) != 0U)
         {
             LINE_LOG("INFO", "linecal %s collecting %u samples", action, samples);
         }

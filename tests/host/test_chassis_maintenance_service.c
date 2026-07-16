@@ -11,15 +11,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static uint8_t               fake_lock;
-static uint8_t               fake_begin_allowed;
-static uint32_t              cancel_count;
-static uint32_t              emergency_stop_count;
-static uint32_t              motor_stop_count;
-static uint32_t              end_count;
-static wheel_encoder_state_t fake_encoder;
-static motor_driver_state_t  fake_motor;
-static uint8_t               fake_control_step_active;
+static uint8_t                         fake_lock;
+static uint8_t                         fake_begin_allowed;
+static uint32_t                        cancel_count;
+static uint32_t                        emergency_stop_count;
+static uint32_t                        motor_stop_count;
+static uint32_t                        end_count;
+static state_estimation_wheel_status_t fake_encoder;
+static motor_driver_state_t            fake_motor;
+static uint8_t                         fake_control_step_active;
 
 static void require_int(int condition, const char *message)
 {
@@ -100,19 +100,9 @@ void MotorDriver_StopAll(motor_stop_mode_t mode)
     motor_stop_count++;
 }
 
-void WheelEncoderDriver_GetState(wheel_encoder_state_t *state)
-{
-    *state = fake_encoder;
-}
-
 uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *state)
 {
-    *state = (state_estimation_wheel_status_t){0};
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        state->speed_mps[i]   = fake_encoder.speed_mps[i];
-        state->speed_valid[i] = fake_encoder.speed_valid[i];
-    }
+    *state = fake_encoder;
     return 1U;
 }
 
@@ -134,7 +124,7 @@ static void reset_fake(void)
     emergency_stop_count     = 0U;
     motor_stop_count         = 0U;
     end_count                = 0U;
-    fake_encoder             = (wheel_encoder_state_t){0};
+    fake_encoder             = (state_estimation_wheel_status_t){0};
     fake_motor               = (motor_driver_state_t){0};
     fake_control_step_active = 0U;
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)

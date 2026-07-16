@@ -1,6 +1,7 @@
-#include "flash_param.h"
+#include "flash_parameter_image.h"
 #include "motor_types.h"
 #include "param_service.h"
+#include "parameter_imu_calibration_types.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -39,7 +40,7 @@ static void make_bundle(flash_param_bundle_t *bundle, float max_linear_mps)
     memset(bundle, 0, sizeof(*bundle));
     ParamService_Defaults(&bundle->params);
     bundle->params.max_linear_mps = max_linear_mps;
-    ImuBmi270Calibration_Default(&bundle->imu_calibration);
+    ParameterImuCalibration_Default(&bundle->imu_calibration);
 }
 
 static void load_hex_fixture(const char *path, uint8_t *image, size_t image_size)
@@ -164,16 +165,16 @@ static void test_schema2_migrates_bias_to_calibration_once(void)
 
 static void test_schema2_calibration_bias_has_priority(void)
 {
-    param_model_t            old_params;
-    flash_param_bundle_t     loaded;
-    imu_bmi270_calibration_t calibration;
+    param_model_t        old_params;
+    flash_param_bundle_t loaded;
+    imu_calibration_t    calibration;
 
     ParamService_Defaults(&old_params);
     old_params.imu_gyro_bias_valid  = 1U;
     old_params.imu_gyro_bias_dps[0] = 0.11f;
-    ImuBmi270Calibration_Default(&calibration);
+    ParameterImuCalibration_Default(&calibration);
     calibration.gyro_bias_dps[0] = 0.77f;
-    calibration.crc              = ImuBmi270Calibration_Crc(&calibration);
+    calibration.crc              = ParameterImuCalibration_Crc(&calibration);
     FlashParamHost_Reset();
     require_int(FlashParamHost_SeedSchema2WithCalibration(&old_params, &calibration) == FLASH_PARAM_STATUS_OK,
                 "schema2 dual-bias image seeded");

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "communication_types.h"
-#include "framed_stream_parser.h"
+#include "frame_stream_parser.h"
 
 #ifdef __cplusplus
 extern "C"

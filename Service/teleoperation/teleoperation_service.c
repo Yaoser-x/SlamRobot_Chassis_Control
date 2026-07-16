@@ -6,8 +6,6 @@
 
 #include "status_led_driver.h"
 
-#include "line_sensor_calibration.h"
-
 #include "line_following_service.h"
 
 #include "ps2_controller_driver.h"

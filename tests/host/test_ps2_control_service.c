@@ -4,10 +4,8 @@
 #include "control_config.h"
 #include "bsp_config.h"
 #include "control_service.h"
-#include "bmi270_driver.h"
 #include "status_led_driver.h"
 
-#include <string.h>
 #include "line_sensor_calibration.h"
 #include "line_following_service.h"
 #include "ps2_controller_driver.h"
@@ -29,7 +27,7 @@ static uint8_t                        fake_estop;
 static uint8_t                        fake_fault_stop;
 static uint8_t                        fake_maintenance;
 static ps2_controller_driver_sample_t fake_sample;
-static bmi270_driver_state_t          fake_imu;
+static state_estimation_imu_status_t  fake_imu;
 static chassis_cmd_t                  last_command;
 static uint32_t                       set_command_count;
 static uint32_t                       clear_source_count;
@@ -190,18 +188,9 @@ void StatusLedDriver_SetMode(status_led_driver_mode_t mode)
 {
     (void)mode;
 }
-void Bmi270Driver_GetState(bmi270_driver_state_t *state)
-{
-    *state = fake_imu;
-}
-
 uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
 {
-    bmi270_driver_state_t driver_state;
-
-    _Static_assert(sizeof(*state) == sizeof(driver_state), "IMU status test fixture layout mismatch");
-    Bmi270Driver_GetState(&driver_state);
-    memcpy(state, &driver_state, sizeof(*state));
+    *state = fake_imu;
     return 1UL;
 }
 
@@ -222,7 +211,7 @@ static void reset_fake(void)
               .left_x  = PS2_AXIS_CENTER,
               .left_y  = PS2_AXIS_CENTER,
     };
-    fake_imu                          = (bmi270_driver_state_t){0};
+    fake_imu                          = (state_estimation_imu_status_t){0};
     fake_imu.enabled                  = 1U;
     fake_imu.online                   = 1U;
     fake_imu.last_error               = STATE_ESTIMATION_IMU_ERROR_NONE;

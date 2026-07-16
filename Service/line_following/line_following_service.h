@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "line_sensor_calibration.h"
+#include "line_following_calibration_types.h"
 #include "line_following_config.h"
 #include "line_following_status.h"
 
@@ -31,6 +31,9 @@ extern "C"
     uint8_t  LineFollowing_CalibrationApplyToRam(void);
     void     LineFollowing_CalibrationGet(line_sensor_calibration_t *calibration);
     void     LineFollowing_CalibrationCancel(void);
+    uint8_t  LineFollowing_CalibrationBeginCoordinated(line_sensor_calibration_surface_t surface, uint16_t samples);
+    uint8_t  LineFollowing_CalibrationCommit(void);
+    void     LineFollowing_SetCalibrationPorts(const line_following_calibration_ports_t *ports);
 
 #ifdef __cplusplus
 }

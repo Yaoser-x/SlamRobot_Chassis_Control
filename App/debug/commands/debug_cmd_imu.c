@@ -2,6 +2,7 @@
 
 #include "debug_console_writer.h"
 #include "bmi270_driver.h"
+#include "state_estimation_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -20,17 +21,17 @@ static const char *DebugCmdImu_FailReason(uint8_t reason)
 {
     switch (reason)
     {
-        case IMU_BMI270_GYRO_CAL_FAIL_NONE:
+        case 0U:
             return "none";
-        case IMU_BMI270_GYRO_CAL_FAIL_CONFIG:
+        case 1U:
             return "config";
-        case IMU_BMI270_GYRO_CAL_FAIL_READ:
+        case 2U:
             return "read";
-        case IMU_BMI270_GYRO_CAL_FAIL_ABS:
+        case 3U:
             return "abs";
-        case IMU_BMI270_GYRO_CAL_FAIL_SPAN:
+        case 4U:
             return "span";
-        case IMU_BMI270_GYRO_CAL_FAIL_MOTION:
+        case 5U:
             return "motion";
         default:
             return "unknown";
@@ -73,13 +74,13 @@ static void DebugCmdImu_PrintDiag(void)
 
 static void DebugCmdImu_Calibrate(int value)
 {
-    uint16_t              samples = (value > 0) ? (uint16_t)value : 0U;
-    bmi270_driver_state_t imu_state;
+    uint16_t                      samples = (value > 0) ? (uint16_t)value : 0U;
+    state_estimation_imu_status_t imu_state;
 
     IMU_LOG("INFO", "bmi270 gyro calibration request: keep still");
-    if (Bmi270Driver_CalibrateGyro(samples, 10U) == 0U)
+    if (StateEstimation_BeginImuCalibration(samples, 10U) == 0U)
     {
-        Bmi270Driver_GetState(&imu_state);
+        (void)StateEstimation_GetImu(&imu_state);
         IMU_LOG("WARN",
                 "bmi270 gyro calibration failed reason=%s axis=%u samples=%u mean_dps=%.2f,%.2f,%.2f "
                 "span_dps=%.2f,%.2f,%.2f min_dps=%.2f,%.2f,%.2f max_dps=%.2f,%.2f,%.2f init=%u err=%u "
@@ -105,7 +106,7 @@ static void DebugCmdImu_Calibrate(int value)
                 imu_state.online);
         return;
     }
-    Bmi270Driver_GetState(&imu_state);
+    (void)StateEstimation_GetImu(&imu_state);
     IMU_LOG("INFO",
             "bmi270 gyro calibration accepted state=%u samples=%u; use status/acal for progress",
             imu_state.gyro_auto_cal_state,
@@ -164,7 +165,7 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imucalclear") == 0)
     {
-        Bmi270Driver_ClearCalibration();
+        StateEstimation_ClearImuCalibration();
         IMU_LOG("INFO", "bmi270 gyro calibration cleared");
         return 1U;
     }
