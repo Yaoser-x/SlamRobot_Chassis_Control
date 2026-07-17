@@ -599,6 +599,9 @@ add_executable(test_app_config
     test_app_config.c
     ../../App/config/robot_config.c
     ../../Service/parameter_management/parameter_management_service.c
+    fakes/service/motion_control_validate.c
+    fakes/service/teleoperation_validate.c
+    fakes/service/safety_management_validate.c
 )
 
 target_include_directories(test_app_config PRIVATE
@@ -609,6 +612,7 @@ target_include_directories(test_app_config PRIVATE
     ../../Algorithm/kinematics
     ../../BSP/motor/internal
     fakes/config
+    fakes/service
     ../../Service/command_management
     ../../Service/communication
     ../../Service/line_following
@@ -637,9 +641,13 @@ add_executable(test_foundation_services
     ../../Service/power_management/power_management_service.c
     ../../Service/system_monitoring/system_monitoring_service.c
     ../../Algorithm/calibration/imu_calibration_guard.c
+    fakes/service/motion_control_validate.c
+    fakes/service/teleoperation_validate.c
+    fakes/service/safety_management_validate.c
 )
 target_include_directories(test_foundation_services PRIVATE
     .
+    fakes/service
     ../../App
     ../../BSP
     ../../BSP/adc

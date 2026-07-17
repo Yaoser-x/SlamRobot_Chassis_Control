@@ -164,14 +164,26 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imucalclear") == 0)
     {
-        StateEstimation_ClearImuCalibration();
-        IMU_LOG("INFO", "bmi270 gyro calibration cleared");
+        if (StateEstimation_ClearImuCalibration() == (uint8_t)STATE_ESTIMATION_RESULT_OK)
+        {
+            IMU_LOG("INFO", "bmi270 gyro calibration cleared");
+        }
+        else
+        {
+            IMU_LOG("WARN", "bmi270 gyro calibration clear busy, retry later");
+        }
         return 1U;
     }
     if (sscanf(line, "imu %d", &value) == 1)
     {
-        (void)StateEstimation_SetImuEnabled((value != 0) ? 1U : 0U);
-        IMU_LOG("INFO", "imu %s", (value != 0) ? "enabled" : "disabled");
+        if (StateEstimation_SetImuEnabled((value != 0) ? 1U : 0U) != 0U)
+        {
+            IMU_LOG("INFO", "imu %s", (value != 0) ? "enabled" : "disabled");
+        }
+        else
+        {
+            IMU_LOG("WARN", "imu %s failed: operation busy", (value != 0) ? "enable" : "disable");
+        }
         return 1U;
     }
     return 0U;

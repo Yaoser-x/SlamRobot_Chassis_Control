@@ -107,8 +107,14 @@ static uint8_t DebugCmdParam_Save(const char *line)
         params.current_zero_valid = 1U;
     }
     (void)ParameterManagement_Set(&params);
-    StateEstimation_GetImuCalibration(&calibration);
-    ParameterManagement_SetImuCalibration(&calibration);
+    if (StateEstimation_GetImuCalibration(&calibration) == (uint8_t)STATE_ESTIMATION_RESULT_OK)
+    {
+        ParameterManagement_SetImuCalibration(&calibration);
+    }
+    else
+    {
+        PARAM_LOG("WARN", "imu calibration read busy, calibration not updated in this save");
+    }
     if (ParameterManagement_Save() != 0U)
     {
         PARAM_LOG("INFO", "param saved to flash");

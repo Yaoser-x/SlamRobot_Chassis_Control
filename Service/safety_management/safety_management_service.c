@@ -13,7 +13,7 @@
 
 static safety_management_config_t safety_config;
 static safety_management_status_t monitor_state;
-static uint8_t                    overcurrent_count[MOTOR_ID_COUNT];
+static uint16_t                   overcurrent_count[MOTOR_ID_COUNT];
 static uint32_t                   current_observe_over_limit_count[MOTOR_ID_COUNT];
 static uint32_t                   current_fault_would_latch_count[MOTOR_ID_COUNT];
 static uint8_t                    motor_output_active[MOTOR_ID_COUNT];
@@ -57,14 +57,14 @@ static uint8_t SafetyManagement_TimeReached(uint32_t now_ms, uint32_t deadline_m
 
 static void SafetyManagement_UpdateOvercurrentCounters(const power_management_status_t *adc_state,
                                                        const uint8_t                    blanked[MOTOR_ID_COUNT],
-                                                       const uint8_t                    previous_count[MOTOR_ID_COUNT],
-                                                       uint8_t                          next_count[MOTOR_ID_COUNT],
+                                                       const uint16_t                   previous_count[MOTOR_ID_COUNT],
+                                                       uint16_t                         next_count[MOTOR_ID_COUNT],
                                                        uint32_t                        *new_latched_flags)
 {
-    uint8_t debounce_count;
+    uint16_t debounce_count;
 
-    debounce_count = (uint8_t)((safety_config.current_fault_debounce_ms + safety_config.update_period_ms - 1U)
-                               / safety_config.update_period_ms);
+    debounce_count = (uint16_t)((safety_config.current_fault_debounce_ms + safety_config.update_period_ms - 1U)
+                                / safety_config.update_period_ms);
     if (debounce_count == 0U)
     {
         debounce_count = 1U;
@@ -121,11 +121,11 @@ static void SafetyManagement_UpdateOvercurrentCounters(const power_management_st
 static void SafetyManagement_UpdateCurrentDryRun(const power_management_status_t *adc_state,
                                                  const uint8_t                    blanked[MOTOR_ID_COUNT])
 {
-    uint8_t debounce_count;
+    uint16_t debounce_count;
     (void)blanked;
 
-    debounce_count = (uint8_t)((safety_config.current_fault_debounce_ms + safety_config.update_period_ms - 1U)
-                               / safety_config.update_period_ms);
+    debounce_count = (uint16_t)((safety_config.current_fault_debounce_ms + safety_config.update_period_ms - 1U)
+                                / safety_config.update_period_ms);
     if (debounce_count == 0U)
     {
         debounce_count = 1U;
@@ -154,7 +154,7 @@ static void SafetyManagement_UpdateCurrentDryRun(const power_management_status_t
     }
 }
 
-static uint8_t SafetyManagement_ConfigValid(const safety_management_config_t *config)
+uint8_t SafetyManagement_ValidateConfig(const safety_management_config_t *config)
 {
     return (config != 0 && config->battery_low_warn_v > config->battery_critical_v
             && config->battery_low_clear_v > config->battery_low_warn_v
@@ -176,7 +176,7 @@ uint8_t SafetyManagement_Init(const safety_management_config_t *config)
 {
     platform_critical_state_t critical;
 
-    if (SafetyManagement_ConfigValid(config) == 0U)
+    if (SafetyManagement_ValidateConfig(config) == 0U)
     {
         return 0U;
     }
@@ -243,8 +243,8 @@ void SafetyManagement_Update(void)
     uint8_t                          active_source;
     system_monitoring_task_health_t  task_health;
     safety_management_status_t       next_state;
-    uint8_t                          previous_overcurrent_count[MOTOR_ID_COUNT];
-    uint8_t                          next_overcurrent_count[MOTOR_ID_COUNT];
+    uint16_t                         previous_overcurrent_count[MOTOR_ID_COUNT];
+    uint16_t                         next_overcurrent_count[MOTOR_ID_COUNT];
     uint8_t                          overcurrent_blanked[MOTOR_ID_COUNT];
     uint32_t                         new_latched_flags = 0U;
     uint32_t                         latched_after_commit;

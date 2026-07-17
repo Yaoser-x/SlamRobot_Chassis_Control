@@ -27,6 +27,14 @@ typedef enum
     APP_TASK_PRIORITY_HIGH
 } app_task_priority_t;
 
+/** @brief Beta5 frozen task attributes.
+ *
+ * Task period, stack size, priority, and event-driven flag are frozen in Beta5.
+ * freertos.c creates tasks with hardcoded osThreadAttr_t values and every task
+ * loop reads RobotConfig_GetDefault()-&gt;tasks[...].period_ms.  The values in
+ * robot_config_t.tasks[] are documentation of the frozen intent; they are
+ * NOT runtime-configurable parameters.  RobotConfig_TasksValid() enforces
+ * exact equality with the defaults. */
 typedef struct
 {
     uint32_t            period_ms;

@@ -49,11 +49,19 @@ FORBIDDEN_APIS = {
         r"\b(?:HAL_[A-Za-z0-9_]+|os(?:Kernel|Delay|Thread|Event|Mutex|Semaphore)[A-Za-z0-9_]*|"
         r"NVIC_[A-Za-z0-9_]+|SCB|SysTick|__(?:disable_irq|enable_irq|get_PRIMASK|set_PRIMASK))\b"
     ),
+    "BSP": re.compile(
+        r"\b(?:os(?:Kernel|Delay|Thread|Event|Mutex|Semaphore|MessageQ|Timer|Pool"
+        r"|MemoryPool|MessageQueue|Static)[A-Za-z0-9_]*|"
+        r"xTask[A-Za-z0-9_]*|vTask[A-Za-z0-9_]*|xQueue[A-Za-z0-9_]*|"
+        r"xSemaphore[A-Za-z0-9_]*|xEventGroup[A-Za-z0-9_]*|pvPortMalloc|"
+        r"uxTask[A-Za-z0-9_]*|pcTask[A-Za-z0-9_]*)\b"
+    ),
 }
 
 FORBIDDEN_HEADER_MARKERS = {
     "Algorithm": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
     "Service": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
+    "BSP": ("cmsis_os", "FreeRTOS.h", "task.h", "queue.h", "semphr.h", "event_groups.h"),
 }
 
 PUBLIC_SERVICE_HARDWARE_TYPE = re.compile(

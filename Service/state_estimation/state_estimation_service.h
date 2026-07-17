@@ -12,6 +12,15 @@ extern "C"
 {
 #endif
 
+    /** Unified result codes for non-trivial State Estimation operations. */
+    typedef enum
+    {
+        STATE_ESTIMATION_RESULT_OK             = 0U,
+        STATE_ESTIMATION_RESULT_BUSY           = 1U,
+        STATE_ESTIMATION_RESULT_NULL_PARAMETER = 2U,
+        STATE_ESTIMATION_RESULT_HARDWARE_ERROR = 3U
+    } state_estimation_result_t;
+
     /** Initialize the wheel and IMU estimation owner without merging their schedulers. */
     uint8_t StateEstimation_Init(const state_estimation_config_t *config);
     uint8_t StateEstimation_IsInitialized(void);
@@ -29,9 +38,9 @@ extern "C"
     /** Advance the existing non-blocking IMU calibration state machine. */
     void     StateEstimation_ServiceImuCalibration(uint32_t now_ms, uint8_t stationary);
     uint8_t  StateEstimation_ApplyImuCalibration(const imu_calibration_t *calibration);
-    void     StateEstimation_ClearImuCalibration(void);
+    uint8_t  StateEstimation_ClearImuCalibration(void);
     uint8_t  StateEstimation_BeginImuCalibration(uint16_t samples, uint16_t interval_ms);
-    void     StateEstimation_GetImuCalibration(imu_calibration_t *calibration);
+    uint8_t  StateEstimation_GetImuCalibration(imu_calibration_t *calibration);
     void     StateEstimation_InitCalibrationCoordinator(const state_estimation_calibration_ports_t *ports,
                                                         uint8_t                                     first_save_needed,
                                                         uint8_t                                     persist_imu_calibration,

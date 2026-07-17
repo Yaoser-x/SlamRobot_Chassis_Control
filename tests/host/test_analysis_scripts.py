@@ -172,6 +172,20 @@ class AnalysisTests(unittest.TestCase):
                 errors,
             )
 
+    def test_architecture_rejects_bsp_cmsis_rtos_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "BSP/motor/motor_driver.c", '#include "cmsis_os2.h"\nvoid f(void) {}\n')
+            errors = architecture.analyze(root)
+            self.assertTrue(any("forbidden BSP header" in error for error in errors), errors)
+
+    def test_architecture_rejects_bsp_freertos_api(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "BSP/imu/bmi270_driver.c", "void f(void) { osKernelGetTickCount(); }\n")
+            errors = architecture.analyze(root)
+            self.assertTrue(any("forbidden BSP API" in error for error in errors), errors)
+
     def test_naming_rejects_non_snake_case_and_final_legacy_layer(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

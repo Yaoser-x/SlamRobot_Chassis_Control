@@ -1,6 +1,9 @@
 #include "robot_config.h"
 
+#include "motion_control_service.h"
 #include "parameter_management_service.h"
+#include "safety_management_service.h"
+#include "teleoperation_service.h"
 
 static const robot_config_t robot_default_config = {
     .motion =
@@ -312,34 +315,33 @@ static uint8_t RobotConfig_TeleoperationValid(const teleoperation_config_t *conf
 
 static uint8_t RobotConfig_TasksValid(const robot_config_t *config)
 {
+    const robot_config_t *defaults;
+    uint32_t              index;
+
     if (config == 0)
     {
         return 0U;
     }
-    for (uint32_t index = 0U; index < (uint32_t)APP_TASK_COUNT; ++index)
+    defaults = RobotConfig_GetDefault();
+    for (index = 0U; index < (uint32_t)APP_TASK_COUNT; ++index)
     {
-        const app_task_config_t *task = &config->tasks[index];
+        const app_task_config_t *task   = &config->tasks[index];
+        const app_task_config_t *frozen = &defaults->tasks[index];
 
-        if (task->period_ms == 0UL || task->period_ms > 1000UL)
-        {
-            return 0U;
-        }
-        if (task->stack_size_bytes < 512UL || task->stack_size_bytes > 65536UL)
-        {
-            return 0U;
-        }
-        if ((uint8_t)task->priority > (uint8_t)APP_TASK_PRIORITY_HIGH)
-        {
-            return 0U;
-        }
-        if (task->event_driven > 1U)
+        /* Beta5 freezes task period, stack, priority, and event-driven flag.
+           Freertos.c creates tasks with hardcoded attributes, and every task
+           loop reads RobotConfig_GetDefault()->tasks[...].period_ms.  Changing
+           these values at runtime has no effect — this validation gate
+           prevents the false impression that they are configurable. */
+        if (task->period_ms != frozen->period_ms || task->stack_size_bytes != frozen->stack_size_bytes
+            || (uint8_t)task->priority != (uint8_t)frozen->priority || task->event_driven != frozen->event_driven)
         {
             return 0U;
         }
     }
-    for (uint32_t index = 0U; index < SYSTEM_MONITORING_TASK_COUNT; ++index)
+    for (index = 0U; index < SYSTEM_MONITORING_TASK_COUNT; ++index)
     {
-        if (config->system.task_timeout_ms[index] == 0UL || config->system.task_timeout_ms[index] > 10000UL)
+        if (config->system.task_timeout_ms[index] != defaults->system.task_timeout_ms[index])
         {
             return 0U;
         }
@@ -424,10 +426,13 @@ uint8_t RobotConfig_Validate(const robot_config_t *config)
         return 0U;
     }
 
-    if (RobotConfig_MotionValid(&config->motion) == 0U
+    /* Delegate per-capability validation to the owning Service so that
+       App and Service never disagree on boundary values.  Each Service
+       Init() reuses the same ValidateConfig() entry point. */
+    if (RobotConfig_MotionValid(&config->motion) == 0U || MotionControl_ValidateConfig(&config->motion) == 0U
         || RobotConfig_TeleoperationValid(&config->teleoperation) == 0U
-        || RobotConfig_TasksValid(config) == 0U
-        || RobotConfig_SafetyValid(&config->safety) == 0U)
+        || Teleoperation_ValidateConfig(&config->teleoperation) == 0U || RobotConfig_TasksValid(config) == 0U
+        || RobotConfig_SafetyValid(&config->safety) == 0U || SafetyManagement_ValidateConfig(&config->safety) == 0U)
     {
         return 0U;
     }
@@ -507,8 +512,7 @@ uint8_t RobotConfig_Validate(const robot_config_t *config)
     {
         return 0U;
     }
-    if (config->communication.esp12f_status_period_ms == 0UL
-        || config->communication.esp12f_status_period_ms > 10000UL)
+    if (config->communication.esp12f_status_period_ms == 0UL || config->communication.esp12f_status_period_ms > 10000UL)
     {
         return 0U;
     }

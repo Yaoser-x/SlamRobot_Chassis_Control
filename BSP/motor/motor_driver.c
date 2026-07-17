@@ -3,7 +3,7 @@
 
 #include "motor_hardware_layout.h"
 #include "motor_hardware_layout_config.h"
-#include "cmsis_os2.h"
+#include "platform_time.h"
 #include "main.h"
 #include "direction_apply.h"
 #include "motor_config.h"
@@ -90,7 +90,7 @@ static void MotorDriver_ClearRuntimeAfterBreak(void)
 
 void MotorDriver_OnTim1BreakFromIsr(void)
 {
-    MotorBreak_OnTim1Runtime(osKernelGetTickCount());
+    MotorBreak_OnTim1Runtime(PlatformTime_NowMs());
     MotorDriver_ClearRuntimeAfterBreak();
 }
 
@@ -132,7 +132,7 @@ static void MotorDriver_UpdateBreakStatus(void)
 {
     uint32_t primask;
 
-    if (MotorBreak_Update(osKernelGetTickCount()) != 0U)
+    if (MotorBreak_Update(PlatformTime_NowMs()) != 0U)
     {
         MotorDriver_ClearRuntimeAfterBreak();
     }
@@ -331,7 +331,7 @@ void MotorDriver_Init(void)
     }
     /* 清除 PWM 启动期间可能由 HAL_TIM_PWM_Start 触发的 TIM1/TIM8 break 标志，
      避免因 BKIN 脚在 DRV 唤醒过程中短暂低电平导致的误锁存。 */
-    if (MotorBreak_CompleteStartup(startup_qualified, nfault_high_mask, osKernelGetTickCount()) != 0U)
+    if (MotorBreak_CompleteStartup(startup_qualified, nfault_high_mask, PlatformTime_NowMs()) != 0U)
     {
         MotorDriver_ClearRuntimeAfterBreak();
     }
@@ -432,7 +432,7 @@ void MotorDriver_StopAll(motor_stop_mode_t mode)
 void MotorDriver_UpdateFaults(void)
 {
     uint8_t  fault_active[MOTOR_ID_COUNT];
-    uint32_t now_ms = osKernelGetTickCount();
+    uint32_t now_ms = PlatformTime_NowMs();
     uint32_t primask;
 
     MotorDriver_UpdateBreakStatus();

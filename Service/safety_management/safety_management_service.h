@@ -11,6 +11,7 @@ extern "C"
 {
 #endif
 
+    uint8_t SafetyManagement_ValidateConfig(const safety_management_config_t *config);
     uint8_t SafetyManagement_Init(const safety_management_config_t *config);
     /** Refresh Parameter-owned current thresholds before the next safety cycle. */
     void     SafetyManagement_SetCurrentThresholds(const float observe_a[SAFETY_MANAGEMENT_MOTOR_COUNT],

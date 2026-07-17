@@ -11,6 +11,7 @@ extern "C"
 {
 #endif
 
+    uint8_t  Teleoperation_ValidateConfig(const teleoperation_config_t *config);
     uint8_t  Teleoperation_Init(const teleoperation_config_t *config);
     void     Teleoperation_Update(void);
     uint32_t Teleoperation_GetStatus(teleoperation_status_t *status);

@@ -18,6 +18,8 @@ extern "C"
         MOTION_CONTROL_MAINTENANCE_NOT_STATIONARY
     } motion_control_maintenance_result_t;
 
+    /** Validate product configuration without side effects. */
+    uint8_t MotionControl_ValidateConfig(const motion_control_config_t *config);
     /** Initialize the sole runtime motor-output owner with injected product configuration. */
     uint8_t MotionControl_Init(const motion_control_config_t *config);
     /** Execute one motion-control cycle at the supplied monotonic timestamp. */

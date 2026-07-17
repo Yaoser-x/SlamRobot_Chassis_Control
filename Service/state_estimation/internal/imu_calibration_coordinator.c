@@ -84,7 +84,12 @@ void ImuCalibrationCoordinator_ProcessPersistence(uint32_t now_ms)
         return;
     }
 
-    StateEstimation_GetImuCalibration(&calibration);
+    if (StateEstimation_GetImuCalibration(&calibration) != (uint8_t)STATE_ESTIMATION_RESULT_OK)
+    {
+        save_next_ms = now_ms + IMU_AUTOSAVE_RETRY_MS;
+        calibration_ports.end_maintenance();
+        return;
+    }
     save_attempts++;
     if (calibration_ports.persist(&calibration, persist_current_zero) != 0U)
     {

@@ -21,6 +21,8 @@ static uint32_t                        imu_sample_generation;
 static uint32_t                        imu_status_generation;
 static uint8_t                         state_initialized;
 static uint8_t                         imu_operation_active;
+static imu_calibration_t               imu_calibration_snapshot;
+static uint32_t                        imu_calibration_generation;
 
 static uint8_t StateEstimation_TryBeginImuOperation(void)
 {
@@ -42,6 +44,42 @@ static void StateEstimation_EndImuOperation(void)
     platform_critical_state_t critical = PlatformCritical_Enter();
     imu_operation_active               = 0U;
     PlatformCritical_Exit(critical);
+}
+
+static void StateEstimation_UpdateCalibrationSnapshot(void)
+{
+    imu_calibration_t         fresh;
+    platform_critical_state_t critical;
+
+    ImuEstimationPipeline_GetCalibration(&fresh);
+    critical                 = PlatformCritical_Enter();
+    imu_calibration_snapshot = fresh;
+    imu_calibration_generation++;
+    PlatformCritical_Exit(critical);
+}
+
+static uint8_t StateEstimation_ImuFactsChanged(const state_estimation_imu_status_t *prev,
+                                               const state_estimation_imu_status_t *next)
+{
+    if (prev == 0 || next == 0)
+    {
+        return 0U;
+    }
+    return (prev->enabled != next->enabled || prev->online != next->online || prev->chip_id != next->chip_id
+            || prev->last_error != next->last_error || prev->init_state != next->init_state
+            || prev->profile != next->profile || prev->error_count != next->error_count
+            || prev->poll_fallback_count != next->poll_fallback_count || prev->spi_error_count != next->spi_error_count
+            || prev->init_failure_count != next->init_failure_count
+            || prev->fifo_overflow_count != next->fifo_overflow_count
+            || prev->temperature_valid != next->temperature_valid || prev->temperature_c != next->temperature_c
+            || prev->temperature_error_count != next->temperature_error_count
+            || prev->quality_flags != next->quality_flags || prev->quality_latched_flags != next->quality_latched_flags
+            || prev->timestamp_error_count != next->timestamp_error_count
+            || prev->gyro_saturation_count != next->gyro_saturation_count
+            || prev->accel_anomaly_count != next->accel_anomaly_count
+            || prev->attitude_invalid_count != next->attitude_invalid_count || prev->drdy_count != next->drdy_count)
+               ? 1U
+               : 0U;
 }
 
 static void StateEstimation_ResetImuRuntime(uint8_t enabled)
@@ -94,24 +132,9 @@ static void StateEstimation_PublishImu(void)
         sample_consumed = 1U;
     }
     ImuQualityMonitor_EndCycle(&next);
-    status_changed =
-        (previous.enabled != next.enabled || previous.online != next.online || previous.chip_id != next.chip_id
-         || previous.last_error != next.last_error || previous.init_state != next.init_state
-         || previous.profile != next.profile || previous.error_count != next.error_count
-         || previous.poll_fallback_count != next.poll_fallback_count || previous.spi_error_count != next.spi_error_count
-         || previous.init_failure_count != next.init_failure_count
-         || previous.fifo_overflow_count != next.fifo_overflow_count
-         || previous.temperature_valid != next.temperature_valid || previous.temperature_c != next.temperature_c
-         || previous.temperature_error_count != next.temperature_error_count
-         || previous.quality_flags != next.quality_flags || previous.quality_latched_flags != next.quality_latched_flags
-         || previous.timestamp_error_count != next.timestamp_error_count
-         || previous.gyro_saturation_count != next.gyro_saturation_count
-         || previous.accel_anomaly_count != next.accel_anomaly_count
-         || previous.attitude_invalid_count != next.attitude_invalid_count)
-            ? 1U
-            : 0U;
-    critical   = PlatformCritical_Enter();
-    imu_status = next;
+    status_changed = StateEstimation_ImuFactsChanged(&previous, &next);
+    critical       = PlatformCritical_Enter();
+    imu_status     = next;
     if (sample_consumed != 0U)
     {
         imu_sample_generation++;
@@ -151,6 +174,8 @@ uint8_t StateEstimation_Init(const state_estimation_config_t *config)
     imu_status_generation             = 0UL;
     imu_operation_active              = 0U;
     imu_device_event_baseline         = (imu_device_event_baseline_t){0};
+    imu_calibration_snapshot          = (imu_calibration_t){0};
+    imu_calibration_generation        = 0UL;
     state_initialized                 = 1U;
     PlatformCritical_Exit(critical);
     return 1U;
@@ -329,6 +354,12 @@ void StateEstimation_ServiceImuCalibration(uint32_t now_ms, uint8_t stationary)
     {
         imu_status = next;
         imu_status_generation++;
+        if (next.gyro_auto_cal_state == STATE_ESTIMATION_IMU_AUTO_CAL_SUCCESS && next.gyro_calibrated != 0U)
+        {
+            PlatformCritical_Exit(critical);
+            StateEstimation_UpdateCalibrationSnapshot();
+            critical = PlatformCritical_Enter();
+        }
     }
     PlatformCritical_Exit(critical);
     StateEstimation_EndImuOperation();
@@ -356,17 +387,18 @@ uint8_t StateEstimation_ApplyImuCalibration(const imu_calibration_t *calibration
     }
     imu_status_generation++;
     PlatformCritical_Exit(critical);
+    StateEstimation_UpdateCalibrationSnapshot();
     StateEstimation_EndImuOperation();
     return 1U;
 }
 
-void StateEstimation_ClearImuCalibration(void)
+uint8_t StateEstimation_ClearImuCalibration(void)
 {
     platform_critical_state_t critical;
 
     if (StateEstimation_TryBeginImuOperation() == 0U)
     {
-        return;
+        return (uint8_t)STATE_ESTIMATION_RESULT_BUSY;
     }
     ImuEstimationPipeline_ClearCalibration();
     critical                   = PlatformCritical_Enter();
@@ -375,7 +407,9 @@ void StateEstimation_ClearImuCalibration(void)
         (imu_status.enabled != 0U) ? STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE : STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED;
     imu_status_generation++;
     PlatformCritical_Exit(critical);
+    StateEstimation_UpdateCalibrationSnapshot();
     StateEstimation_EndImuOperation();
+    return (uint8_t)STATE_ESTIMATION_RESULT_OK;
 }
 
 uint8_t StateEstimation_BeginImuCalibration(uint16_t samples, uint16_t interval_ms)
@@ -405,13 +439,18 @@ uint8_t StateEstimation_BeginImuCalibration(uint16_t samples, uint16_t interval_
     return accepted;
 }
 
-void StateEstimation_GetImuCalibration(imu_calibration_t *calibration)
+uint8_t StateEstimation_GetImuCalibration(imu_calibration_t *calibration)
 {
-    if (StateEstimation_TryBeginImuOperation() != 0U)
+    platform_critical_state_t critical;
+
+    if (calibration == 0)
     {
-        ImuEstimationPipeline_GetCalibration(calibration);
-        StateEstimation_EndImuOperation();
+        return (uint8_t)STATE_ESTIMATION_RESULT_NULL_PARAMETER;
     }
+    critical     = PlatformCritical_Enter();
+    *calibration = imu_calibration_snapshot;
+    PlatformCritical_Exit(critical);
+    return (uint8_t)STATE_ESTIMATION_RESULT_OK;
 }
 
 void StateEstimation_InitCalibrationCoordinator(const state_estimation_calibration_ports_t *ports,

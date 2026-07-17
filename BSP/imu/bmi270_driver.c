@@ -190,10 +190,18 @@ uint8_t Bmi270Driver_SetProfile(imu_bmi270_profile_id_t profile)
     selected_profile                 = profile;
     driver_state.profile             = (uint8_t)profile;
     driver_state.online              = 0U;
-    driver_state.init_state          = BMI270_DRIVER_INIT_RESET;
     driver_state.temperature_sampled = 0U;
     driver_state.temperature_valid   = 0U;
     Bmi270Driver_ClearQueue();
+    if (driver_state.enabled != 0U)
+    {
+        driver_state.init_state = BMI270_DRIVER_INIT_RESET;
+        next_init_retry_ms      = 0U;
+    }
+    else
+    {
+        driver_state.init_state = BMI270_DRIVER_INIT_DISABLED;
+    }
     return 1U;
 }
 
@@ -363,7 +371,7 @@ uint8_t Bmi270Driver_Update(void)
 
     if (driver_state.enabled == 0U)
     {
-        return 1U;
+        return 0U;
     }
     if (driver_state.online == 0U)
     {
