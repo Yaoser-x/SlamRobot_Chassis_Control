@@ -12,6 +12,7 @@
 #define IMU_GYRO_CAL_STILL_SPAN_DPS 5.0f
 #define IMU_AUTO_CAL_MAX_ATTEMPTS   5U
 #define IMU_AUTO_CAL_RETRY_MS       2000U
+#define IMU_AUTO_CAL_START_DELAY_MS 1000U
 #define IMU_GYRO_SATURATION_DPS     490.0f
 #define IMU_ACCEL_REJECT_MIN_G_SQ   0.16f
 #define IMU_ACCEL_REJECT_MAX_G_SQ   3.24f
@@ -29,17 +30,17 @@ void ImuEstimationPipeline_Init(void)
 {
     ImuBmi270Calibration_Default(&calibration);
     attitude_params = ImuBmi270Mahony_DefaultParams();
-    ImuEstimationPipeline_ResetRuntime();
+    ImuEstimationPipeline_ResetRuntime(0UL);
 }
 
-void ImuEstimationPipeline_ResetRuntime(void)
+void ImuEstimationPipeline_ResetRuntime(uint32_t now_ms)
 {
     ImuBmi270Mahony_Init(&attitude);
     ImuBmi270GyroCalAccumulator_Init(&calibration_accumulator);
     calibration_active            = 0U;
     calibration_automatic         = 0U;
     last_calibration_sample_count = 0UL;
-    auto_cal_next_ms              = 1000UL;
+    auto_cal_next_ms              = now_ms + IMU_AUTO_CAL_START_DELAY_MS;
 }
 
 void ImuEstimationPipeline_Process(const bmi270_sample_t         *sample,

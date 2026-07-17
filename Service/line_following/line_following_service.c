@@ -493,7 +493,7 @@ void LineFollowing_Enable(uint8_t enable)
             enable       = 0U;
             clear_source = 1U;
         }
-        else if (LineFollowing_SafetyActive() != 0U || generation != CommandManagement_GetMotionRevokeGeneration())
+        else if (generation != CommandManagement_GetMotionRevokeGeneration())
         {
             enable       = 0U;
             clear_source = 1U;

@@ -4,7 +4,6 @@
 #include "state_estimation_service.h"
 #include "platform_task_event.h"
 #include "platform_time.h"
-#include "state_estimation_service.h"
 #include "system_monitoring_service.h"
 
 void Task_Imu(void *argument)

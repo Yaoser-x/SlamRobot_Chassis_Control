@@ -6,15 +6,50 @@
 #include "platform_critical.h"
 #include "state_estimation_service.h"
 
-#include <string.h>
-
-_Static_assert(sizeof(power_management_status_t) == sizeof(power_adc_driver_state_t),
-               "Power Service and ADC driver snapshots must remain layout-compatible");
-
 static power_management_config_t power_config;
 static power_management_status_t power_status;
 static uint32_t                  power_generation;
 static uint8_t                   power_initialized;
+
+static void PowerManagement_MapDriverState(const power_adc_driver_state_t *source, power_management_status_t *target)
+{
+    if (source == 0 || target == 0)
+    {
+        return;
+    }
+    *target = (power_management_status_t){0};
+    for (uint8_t index = 0U; index < POWER_MANAGEMENT_MOTOR_COUNT; ++index)
+    {
+        target->raw_current[index]           = source->raw_current[index];
+        target->current_zero_raw[index]      = source->current_zero_raw[index];
+        target->current_a[index]             = source->current_a[index];
+        target->current_mean_a[index]        = source->current_mean_a[index];
+        target->current_rms_a[index]         = source->current_rms_a[index];
+        target->current_peak_a[index]        = source->current_peak_a[index];
+        target->current_signed_mean_a[index] = source->current_signed_mean_a[index];
+        target->current_noise_a[index]       = source->current_noise_a[index];
+        target->current_sample_count[index]  = source->current_sample_count[index];
+        target->current_zero_span_raw[index] = source->current_zero_span_raw[index];
+        target->current_quality_flags[index] = source->current_quality_flags[index];
+    }
+    target->raw_battery                = source->raw_battery;
+    target->raw_left_current           = source->raw_left_current;
+    target->raw_right_current          = source->raw_right_current;
+    target->battery_voltage            = source->battery_voltage;
+    target->left_current_a             = source->left_current_a;
+    target->right_current_a            = source->right_current_a;
+    target->current_zero_sample_count  = source->current_zero_sample_count;
+    target->raw_sample_count           = source->raw_sample_count;
+    target->missed_window_count        = source->missed_window_count;
+    target->sample_rate_hz_milli       = source->sample_rate_hz_milli;
+    target->valid_flags                = source->valid_flags;
+    target->invalid_reason_flags       = source->invalid_reason_flags;
+    target->samples_ready              = source->samples_ready;
+    target->current_zero_valid         = source->current_zero_valid;
+    target->current_valid              = source->current_valid;
+    target->current_control_valid      = source->current_control_valid;
+    target->current_control_valid_mask = source->current_control_valid_mask;
+}
 
 static void PowerManagement_Publish(void)
 {
@@ -23,7 +58,7 @@ static void PowerManagement_Publish(void)
     platform_critical_state_t critical;
 
     PowerAdcDriver_GetState(&raw);
-    memcpy(&next, &raw, sizeof(next));
+    PowerManagement_MapDriverState(&raw, &next);
     critical     = PlatformCritical_Enter();
     power_status = next;
     power_generation++;
@@ -43,7 +78,7 @@ uint8_t PowerManagement_Init(const power_management_config_t *config)
     PowerAdcDriver_SetUpdatePeriodMs((uint32_t)config->update_period_ms);
     PowerAdcDriver_Init();
     PowerAdcDriver_GetState(&raw);
-    memcpy(&initial_status, &raw, sizeof(initial_status));
+    PowerManagement_MapDriverState(&raw, &initial_status);
     critical          = PlatformCritical_Enter();
     power_config      = *config;
     power_status      = initial_status;

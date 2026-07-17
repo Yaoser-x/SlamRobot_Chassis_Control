@@ -76,6 +76,25 @@ int main(void)
     require_int(fabsf(calibration.gyro_bias_dps[0] - 2.0f) < 0.0001f,
                 "automatic calibration from default bias retains absolute-bias semantics");
 
+    ImuEstimationPipeline_ResetRuntime(5000U);
+    status = (state_estimation_imu_status_t){
+        .enabled               = 1U,
+        .online                = 1U,
+        .gyro_auto_cal_enabled = 1U,
+        .sample_count          = 10U,
+    };
+    ImuEstimationPipeline_ServiceCalibration(5000U, 1U, &status);
+    require_int(status.gyro_auto_cal_state == STATE_ESTIMATION_IMU_AUTO_CAL_RETRY_WAIT,
+                "runtime reset delays auto calibration relative to current time");
+    status.sample_count++;
+    ImuEstimationPipeline_ServiceCalibration(5999U, 1U, &status);
+    require_int(status.gyro_auto_cal_state == STATE_ESTIMATION_IMU_AUTO_CAL_RETRY_WAIT,
+                "auto calibration remains delayed before the relative deadline");
+    status.sample_count++;
+    ImuEstimationPipeline_ServiceCalibration(6000U, 1U, &status);
+    require_int(status.gyro_auto_cal_state == STATE_ESTIMATION_IMU_AUTO_CAL_COLLECTING,
+                "auto calibration starts at the relative deadline");
+
     (void)puts("imu estimation pipeline tests passed");
     return 0;
 }

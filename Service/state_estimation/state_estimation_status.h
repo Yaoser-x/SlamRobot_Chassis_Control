@@ -123,6 +123,7 @@ typedef struct
     float    yaw_deg;
     float    temperature_c;
     uint8_t  temperature_valid;
+    uint32_t temperature_error_count;
     float    accel_correction_weight;
     uint32_t quality_flags;
     uint32_t quality_latched_flags;
@@ -154,9 +155,12 @@ typedef struct
     state_estimation_wheel_status_t wheel;
     state_estimation_imu_status_t   imu;
     uint32_t                        wheel_generation;
-    uint32_t                        imu_generation;
-    uint8_t                         wheel_fresh;
-    uint8_t                         imu_fresh;
+    uint32_t                        imu_sample_generation;
+    uint32_t                        imu_status_generation;
+    /** Compatibility aggregate; equals sample plus status generation. */
+    uint32_t imu_generation;
+    uint8_t  wheel_fresh;
+    uint8_t  imu_fresh;
 } state_estimation_status_t;
 
 #endif /* STATE_ESTIMATION_STATUS_H */

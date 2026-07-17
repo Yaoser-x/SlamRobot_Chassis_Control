@@ -32,6 +32,32 @@ void WheelEstimationPipeline_Init(void)
     has_last_update = 0U;
 }
 
+void WheelEstimationPipeline_AggregateSideValidity(const uint8_t speed_valid[STATE_ESTIMATION_MOTOR_COUNT],
+                                                   uint8_t      *left_valid,
+                                                   uint8_t      *right_valid)
+{
+    uint8_t side_count[2] = {0U, 0U};
+    uint8_t side_valid[2] = {1U, 1U};
+
+    if (speed_valid == 0 || left_valid == 0 || right_valid == 0)
+    {
+        return;
+    }
+    for (uint32_t index = 0U; index < STATE_ESTIMATION_MOTOR_COUNT; ++index)
+    {
+        const motor_id_t motor = (motor_id_t)index;
+        const uint8_t    side  = (uint8_t)MotorHardwareLayout_MotorSide(motor);
+
+        if (MotorHardwareLayout_MotorEnabled(motor) != 0U && side <= (uint8_t)MOTOR_SIDE_RIGHT)
+        {
+            side_count[side]++;
+            side_valid[side] &= speed_valid[index];
+        }
+    }
+    *left_valid  = (side_count[MOTOR_SIDE_LEFT] != 0U) ? side_valid[MOTOR_SIDE_LEFT] : 0U;
+    *right_valid = (side_count[MOTOR_SIDE_RIGHT] != 0U) ? side_valid[MOTOR_SIDE_RIGHT] : 0U;
+}
+
 void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
                                     uint32_t                         now_ms,
                                     float                            wheel_radius_m,
@@ -140,8 +166,9 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
         (side_count[MOTOR_SIDE_LEFT] != 0U) ? side_speed_sum[MOTOR_SIDE_LEFT] / side_count[MOTOR_SIDE_LEFT] : 0.0f;
     status->right_speed_mps =
         (side_count[MOTOR_SIDE_RIGHT] != 0U) ? side_speed_sum[MOTOR_SIDE_RIGHT] / side_count[MOTOR_SIDE_RIGHT] : 0.0f;
-    status->left_speed_valid  = (side_count[MOTOR_SIDE_LEFT] != 0U) ? 1U : 0U;
-    status->right_speed_valid = (side_count[MOTOR_SIDE_RIGHT] != 0U) ? 1U : 0U;
+    WheelEstimationPipeline_AggregateSideValidity(status->speed_valid,
+                                                  &status->left_speed_valid,
+                                                  &status->right_speed_valid);
 
     for (uint32_t first = 0U; first < STATE_ESTIMATION_MOTOR_COUNT; ++first)
     {

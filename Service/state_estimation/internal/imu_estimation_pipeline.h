@@ -9,7 +9,7 @@
 /** @brief Reset all service-owned IMU filters, attitude, and calibration state. */
 void ImuEstimationPipeline_Init(void);
 /** Reset runtime estimation and calibration scheduling while preserving the applied calibration model. */
-void ImuEstimationPipeline_ResetRuntime(void);
+void ImuEstimationPipeline_ResetRuntime(uint32_t now_ms);
 /** @brief Explicitly map device facts and estimate calibrated robot attitude. */
 void    ImuEstimationPipeline_Process(const bmi270_sample_t         *sample,
                                       const bmi270_driver_state_t   *device,

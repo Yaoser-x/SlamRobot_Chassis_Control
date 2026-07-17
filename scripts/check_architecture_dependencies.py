@@ -220,7 +220,6 @@ def analyze(root: Path, final: bool = True) -> list[str]:
     header_index = build_header_index(root)
     internal_header_index = build_internal_header_index(root)
     adapters = app_adapter_sources(root)
-    adapter_directories = {Path(path).parent.as_posix() for path in adapters}
 
     for name in sorted(FORBIDDEN_TOP_LEVEL):
         if (root / name).exists():
@@ -243,8 +242,8 @@ def analyze(root: Path, final: bool = True) -> list[str]:
                 target = include_layer(include, header_index)
                 adapter_dependency = (
                     layer == "App"
-                    and (relative in adapters or relative_path.parent.as_posix() in adapter_directories)
-                    and target in {"Algorithm", "BSP"}
+                    and relative in adapters
+                    and target == "BSP"
                 )
                 if target is not None and target not in ALLOWED[layer] and not adapter_dependency:
                     if layer == "App" and target == "BSP":

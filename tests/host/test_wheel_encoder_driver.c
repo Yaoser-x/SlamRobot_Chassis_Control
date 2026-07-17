@@ -21,6 +21,7 @@ TIM_HandleTypeDef htim5 = {.Instance = &tim5_instance};
 
 static uint32_t                        fake_primask;
 static uint32_t                        layout_calls_while_masked;
+static uint8_t                         enabled_mask = 0x0FU;
 static state_estimation_wheel_status_t wheel_status;
 
 static void WheelEncoderDriverTest_Init(void)
@@ -86,7 +87,7 @@ uint8_t MotorHardwareLayout_MotorEnabled(motor_id_t motor)
     {
         layout_calls_while_masked++;
     }
-    return ((uint32_t)motor < MOTOR_ID_COUNT) ? 1U : 0U;
+    return ((uint32_t)motor < MOTOR_ID_COUNT && (enabled_mask & (uint8_t)(1U << (uint8_t)motor)) != 0U) ? 1U : 0U;
 }
 
 motor_side_t MotorHardwareLayout_MotorSide(motor_id_t motor)
@@ -197,12 +198,34 @@ static void test_hardware_count_snapshot_uses_logical_motor_order(void)
     require_int(counts[MOTOR_ID_M4] == 45U, "M4 maps to TIM5");
 }
 
+static void test_side_validity_requires_every_enabled_encoder(void)
+{
+    uint8_t speed_valid[MOTOR_ID_COUNT] = {1U, 1U, 1U, 1U};
+    uint8_t left_valid;
+    uint8_t right_valid;
+
+    enabled_mask             = 0x0FU;
+    speed_valid[MOTOR_ID_M2] = 0U;
+    WheelEstimationPipeline_AggregateSideValidity(speed_valid, &left_valid, &right_valid);
+    require_int(left_valid == 0U && right_valid != 0U, "one invalid left encoder invalidates only the left side");
+    speed_valid[MOTOR_ID_M2] = 1U;
+    speed_valid[MOTOR_ID_M3] = 0U;
+    WheelEstimationPipeline_AggregateSideValidity(speed_valid, &left_valid, &right_valid);
+    require_int(left_valid != 0U && right_valid == 0U, "one invalid right encoder invalidates only the right side");
+    speed_valid[MOTOR_ID_M2] = 0U;
+    enabled_mask &= (uint8_t) ~(1U << MOTOR_ID_M2);
+    WheelEstimationPipeline_AggregateSideValidity(speed_valid, &left_valid, &right_valid);
+    require_int(left_valid != 0U, "disabled invalid motor does not invalidate its side");
+    enabled_mask = 0x0FU;
+}
+
 int main(void)
 {
     test_runtime_encoder_direction_reverses_delta();
     test_update_publishes_after_unmasked_calculation();
     test_runtime_wheel_radius_changes_speed_generation();
     test_hardware_count_snapshot_uses_logical_motor_order();
+    test_side_validity_requires_every_enabled_encoder();
     (void)printf("PASS: encoder driver host tests\n");
     return 0;
 }

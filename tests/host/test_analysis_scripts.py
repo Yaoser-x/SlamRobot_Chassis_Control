@@ -97,6 +97,23 @@ class AnalysisTests(unittest.TestCase):
             errors = architecture.analyze(root)
             self.assertTrue(any("App BSP include" in error for error in errors), errors)
 
+    def test_architecture_rejects_app_bsp_include_beside_adapter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "BSP/led/status_led_driver.h", "#pragma once\n")
+            self.write_fixture(root, "App/tasks/status_led_adapter.c", '#include "status_led_driver.h"\n')
+            self.write_fixture(root, "App/tasks/task_led.c", '#include "status_led_driver.h"\n')
+            self.write_fixture(
+                root,
+                "CMakeLists.txt",
+                "set(F407_APP_ADAPTER_SOURCES\n"
+                "    App/tasks/status_led_adapter.c\n"
+                ")\n",
+            )
+            errors = architecture.analyze(root)
+            self.assertTrue(any(error.startswith("App/tasks/task_led.c: App BSP include") for error in errors), errors)
+            self.assertFalse(any(error.startswith("App/tasks/status_led_adapter.c: App BSP include") for error in errors), errors)
+
     def test_cmake_rejects_public_algorithm_link_from_service(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

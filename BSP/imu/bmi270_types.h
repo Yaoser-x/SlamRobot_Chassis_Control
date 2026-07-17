@@ -58,7 +58,9 @@ typedef struct
     uint32_t init_failure_count;
     uint32_t fifo_error_count;
     float    temperature_c;
+    uint8_t  temperature_sampled;
     uint8_t  temperature_valid;
+    uint32_t temperature_error_count;
 } bmi270_driver_state_t;
 
 #endif /* BMI270_TYPES_H */

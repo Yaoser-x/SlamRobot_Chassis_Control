@@ -1,57 +1,72 @@
 #include "imu_quality_monitor.h"
 
-void ImuQualityMonitor_BeginCycle(const bmi270_driver_state_t *device, state_estimation_imu_status_t *status)
+void ImuQualityMonitor_ResetBaseline(const bmi270_driver_state_t *device, imu_device_event_baseline_t *baseline)
 {
-    uint32_t previous_poll_fallback_count;
-
-    if (device == 0 || status == 0)
+    if (device == 0 || baseline == 0)
     {
         return;
     }
-    previous_poll_fallback_count = status->poll_fallback_count;
-    status->quality_flags        = 0UL;
-    status->enabled              = device->enabled;
-    status->online               = device->online;
-    status->chip_id              = device->chip_id;
-    status->last_error           = device->last_error;
-    status->init_state           = device->init_state;
-    status->profile              = device->profile;
-    status->error_count          = device->error_count;
-    status->last_update_ms       = device->last_update_ms;
-    status->sample_count         = device->sample_count;
-    status->drdy_count           = device->drdy_count;
-    status->poll_fallback_count  = device->poll_fallback_count;
-    status->spi_error_count      = device->spi_error_count;
-    status->init_failure_count   = device->init_failure_count;
-    status->fifo_overflow_count  = device->fifo_error_count;
-    status->temperature_c        = device->temperature_c;
-    status->temperature_valid    = device->temperature_valid;
+    baseline->previous_spi_error_count     = device->spi_error_count;
+    baseline->previous_init_failure_count  = device->init_failure_count;
+    baseline->previous_fifo_error_count    = device->fifo_error_count;
+    baseline->previous_poll_fallback_count = device->poll_fallback_count;
+    baseline->previous_last_error          = device->last_error;
+}
 
-    if (device->last_error == STATE_ESTIMATION_IMU_ERROR_SPI)
+void ImuQualityMonitor_BeginCycle(const bmi270_driver_state_t   *device,
+                                  imu_device_event_baseline_t   *baseline,
+                                  state_estimation_imu_status_t *status)
+{
+    if (device == 0 || baseline == 0 || status == 0)
+    {
+        return;
+    }
+    status->quality_flags           = 0UL;
+    status->enabled                 = device->enabled;
+    status->online                  = device->online;
+    status->chip_id                 = device->chip_id;
+    status->last_error              = device->last_error;
+    status->init_state              = device->init_state;
+    status->profile                 = device->profile;
+    status->error_count             = device->error_count;
+    status->last_update_ms          = device->last_update_ms;
+    status->sample_count            = device->sample_count;
+    status->drdy_count              = device->drdy_count;
+    status->poll_fallback_count     = device->poll_fallback_count;
+    status->spi_error_count         = device->spi_error_count;
+    status->init_failure_count      = device->init_failure_count;
+    status->fifo_overflow_count     = device->fifo_error_count;
+    status->temperature_c           = device->temperature_c;
+    status->temperature_valid       = device->temperature_valid;
+    status->temperature_error_count = device->temperature_error_count;
+
+    if (device->spi_error_count != baseline->previous_spi_error_count)
     {
         status->quality_flags |= STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR;
     }
-    else if (device->last_error == STATE_ESTIMATION_IMU_ERROR_CHIP_ID
-             || device->last_error == STATE_ESTIMATION_IMU_ERROR_CONFIG)
+    if (device->init_failure_count != baseline->previous_init_failure_count)
     {
         status->quality_flags |= STATE_ESTIMATION_IMU_QUALITY_INIT_FAILED;
     }
-    else if (device->last_error == STATE_ESTIMATION_IMU_ERROR_FIFO)
+    if (device->fifo_error_count != baseline->previous_fifo_error_count)
     {
         status->quality_flags |= STATE_ESTIMATION_IMU_QUALITY_FIFO_OVERFLOW;
     }
-    else if (device->last_error == STATE_ESTIMATION_IMU_ERROR_PROFILE_VERIFY)
+    if (device->last_error == STATE_ESTIMATION_IMU_ERROR_PROFILE_VERIFY
+        && baseline->previous_last_error != STATE_ESTIMATION_IMU_ERROR_PROFILE_VERIFY)
     {
         status->quality_flags |= STATE_ESTIMATION_IMU_QUALITY_PROFILE_MISMATCH;
     }
-    if (device->poll_fallback_count != previous_poll_fallback_count)
+    if (device->poll_fallback_count != baseline->previous_poll_fallback_count)
     {
         status->quality_flags |= STATE_ESTIMATION_IMU_QUALITY_POLL_FALLBACK;
     }
-    if (device->temperature_valid == 0U)
+    if (device->enabled != 0U && device->online != 0U && device->temperature_sampled != 0U
+        && device->temperature_valid == 0U)
     {
         status->quality_flags |= STATE_ESTIMATION_IMU_QUALITY_TEMPERATURE_INVALID;
     }
+    ImuQualityMonitor_ResetBaseline(device, baseline);
 }
 
 void ImuQualityMonitor_RecordSample(uint32_t flags, state_estimation_imu_status_t *status)

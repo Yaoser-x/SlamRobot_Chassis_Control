@@ -166,70 +166,180 @@ const robot_config_t *RobotConfig_GetDefault(void)
     return &robot_default_config;
 }
 
-static uint8_t RobotConfig_MotionMatches(const motion_control_config_t *config)
+static uint8_t RobotConfig_MotionValid(const motion_control_config_t *config)
 {
-    const motion_control_config_t *expected = &robot_default_config.motion;
-
-    return (config->max_linear_mps == expected->max_linear_mps && config->max_angular_rps == expected->max_angular_rps
-            && config->open_loop_full_mps == expected->open_loop_full_mps
-            && config->angular_epsilon_rps == expected->angular_epsilon_rps
-            && config->speed_ramp_mps2 == expected->speed_ramp_mps2
-            && config->angular_ramp_rps2 == expected->angular_ramp_rps2
-            && config->maintenance_max_speed_mps == expected->maintenance_max_speed_mps
-            && config->pid_correction_limit == expected->pid_correction_limit
-            && config->pid_stop_epsilon_mps == expected->pid_stop_epsilon_mps
-            && config->pid_direction_epsilon_mps == expected->pid_direction_epsilon_mps
-            && config->pid_feedback_min_target_mps == expected->pid_feedback_min_target_mps
-            && config->pid_feedback_min_speed_mps == expected->pid_feedback_min_speed_mps
-            && config->test_mode_lease_ms == expected->test_mode_lease_ms
-            && config->encoder_feedback_timeout_ms == expected->encoder_feedback_timeout_ms
-            && config->pid_feedback_loss_count == expected->pid_feedback_loss_count
-            && config->motor_current_limiter_observe_only == expected->motor_current_limiter_observe_only
-            && config->current_soft_limit_enabled == expected->current_soft_limit_enabled
-            && config->pid_enabled == expected->pid_enabled
-            && config->wheel_speed_proportional_scale == expected->wheel_speed_proportional_scale)
-               ? 1U
-               : 0U;
+    if (config == 0)
+    {
+        return 0U;
+    }
+    /* NaN/Inf guard: ordered comparisons with finite operands return false when either operand is NaN. */
+    if (!(config->max_linear_mps > 0.0f) || config->max_linear_mps > 10.0f)
+    {
+        return 0U;
+    }
+    if (!(config->max_angular_rps > 0.0f) || config->max_angular_rps > 50.0f)
+    {
+        return 0U;
+    }
+    if (!(config->open_loop_full_mps > 0.0f) || config->open_loop_full_mps > config->max_linear_mps)
+    {
+        return 0U;
+    }
+    if (!(config->angular_epsilon_rps >= 0.0f))
+    {
+        return 0U;
+    }
+    if (!(config->speed_ramp_mps2 >= 0.0f) || config->speed_ramp_mps2 > 100.0f)
+    {
+        return 0U;
+    }
+    if (!(config->angular_ramp_rps2 >= 0.0f) || config->angular_ramp_rps2 > 500.0f)
+    {
+        return 0U;
+    }
+    if (!(config->maintenance_max_speed_mps >= 0.0f) || config->maintenance_max_speed_mps > config->max_linear_mps)
+    {
+        return 0U;
+    }
+    if (!(config->pid_correction_limit >= 0.0f) || config->pid_correction_limit > 2000.0f)
+    {
+        return 0U;
+    }
+    if (!(config->pid_stop_epsilon_mps >= 0.0f))
+    {
+        return 0U;
+    }
+    if (!(config->pid_direction_epsilon_mps >= 0.0f))
+    {
+        return 0U;
+    }
+    if (!(config->pid_feedback_min_target_mps >= 0.0f) || config->pid_feedback_min_target_mps > config->max_linear_mps)
+    {
+        return 0U;
+    }
+    if (!(config->pid_feedback_min_speed_mps >= 0.0f) || config->pid_feedback_min_speed_mps > config->max_linear_mps)
+    {
+        return 0U;
+    }
+    if (config->test_mode_lease_ms == 0UL || config->test_mode_lease_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->encoder_feedback_timeout_ms == 0UL || config->encoder_feedback_timeout_ms > 1000UL)
+    {
+        return 0U;
+    }
+    if (config->pid_feedback_loss_count == 0U)
+    {
+        return 0U;
+    }
+    if (config->pid_enabled > 1U)
+    {
+        return 0U;
+    }
+    if (config->wheel_speed_proportional_scale > 1U)
+    {
+        return 0U;
+    }
+    if (config->motor_current_limiter_observe_only > 1U)
+    {
+        return 0U;
+    }
+    if (config->current_soft_limit_enabled > 1U)
+    {
+        return 0U;
+    }
+    return 1U;
 }
 
-static uint8_t RobotConfig_TeleoperationMatches(const teleoperation_config_t *config)
+static uint8_t RobotConfig_TeleoperationValid(const teleoperation_config_t *config)
 {
-    const teleoperation_config_t *expected = &robot_default_config.teleoperation;
-
-    return (config->linear_max_mps == expected->linear_max_mps && config->angular_max_rps == expected->angular_max_rps
-            && config->dpad_linear_mps == expected->dpad_linear_mps
-            && config->dpad_angular_rps == expected->dpad_angular_rps
-            && config->manual_cancel_threshold == expected->manual_cancel_threshold
-            && config->heading_quarter_timeout_ms == expected->heading_quarter_timeout_ms
-            && config->heading_full_timeout_ms == expected->heading_full_timeout_ms
-            && config->heading_imu_fresh_ms == expected->heading_imu_fresh_ms
-            && config->idle_release_ms == expected->idle_release_ms && config->axis_center == expected->axis_center
-            && config->axis_deadzone == expected->axis_deadzone
-            && config->offline_fail_limit == expected->offline_fail_limit
-            && config->macro_l1_mask == expected->macro_l1_mask && config->macro_r1_mask == expected->macro_r1_mask
-            && config->macro_l2_mask == expected->macro_l2_mask && config->macro_r2_mask == expected->macro_r2_mask
-            && config->line_toggle_mask == expected->line_toggle_mask
-            && config->linecal_floor_mask == expected->linecal_floor_mask
-            && config->linecal_line_mask == expected->linecal_line_mask)
-               ? 1U
-               : 0U;
+    if (config == 0)
+    {
+        return 0U;
+    }
+    if (!(config->linear_max_mps > 0.0f) || config->linear_max_mps > 10.0f)
+    {
+        return 0U;
+    }
+    if (!(config->angular_max_rps > 0.0f) || config->angular_max_rps > 50.0f)
+    {
+        return 0U;
+    }
+    if (!(config->dpad_linear_mps > 0.0f) || config->dpad_linear_mps > config->linear_max_mps)
+    {
+        return 0U;
+    }
+    if (!(config->dpad_angular_rps > 0.0f) || config->dpad_angular_rps > config->angular_max_rps)
+    {
+        return 0U;
+    }
+    if (!(config->manual_cancel_threshold >= 0.0f) || config->manual_cancel_threshold > 1.0f)
+    {
+        return 0U;
+    }
+    if (config->heading_quarter_timeout_ms == 0UL || config->heading_quarter_timeout_ms > 60000UL)
+    {
+        return 0U;
+    }
+    if (config->heading_full_timeout_ms == 0UL || config->heading_full_timeout_ms > 120000UL)
+    {
+        return 0U;
+    }
+    if (config->heading_imu_fresh_ms == 0UL || config->heading_imu_fresh_ms > 500UL)
+    {
+        return 0U;
+    }
+    if (config->idle_release_ms == 0UL || config->idle_release_ms > 30000UL)
+    {
+        return 0U;
+    }
+    if (config->axis_center < 0 || config->axis_center > 255)
+    {
+        return 0U;
+    }
+    if (config->axis_deadzone < 0 || config->axis_deadzone > 127)
+    {
+        return 0U;
+    }
+    if (config->offline_fail_limit == 0U)
+    {
+        return 0U;
+    }
+    /* Button masks are bit patterns — any value is legal architecturally. */
+    return 1U;
 }
 
-static uint8_t RobotConfig_TasksMatch(const robot_config_t *config)
+static uint8_t RobotConfig_TasksValid(const robot_config_t *config)
 {
+    if (config == 0)
+    {
+        return 0U;
+    }
     for (uint32_t index = 0U; index < (uint32_t)APP_TASK_COUNT; ++index)
     {
-        const app_task_config_t *actual   = &config->tasks[index];
-        const app_task_config_t *expected = &robot_default_config.tasks[index];
-        if (actual->period_ms != expected->period_ms || actual->stack_size_bytes != expected->stack_size_bytes
-            || actual->priority != expected->priority || actual->event_driven != expected->event_driven)
+        const app_task_config_t *task = &config->tasks[index];
+
+        if (task->period_ms == 0UL || task->period_ms > 1000UL)
+        {
+            return 0U;
+        }
+        if (task->stack_size_bytes < 512UL || task->stack_size_bytes > 65536UL)
+        {
+            return 0U;
+        }
+        if ((uint8_t)task->priority > (uint8_t)APP_TASK_PRIORITY_HIGH)
+        {
+            return 0U;
+        }
+        if (task->event_driven > 1U)
         {
             return 0U;
         }
     }
     for (uint32_t index = 0U; index < SYSTEM_MONITORING_TASK_COUNT; ++index)
     {
-        if (config->system.task_timeout_ms[index] != robot_default_config.system.task_timeout_ms[index])
+        if (config->system.task_timeout_ms[index] == 0UL || config->system.task_timeout_ms[index] > 10000UL)
         {
             return 0U;
         }
@@ -237,18 +347,69 @@ static uint8_t RobotConfig_TasksMatch(const robot_config_t *config)
     return 1U;
 }
 
-static uint8_t RobotConfig_SafetyMatches(const safety_management_config_t *config)
+static uint8_t RobotConfig_SafetyValid(const safety_management_config_t *config)
 {
-    const safety_management_config_t *expected = &robot_default_config.safety;
-
-    if (config->current_fault_debounce_ms != expected->current_fault_debounce_ms)
+    if (config == 0)
+    {
+        return 0U;
+    }
+    /* Battery thresholds: warn < critical violates the monitor's hysteresis. */
+    if (!(config->battery_low_warn_v > 0.0f) || config->battery_low_warn_v > 30.0f)
+    {
+        return 0U;
+    }
+    if (!(config->battery_low_clear_v >= config->battery_low_warn_v) || config->battery_low_clear_v > 30.0f)
+    {
+        return 0U;
+    }
+    if (!(config->battery_critical_v > 0.0f) || config->battery_critical_v > config->battery_low_warn_v)
+    {
+        return 0U;
+    }
+    if (!(config->battery_recover_v > config->battery_critical_v) || config->battery_recover_v > 30.0f)
+    {
+        return 0U;
+    }
+    if (config->battery_critical_debounce_ms == 0UL || config->battery_critical_debounce_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->battery_recover_debounce_ms == 0UL || config->battery_recover_debounce_ms > 60000UL)
+    {
+        return 0U;
+    }
+    if (config->update_period_ms == 0UL || config->update_period_ms > 1000UL)
+    {
+        return 0U;
+    }
+    if (config->overcurrent_startup_blank_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->overcurrent_startup_rearm_ms > 60000UL)
+    {
+        return 0U;
+    }
+    if (config->battery_low_monitor_enabled > 1U)
+    {
+        return 0U;
+    }
+    if (config->overcurrent_fault_enabled > 1U)
+    {
+        return 0U;
+    }
+    if (config->current_fault_debounce_ms == 0U || config->current_fault_debounce_ms > 5000U)
     {
         return 0U;
     }
     for (uint8_t index = 0U; index < SAFETY_MANAGEMENT_MOTOR_COUNT; ++index)
     {
-        if (config->current_observe_a[index] != expected->current_observe_a[index]
-            || config->current_fault_a[index] != expected->current_fault_a[index])
+        if (!(config->current_observe_a[index] >= 0.0f) || config->current_observe_a[index] > 100.0f)
+        {
+            return 0U;
+        }
+        if (!(config->current_fault_a[index] >= config->current_observe_a[index])
+            || config->current_fault_a[index] > 100.0f)
         {
             return 0U;
         }
@@ -263,55 +424,131 @@ uint8_t RobotConfig_Validate(const robot_config_t *config)
         return 0U;
     }
 
-    /* Until each owner consumes its config, only the characterized product
-     * aggregate is accepted. Compare fields, never structure padding. */
-    if (RobotConfig_MotionMatches(&config->motion) == 0U
-        || RobotConfig_TeleoperationMatches(&config->teleoperation) == 0U || RobotConfig_TasksMatch(config) == 0U
-        || RobotConfig_SafetyMatches(&config->safety) == 0U)
+    if (RobotConfig_MotionValid(&config->motion) == 0U
+        || RobotConfig_TeleoperationValid(&config->teleoperation) == 0U
+        || RobotConfig_TasksValid(config) == 0U
+        || RobotConfig_SafetyValid(&config->safety) == 0U)
     {
         return 0U;
     }
 
-    return (config->state.wheel_feedback_timeout_ms == robot_default_config.state.wheel_feedback_timeout_ms
-            && config->state.imu_fresh_timeout_ms == robot_default_config.state.imu_fresh_timeout_ms
-            && config->power.current_zero_max_speed_mps == robot_default_config.power.current_zero_max_speed_mps
-            && config->power.update_period_ms == robot_default_config.power.update_period_ms
-            && config->safety.battery_low_warn_v == robot_default_config.safety.battery_low_warn_v
-            && config->safety.battery_low_clear_v == robot_default_config.safety.battery_low_clear_v
-            && config->safety.battery_critical_v == robot_default_config.safety.battery_critical_v
-            && config->safety.battery_recover_v == robot_default_config.safety.battery_recover_v
-            && config->safety.battery_critical_debounce_ms == robot_default_config.safety.battery_critical_debounce_ms
-            && config->safety.battery_recover_debounce_ms == robot_default_config.safety.battery_recover_debounce_ms
-            && config->safety.update_period_ms == robot_default_config.safety.update_period_ms
-            && config->safety.overcurrent_startup_blank_ms == robot_default_config.safety.overcurrent_startup_blank_ms
-            && config->safety.overcurrent_startup_rearm_ms == robot_default_config.safety.overcurrent_startup_rearm_ms
-            && config->safety.battery_low_monitor_enabled == robot_default_config.safety.battery_low_monitor_enabled
-            && config->safety.overcurrent_fault_enabled == robot_default_config.safety.overcurrent_fault_enabled
-            && config->command.host_timeout_ms == robot_default_config.command.host_timeout_ms
-            && config->command.ps2_timeout_ms == robot_default_config.command.ps2_timeout_ms
-            && config->command.esp12f_timeout_ms == robot_default_config.command.esp12f_timeout_ms
-            && config->command.line_timeout_ms == robot_default_config.command.line_timeout_ms
-            && config->command.debug_timeout_ms == robot_default_config.command.debug_timeout_ms
-            && config->line.angular_max_rps == robot_default_config.line.angular_max_rps
-            && config->line.sensor_timeout_ms == robot_default_config.line.sensor_timeout_ms
-            && config->line.default_enabled == robot_default_config.line.default_enabled
-            && config->line.detect_threshold_count == robot_default_config.line.detect_threshold_count
-            && config->communication.host_status_period_ms == robot_default_config.communication.host_status_period_ms
-            && config->communication.host_imu_status_period_ms
-                   == robot_default_config.communication.host_imu_status_period_ms
-            && config->communication.host_diagnostic_period_ms
-                   == robot_default_config.communication.host_diagnostic_period_ms
-            && config->communication.esp12f_status_period_ms
-                   == robot_default_config.communication.esp12f_status_period_ms
-            && ParameterManagement_Validate(&config->parameter.factory_defaults) != 0U
-            && config->parameter.load_flash_on_boot <= 1U && config->parameter.persist_imu_calibration <= 1U
-            && config->parameter.persist_current_zero <= 1U
-            && config->display.welcome_duration_ms == robot_default_config.display.welcome_duration_ms
-            && config->display.selfcheck_item_ms == robot_default_config.display.selfcheck_item_ms
-            && config->display.error_blink_period_ms == robot_default_config.display.error_blink_period_ms
-            && config->display.rpi_timeout_ms == robot_default_config.display.rpi_timeout_ms
-            && config->display.line_timeout_ms == robot_default_config.display.line_timeout_ms
-            && config->display.selfcheck_total_items == robot_default_config.display.selfcheck_total_items)
-               ? 1U
-               : 0U;
+    /* State Estimation: wheel/IMU freshness timeouts. */
+    if (config->state.wheel_feedback_timeout_ms == 0UL || config->state.wheel_feedback_timeout_ms > 5000UL)
+    {
+        return 0U;
+    }
+    if (config->state.imu_fresh_timeout_ms == 0UL || config->state.imu_fresh_timeout_ms > 1000UL)
+    {
+        return 0U;
+    }
+
+    /* Power Management: stationary threshold and update period. */
+    if (!(config->power.current_zero_max_speed_mps >= 0.0f) || config->power.current_zero_max_speed_mps > 1.0f)
+    {
+        return 0U;
+    }
+    if (config->power.update_period_ms == 0UL || config->power.update_period_ms > 1000UL)
+    {
+        return 0U;
+    }
+
+    /* Command Management: per-source timeouts. */
+    if (config->command.host_timeout_ms == 0UL || config->command.host_timeout_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->command.ps2_timeout_ms == 0UL || config->command.ps2_timeout_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->command.esp12f_timeout_ms == 0UL || config->command.esp12f_timeout_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->command.line_timeout_ms == 0UL || config->command.line_timeout_ms > 5000UL)
+    {
+        return 0U;
+    }
+    if (config->command.debug_timeout_ms == 0UL || config->command.debug_timeout_ms > 30000UL)
+    {
+        return 0U;
+    }
+
+    /* Line Following: angular limit and sensor freshness. */
+    if (!(config->line.angular_max_rps > 0.0f) || config->line.angular_max_rps > 50.0f)
+    {
+        return 0U;
+    }
+    if (config->line.sensor_timeout_ms == 0UL || config->line.sensor_timeout_ms > 1000UL)
+    {
+        return 0U;
+    }
+    if (config->line.default_enabled > 1U)
+    {
+        return 0U;
+    }
+    if (config->line.detect_threshold_count == 0U || config->line.detect_threshold_count > 8U)
+    {
+        return 0U;
+    }
+
+    /* Communication: telemetry publication periods. */
+    if (config->communication.host_status_period_ms == 0UL || config->communication.host_status_period_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->communication.host_imu_status_period_ms == 0UL
+        || config->communication.host_imu_status_period_ms > 1000UL)
+    {
+        return 0U;
+    }
+    if (config->communication.host_diagnostic_period_ms == 0UL
+        || config->communication.host_diagnostic_period_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->communication.esp12f_status_period_ms == 0UL
+        || config->communication.esp12f_status_period_ms > 10000UL)
+    {
+        return 0U;
+    }
+
+    /* Parameter: delegate to ParameterManagement for the factory model. */
+    if (ParameterManagement_Validate(&config->parameter.factory_defaults) == 0U)
+    {
+        return 0U;
+    }
+    if (config->parameter.load_flash_on_boot > 1U || config->parameter.persist_imu_calibration > 1U
+        || config->parameter.persist_current_zero > 1U)
+    {
+        return 0U;
+    }
+
+    /* Display: OLED UI timing. */
+    if (config->display.welcome_duration_ms == 0UL || config->display.welcome_duration_ms > 60000UL)
+    {
+        return 0U;
+    }
+    if (config->display.selfcheck_item_ms == 0UL || config->display.selfcheck_item_ms > 5000UL)
+    {
+        return 0U;
+    }
+    if (config->display.error_blink_period_ms == 0UL || config->display.error_blink_period_ms > 5000UL)
+    {
+        return 0U;
+    }
+    if (config->display.rpi_timeout_ms == 0UL || config->display.rpi_timeout_ms > 10000UL)
+    {
+        return 0U;
+    }
+    if (config->display.line_timeout_ms == 0UL || config->display.line_timeout_ms > 5000UL)
+    {
+        return 0U;
+    }
+    if (config->display.selfcheck_total_items == 0U || config->display.selfcheck_total_items > 32U)
+    {
+        return 0U;
+    }
+
+    return 1U;
 }

@@ -96,23 +96,45 @@ static void test_default_matches_beta4_constants(void)
     require_int(CHASSIS_TRACK_WIDTH_M == 0.176f, "track width compatibility remains 0.176 m");
 }
 
-static void test_validation_accepts_copy_and_rejects_drift(void)
+static void test_validation_accepts_legal_config_and_rejects_illegal(void)
 {
     robot_config_t copy = *RobotConfig_GetDefault();
 
-    require_int(RobotConfig_Validate(&copy) == 1U, "semantic default copy validates");
-    copy.command.host_timeout_ms++;
-    require_int(RobotConfig_Validate(&copy) == 0U, "frozen command timeout drift is rejected");
+    /* Default copy is legal. */
+    require_int(RobotConfig_Validate(&copy) == 1U, "default config validates");
+
+    /* Legal deviation (within range) is accepted. */
+    copy.command.host_timeout_ms = 500U;
+    require_int(RobotConfig_Validate(&copy) == 1U, "legal command timeout within range is accepted");
+
+    /* Illegal: zero max linear speed is rejected. */
+    copy                                 = *RobotConfig_GetDefault();
+    copy.motion.max_linear_mps           = 0.0f;
+    require_int(RobotConfig_Validate(&copy) == 0U, "zero max linear speed is rejected");
+
+    /* Illegal: battery critical above low warn is rejected. */
+    copy                              = *RobotConfig_GetDefault();
+    copy.safety.battery_critical_v    = 12.0f;
+    copy.safety.battery_low_warn_v    = 10.0f;
+    require_int(RobotConfig_Validate(&copy) == 0U, "battery critical above low warn is rejected");
+
+    /* Illegal: zero task period is rejected. */
+    copy                       = *RobotConfig_GetDefault();
+    copy.tasks[APP_TASK_MOTOR].period_ms = 0UL;
+    require_int(RobotConfig_Validate(&copy) == 0U, "zero task period is rejected");
+
+    /* Illegal: invalid factory parameters. */
     copy                                           = *RobotConfig_GetDefault();
     copy.parameter.factory_defaults.wheel_radius_m = 0.0f;
     require_int(RobotConfig_Validate(&copy) == 0U, "invalid injected factory parameters are rejected");
+
     require_int(RobotConfig_Validate(0) == 0U, "null config is rejected");
 }
 
 int main(void)
 {
     test_default_matches_beta4_constants();
-    test_validation_accepts_copy_and_rejects_drift();
+    test_validation_accepts_legal_config_and_rejects_illegal();
     puts("app config tests passed");
     return 0;
 }

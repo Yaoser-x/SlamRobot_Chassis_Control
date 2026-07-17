@@ -24,6 +24,9 @@ static bmi270_driver_state_t           fake_imu_device;
 static state_estimation_imu_status_t   fake_imu;
 static bmi270_sample_t                 fake_imu_sample;
 static uint8_t                         fake_imu_sample_pending;
+static uint8_t                         fake_imu_update_enabled;
+static uint8_t                         fake_imu_reentrant_probe;
+static uint8_t                         fake_imu_reentrant_probe_result;
 static power_adc_driver_state_t        fake_adc;
 static motor_driver_state_t            fake_motor;
 static float                           last_wheel_radius_m;
@@ -95,11 +98,21 @@ void Bmi270Driver_Init(void)
     fake_imu_sample            = (bmi270_sample_t){0};
     fake_imu_sample.accel_g[2] = 1.0f;
     fake_imu_sample_pending    = 0U;
+    fake_imu_update_enabled    = 1U;
+    fake_imu_reentrant_probe   = 0U;
 }
 
 uint8_t Bmi270Driver_Update(void)
 {
     record_external_call();
+    if (fake_imu_update_enabled == 0U)
+    {
+        return 0U;
+    }
+    if (fake_imu_reentrant_probe != 0U)
+    {
+        fake_imu_reentrant_probe_result = StateEstimation_ProbeImu();
+    }
     fake_imu_device.last_update_ms += 10U;
     fake_imu_device.sample_count++;
     fake_imu_sample.timestamp_ms = fake_imu_device.last_update_ms;
@@ -160,8 +173,9 @@ uint8_t Bmi270Driver_Diagnose(imu_bmi270_diag_t *diag)
     return 1U;
 }
 
-void ImuEstimationPipeline_ResetRuntime(void)
+void ImuEstimationPipeline_ResetRuntime(uint32_t now_ms)
 {
+    (void)now_ms;
     fake_imu.last_update_ms     = 0UL;
     fake_imu.sensor_time        = 0UL;
     fake_imu.filter_initialized = 0U;
@@ -417,9 +431,15 @@ static void test_state_generations_and_freshness_are_independent(void)
     fake_imu_device.last_update_ms = 90U;
     require_int(StateEstimation_RunImuCycle() != 0U, "IMU cycle updates");
     (void)StateEstimation_GetStatus(120U, &status);
-    require_int(status.wheel_generation == 1UL && status.imu_generation == 1UL,
-                "wheel and IMU generations publish independently");
+    require_int(status.wheel_generation == 1UL && status.imu_sample_generation == 1UL
+                    && status.imu_status_generation == 1UL && status.imu_generation == 2UL,
+                "wheel, IMU sample, and IMU status generations publish independently");
     require_int(status.wheel_fresh != 0U && status.imu_fresh != 0U, "both chains initially fresh");
+    fake_imu_update_enabled = 0U;
+    require_int(StateEstimation_RunImuCycle() == 0U, "empty IMU cycle reports no sample");
+    (void)StateEstimation_GetStatus(120U, &status);
+    require_int(status.imu_sample_generation == 1UL, "empty IMU cycle does not publish a sample generation");
+    fake_imu_update_enabled = 1U;
     (void)StateEstimation_GetStatus(151U, &status);
     require_int(status.wheel_fresh != 0U && status.imu_fresh == 0U,
                 "IMU freshness expires independently of wheel freshness");
@@ -448,6 +468,13 @@ static void test_state_estimation_owns_imu_lifecycle(void)
     require_int(status.enabled != 0U && status.online != 0U, "reinitialize publishes device state");
     require_int(StateEstimation_ProbeImu() != 0U, "service probes IMU");
     require_int(StateEstimation_DiagnoseImu(&diagnostic) != 0U, "service maps diagnostic DTO");
+
+    fake_imu_reentrant_probe        = 1U;
+    fake_imu_reentrant_probe_result = 1U;
+    require_int(StateEstimation_RunImuCycle() != 0U, "IMU owner continues its active update");
+    require_int(fake_imu_reentrant_probe_result == 0U,
+                "concurrent lifecycle operation is rejected while update owns IMU");
+    fake_imu_reentrant_probe = 0U;
 }
 
 static void test_power_owner_publishes_and_gates_zero_calibration(void)

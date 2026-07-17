@@ -164,8 +164,10 @@ void Bmi270Driver_Init(void)
 
 uint8_t Bmi270Driver_SetEnabled(uint8_t enabled)
 {
-    driver_state.enabled = (enabled != 0U) ? 1U : 0U;
-    driver_state.online  = 0U;
+    driver_state.enabled             = (enabled != 0U) ? 1U : 0U;
+    driver_state.online              = 0U;
+    driver_state.temperature_sampled = 0U;
+    driver_state.temperature_valid   = 0U;
     Bmi270Driver_ClearQueue();
     if (driver_state.enabled == 0U)
     {
@@ -185,10 +187,12 @@ uint8_t Bmi270Driver_SetProfile(imu_bmi270_profile_id_t profile)
     {
         return 0U;
     }
-    selected_profile        = profile;
-    driver_state.profile    = (uint8_t)profile;
-    driver_state.online     = 0U;
-    driver_state.init_state = BMI270_DRIVER_INIT_RESET;
+    selected_profile                 = profile;
+    driver_state.profile             = (uint8_t)profile;
+    driver_state.online              = 0U;
+    driver_state.init_state          = BMI270_DRIVER_INIT_RESET;
+    driver_state.temperature_sampled = 0U;
+    driver_state.temperature_valid   = 0U;
     Bmi270Driver_ClearQueue();
     return 1U;
 }
@@ -219,8 +223,10 @@ uint8_t Bmi270Driver_ConfigNow(void)
     bmi270_device_status_t      status;
 
     Bmi270Driver_ClearQueue();
-    driver_state.online     = 0U;
-    driver_state.init_state = BMI270_DRIVER_INIT_PROBE;
+    driver_state.online              = 0U;
+    driver_state.init_state          = BMI270_DRIVER_INIT_PROBE;
+    driver_state.temperature_sampled = 0U;
+    driver_state.temperature_valid   = 0U;
     if (profile == 0 || Bmi270Driver_WriteReg(BMI270_REG_CMD, BMI270_CMD_SOFT_RESET) == 0U)
     {
         return 0U;
@@ -332,15 +338,18 @@ static void Bmi270Driver_UpdateTemperature(void)
     uint8_t data[2];
     int16_t raw;
 
+    driver_state.temperature_sampled = 1U;
     if (Bmi270Driver_ReadBytes(BMI270_REG_TEMP_0, data, sizeof(data)) == 0U)
     {
         driver_state.temperature_valid = 0U;
+        driver_state.temperature_error_count++;
         return;
     }
     raw = Bmi270Driver_ReadI16(data);
     if (raw == INT16_MIN)
     {
         driver_state.temperature_valid = 0U;
+        driver_state.temperature_error_count++;
         return;
     }
     driver_state.temperature_c     = ((float)raw / 512.0f) + 23.0f;

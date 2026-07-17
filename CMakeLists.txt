@@ -72,7 +72,9 @@ set(F407_APP_SOURCES
     App/config/robot_config.c
     App/composition/system_publish_snapshot_provider.c
     App/tasks/task_debug.c
+    App/tasks/task_esp12f.c
     App/tasks/task_imu.c
+    App/tasks/task_led.c
     App/tasks/task_motor.c
     App/tasks/task_oled.c
     App/tasks/task_ps2.c
@@ -84,12 +86,13 @@ set(F407_APP_SOURCES
 set(F407_APP_ADAPTER_SOURCES
     App/app_isr.c
     App/adapters/app_hardware_init.c
-    App/tasks/task_esp12f.c
-    App/tasks/task_led.c
+    App/adapters/status_led_adapter.c
     App/debug/debug_maintenance_policy.c
     App/debug/debug_log_policy.c
     App/debug/debug_straight_telemetry.c
+    App/debug/debug_straight_telemetry.h
     App/debug/debug_console_parser.c
+    App/debug/debug_console_parser.h
     App/debug/debug_console_registry.c
     App/debug/debug_console_writer.c
     App/debug/commands/debug_cmd_param.c
@@ -102,6 +105,7 @@ set(F407_APP_ADAPTER_SOURCES
     App/debug/commands/debug_system_status.c
     App/debug/commands/debug_rtos_report.c
     App/debug/telemetry/debug_telemetry.c
+    App/debug/telemetry/debug_telemetry_model.h
     App/debug/telemetry/debug_telemetry_csv.c
     App/debug/telemetry/debug_telemetry_json.c
     App/debug/usart1_debug_console.c

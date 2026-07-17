@@ -46,7 +46,7 @@ uint32_t StateEstimation_GetStatus(uint32_t now_ms, state_estimation_status_t *s
 {
     (void)now_ms;
     *state = fake_state;
-    return state->wheel_generation + state->imu_generation;
+    return state->wheel_generation + state->imu_sample_generation + state->imu_status_generation;
 }
 uint32_t PowerManagement_GetStatus(power_management_status_t *state)
 {
