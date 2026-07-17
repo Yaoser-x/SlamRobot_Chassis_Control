@@ -534,11 +534,58 @@ static void test_straight_integrates_gyro_without_settle_delay(void)
     require_int(state.straight_heading_integral_deg_s < 0.0f, "heading PI integral is observable");
     require_int(state.straight_transition_distance_m >= 0.0f, "caster transition distance is observable");
 
+    (void)ParamService_GetSnapshot(&params);
+    params.straight_max_speed_mps = 0.05f;
+    require_int(ParamService_Set(&params) != 0U, "out-of-range parameters accepted");
+    for (uint32_t now_ms = 1040U; now_ms <= 1080U; now_ms += 20U)
+    {
+        ChassisService_Step(now_ms);
+    }
+    ChassisService_GetState(&state);
+    require_int(state.straight_out_of_range != 0U, "precondition establishes straight range diagnostic");
+
     fake_command_valid = 0U;
-    ChassisService_Step(1040U);
+    ChassisService_Step(1100U);
     ChassisService_GetState(&state);
     require_int(state.straight_active == 0U, "command loss clears straight state");
+    require_int(state.straight_out_of_range == 0U, "command loss clears straight range diagnostic");
     require_int(state.control_source == CONTROL_SOURCE_NONE, "command loss clears logged source");
+}
+
+static void test_straight_reset_paths_clear_observable_state(void)
+{
+    param_model_t              params;
+    chassis_service_snapshot_t state;
+
+    reset_fake_chassis();
+    (void)ParamService_GetSnapshot(&params);
+    params.straight_max_speed_mps = 0.05f;
+    require_int(ParamService_Set(&params) != 0U, "reset-path parameters accepted");
+    set_closed_loop_command(0.2f);
+    for (uint32_t now_ms = 1000U; now_ms <= 1060U; now_ms += 20U)
+    {
+        ChassisService_Step(now_ms);
+    }
+    ChassisService_GetState(&state);
+    require_int(state.straight_out_of_range != 0U, "zero-speed precondition establishes diagnostic");
+    set_closed_loop_command(0.0f);
+    ChassisService_Step(1080U);
+    ChassisService_GetState(&state);
+    require_int(state.straight_active == 0U && state.straight_out_of_range == 0U,
+                "zero-speed stop clears straight diagnostics");
+
+    set_closed_loop_command(0.2f);
+    for (uint32_t now_ms = 1100U; now_ms <= 1160U; now_ms += 20U)
+    {
+        ChassisService_Step(now_ms);
+    }
+    ChassisService_GetState(&state);
+    require_int(state.straight_out_of_range != 0U, "fault-stop precondition establishes diagnostic");
+    fake_fault_stop = 1U;
+    ChassisService_Step(1180U);
+    ChassisService_GetState(&state);
+    require_int(state.straight_active == 0U && state.straight_out_of_range == 0U,
+                "fault stop clears straight diagnostics");
 }
 
 int main(void)
@@ -555,5 +602,6 @@ int main(void)
     test_all_remote_sources_share_straight_line_controller_and_imu_degrade();
     test_straight_heading_gate_distinguishes_imu_failures();
     test_straight_integrates_gyro_without_settle_delay();
+    test_straight_reset_paths_clear_observable_state();
     return 0;
 }

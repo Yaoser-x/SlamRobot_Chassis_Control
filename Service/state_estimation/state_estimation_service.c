@@ -4,6 +4,7 @@
 #include "bmi270_driver.h"
 #include "imu_estimation_pipeline.h"
 #include "imu_calibration_coordinator.h"
+#include "imu_quality_monitor.h"
 #include "parameter_management_service.h"
 #include "platform_critical.h"
 #include "wheel_estimation_pipeline.h"
@@ -14,6 +15,28 @@ static state_estimation_imu_status_t   imu_status;
 static uint32_t                        wheel_generation;
 static uint32_t                        imu_generation;
 static uint8_t                         state_initialized;
+
+static void StateEstimation_ResetImuRuntime(uint8_t enabled)
+{
+    state_estimation_imu_status_t next = {0};
+    bmi270_driver_state_t         device;
+    platform_critical_state_t     critical;
+
+    ImuEstimationPipeline_ResetRuntime();
+    Bmi270Driver_GetState(&device);
+    critical                   = PlatformCritical_Enter();
+    next.quality_latched_flags = imu_status.quality_latched_flags;
+    next.poll_fallback_count   = device.poll_fallback_count;
+    next.gyro_calibrated       = imu_status.gyro_calibrated;
+    next.gyro_auto_cal_enabled = imu_status.gyro_auto_cal_enabled;
+    next.enabled               = enabled;
+    next.init_state =
+        (enabled != 0U) ? STATE_ESTIMATION_IMU_INIT_STATE_RESET : STATE_ESTIMATION_IMU_INIT_STATE_DISABLED;
+    next.quaternion[0] = 1.0f;
+    imu_status         = next;
+    imu_generation++;
+    PlatformCritical_Exit(critical);
+}
 
 static uint8_t StateEstimation_IsFresh(uint32_t now_ms, uint32_t timestamp_ms, uint32_t timeout_ms)
 {
@@ -28,10 +51,12 @@ static void StateEstimation_PublishImu(void)
     platform_critical_state_t     critical;
 
     Bmi270Driver_GetState(&device);
+    ImuQualityMonitor_BeginCycle(&device, &next);
     while (Bmi270Driver_TakeSample(&sample) != 0U)
     {
         ImuEstimationPipeline_Process(&sample, &device, &next);
     }
+    ImuQualityMonitor_EndCycle(&next);
     critical   = PlatformCritical_Enter();
     imu_status = next;
     imu_generation++;
@@ -52,16 +77,18 @@ uint8_t StateEstimation_Init(const state_estimation_config_t *config)
     WheelEstimationPipeline_Init();
     Bmi270Driver_Init();
     ImuEstimationPipeline_Init();
-    initial_wheel             = (state_estimation_wheel_status_t){0};
-    initial_imu               = (state_estimation_imu_status_t){0};
-    initial_imu.quaternion[0] = 1.0f;
-    critical                  = PlatformCritical_Enter();
-    state_config              = *config;
-    wheel_status              = initial_wheel;
-    imu_status                = initial_imu;
-    wheel_generation          = 0UL;
-    imu_generation            = 0UL;
-    state_initialized         = 1U;
+    initial_wheel                     = (state_estimation_wheel_status_t){0};
+    initial_imu                       = (state_estimation_imu_status_t){0};
+    initial_imu.quaternion[0]         = 1.0f;
+    initial_imu.gyro_auto_cal_enabled = 1U;
+    initial_imu.gyro_auto_cal_state   = STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE;
+    critical                          = PlatformCritical_Enter();
+    state_config                      = *config;
+    wheel_status                      = initial_wheel;
+    imu_status                        = initial_imu;
+    wheel_generation                  = 0UL;
+    imu_generation                    = 0UL;
+    state_initialized                 = 1U;
     PlatformCritical_Exit(critical);
     return 1U;
 }
@@ -69,6 +96,81 @@ uint8_t StateEstimation_Init(const state_estimation_config_t *config)
 uint8_t StateEstimation_IsInitialized(void)
 {
     return state_initialized;
+}
+
+uint8_t StateEstimation_SetImuEnabled(uint8_t enabled)
+{
+    uint8_t normalized = (enabled != 0U) ? 1U : 0U;
+    uint8_t accepted   = Bmi270Driver_SetEnabled(normalized);
+
+    if (accepted != 0U)
+    {
+        StateEstimation_ResetImuRuntime(normalized);
+    }
+    return accepted;
+}
+
+uint8_t StateEstimation_ProbeImu(void)
+{
+    uint8_t result = Bmi270Driver_ProbeNow();
+    StateEstimation_PublishImu();
+    return result;
+}
+
+uint8_t StateEstimation_ReinitializeImu(void)
+{
+    if (Bmi270Driver_SetEnabled(1U) == 0U)
+    {
+        return 0U;
+    }
+    StateEstimation_ResetImuRuntime(1U);
+    uint8_t result = Bmi270Driver_ConfigNow();
+    StateEstimation_PublishImu();
+    return result;
+}
+
+uint8_t StateEstimation_SetImuProfile(state_estimation_imu_profile_t profile)
+{
+    state_estimation_imu_status_t status;
+    uint8_t                       result;
+
+    if ((uint8_t)profile > (uint8_t)STATE_ESTIMATION_IMU_PROFILE_DEBUG)
+    {
+        return 0U;
+    }
+    (void)StateEstimation_GetImu(&status);
+    result = Bmi270Driver_SetProfile((imu_bmi270_profile_id_t)profile);
+    if (result != 0U)
+    {
+        StateEstimation_ResetImuRuntime(status.enabled);
+    }
+    return result;
+}
+
+uint8_t StateEstimation_DiagnoseImu(state_estimation_imu_diagnostic_t *diagnostic)
+{
+    imu_bmi270_diag_t bsp_diagnostic;
+
+    if (diagnostic == 0 || Bmi270Driver_Diagnose(&bsp_diagnostic) == 0U)
+    {
+        return 0U;
+    }
+    for (uint8_t attempt = 0U; attempt < 2U; ++attempt)
+    {
+        diagnostic->hal_status[attempt] = bsp_diagnostic.hal_status[attempt];
+        for (uint8_t byte = 0U; byte < 3U; ++byte)
+        {
+            diagnostic->hal_rx[attempt][byte] = bsp_diagnostic.hal_rx[attempt][byte];
+        }
+    }
+    for (uint8_t byte = 0U; byte < 3U; ++byte)
+    {
+        diagnostic->bitbang_rx[byte] = bsp_diagnostic.bitbang_rx[byte];
+    }
+    diagnostic->miso_nopull   = bsp_diagnostic.miso_nopull;
+    diagnostic->miso_pullup   = bsp_diagnostic.miso_pullup;
+    diagnostic->miso_pulldown = bsp_diagnostic.miso_pulldown;
+    return 1U;
 }
 
 void StateEstimation_UpdateWheel(uint32_t now_ms)
@@ -126,16 +228,46 @@ void StateEstimation_ServiceImuCalibration(uint32_t now_ms, uint8_t stationary)
 
 uint8_t StateEstimation_ApplyImuCalibration(const imu_calibration_t *calibration)
 {
-    return ImuEstimationPipeline_ApplyCalibration(calibration);
+    platform_critical_state_t critical;
+
+    if (ImuEstimationPipeline_ApplyCalibration(calibration) == 0U)
+    {
+        return 0U;
+    }
+    critical                       = PlatformCritical_Enter();
+    imu_status.gyro_calibrated     = 1U;
+    imu_status.gyro_auto_cal_state = STATE_ESTIMATION_IMU_AUTO_CAL_SUCCESS;
+    for (uint8_t axis = 0U; axis < 3U; ++axis)
+    {
+        imu_status.gyro_bias_dps[axis] = calibration->gyro_bias_dps[axis];
+    }
+    imu_generation++;
+    PlatformCritical_Exit(critical);
+    return 1U;
 }
 
 void StateEstimation_ClearImuCalibration(void)
 {
+    platform_critical_state_t critical;
+
     ImuEstimationPipeline_ClearCalibration();
+    critical                   = PlatformCritical_Enter();
+    imu_status.gyro_calibrated = 0U;
+    imu_status.gyro_auto_cal_state =
+        (imu_status.enabled != 0U) ? STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE : STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED;
+    imu_generation++;
+    PlatformCritical_Exit(critical);
 }
 
 uint8_t StateEstimation_BeginImuCalibration(uint16_t samples, uint16_t interval_ms)
 {
+    state_estimation_imu_status_t status;
+
+    (void)StateEstimation_GetImu(&status);
+    if (status.enabled == 0U || status.online == 0U)
+    {
+        return 0U;
+    }
     if (samples == 0U)
     {
         samples = 500U;

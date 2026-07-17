@@ -172,7 +172,7 @@ static void reset_fake_monitor(void)
     fake_adc_state.battery_voltage                 = 12.0f;
     fake_adc_state.samples_ready                   = 1U;
     fake_adc_state.raw_sample_count                = 1U;
-    fake_adc_state.valid_flags                     = POWER_ADC_DRIVER_VALID_SAMPLES_READY;
+    fake_adc_state.valid_flags                     = POWER_MANAGEMENT_ADC_VALID_SAMPLES_READY;
     fake_encoder_state.speed_valid_all             = 1U;
     fake_encoder_state.speed_valid[MOTOR_ID_M2]    = 1U;
     fake_encoder_state.speed_valid[MOTOR_ID_M3]    = 1U;
@@ -439,7 +439,7 @@ static void test_invalid_battery_sample_resets_debounce_and_other_fault_survives
     fake_tick_ms                   = 1000U;
     SafetyManagement_Update();
     fake_tick_ms                        = 1400U;
-    fake_adc_state.invalid_reason_flags = POWER_ADC_DRIVER_INVALID_NO_NEW_SAMPLE;
+    fake_adc_state.invalid_reason_flags = POWER_MANAGEMENT_ADC_INVALID_NO_NEW_SAMPLE;
     SafetyManagement_Update();
     fake_tick_ms                        = 1500U;
     fake_adc_state.invalid_reason_flags = 0UL;

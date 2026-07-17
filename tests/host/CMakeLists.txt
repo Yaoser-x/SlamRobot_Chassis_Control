@@ -161,6 +161,7 @@ add_test(NAME line_sensor_driver COMMAND test_line_sensor_driver)
 add_executable(test_line_control_service
     test_line_control_service.c
     ../../Service/line_following/internal/line_calibration_coordinator.c
+    ../../Service/line_following/internal/line_parameter_sync.c
     ../../Service/line_following/line_following_service.c
     ../../Algorithm/calibration/line_sensor_calibration.c
 )
@@ -540,6 +541,29 @@ target_link_libraries(test_imu_pipeline PRIVATE m)
 
 add_test(NAME imu_pipeline COMMAND test_imu_pipeline)
 
+add_executable(test_imu_estimation_pipeline
+    test_imu_estimation_pipeline.c
+    ../../Service/state_estimation/internal/imu_estimation_pipeline.c
+    ../../Service/state_estimation/internal/imu_quality_monitor.c
+    ../../Algorithm/calibration/imu_calibration.c
+    ../../Algorithm/estimation/attitude_estimator.c
+    ../../Algorithm/estimation/imu_timestamp_tracker.c
+    ../../Algorithm/filtering/imu_signal_filter.c
+    ../../Service/parameter_management/parameter_imu_calibration.c
+)
+target_include_directories(test_imu_estimation_pipeline PRIVATE
+    . ../../BSP/imu ../../Service/state_estimation/internal
+)
+target_link_libraries(test_imu_estimation_pipeline PRIVATE m)
+add_test(NAME imu_estimation_pipeline COMMAND test_imu_estimation_pipeline)
+
+add_executable(test_imu_quality_monitor
+    test_imu_quality_monitor.c
+    ../../Service/state_estimation/internal/imu_quality_monitor.c
+)
+target_include_directories(test_imu_quality_monitor PRIVATE . ../../BSP/imu ../../Service/state_estimation/internal)
+add_test(NAME imu_quality_monitor COMMAND test_imu_quality_monitor)
+
 add_executable(test_bmi270_device
     test_bmi270_device.c
     ../../BSP/imu/bmi270_device.c
@@ -548,6 +572,14 @@ add_executable(test_bmi270_device
 )
 target_include_directories(test_bmi270_device PRIVATE . ../../BSP/imu)
 add_test(NAME bmi270_device COMMAND test_bmi270_device)
+
+add_executable(test_bmi270_driver_sequence
+    test_bmi270_driver_sequence.c
+    ../../BSP/imu/bmi270_driver.c
+    ../../BSP/imu/bmi270_profile.c
+)
+target_include_directories(test_bmi270_driver_sequence PRIVATE . ../../BSP/imu)
+add_test(NAME bmi270_driver_sequence COMMAND test_bmi270_driver_sequence)
 
 add_executable(test_param_service
     test_param_service.c
@@ -597,6 +629,7 @@ add_executable(test_foundation_services
     test_foundation_services.c
     ../../App/config/robot_config.c
     ../../Service/state_estimation/internal/imu_calibration_coordinator.c
+    ../../Service/state_estimation/internal/imu_quality_monitor.c
     ../../Service/parameter_management/parameter_management_service.c
     ../../Service/parameter_management/internal/parameter_management_persistence.c
     ../../Service/parameter_management/parameter_imu_calibration.c

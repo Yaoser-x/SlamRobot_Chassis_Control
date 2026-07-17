@@ -41,8 +41,8 @@ static uint8_t SafetyManagement_CurrentBelowFaultThreshold(uint8_t motor, float 
 
 static uint8_t SafetyManagement_BatterySampleValid(const power_management_status_t *adc_state)
 {
-    const uint32_t invalid_mask = POWER_ADC_DRIVER_INVALID_NOT_READY | POWER_ADC_DRIVER_INVALID_NO_NEW_SAMPLE
-                                  | POWER_ADC_DRIVER_INVALID_DMA_ERROR;
+    const uint32_t invalid_mask = POWER_MANAGEMENT_ADC_INVALID_NOT_READY | POWER_MANAGEMENT_ADC_INVALID_NO_NEW_SAMPLE
+                                  | POWER_MANAGEMENT_ADC_INVALID_DMA_ERROR;
 
     return (adc_state != 0 && adc_state->samples_ready != 0U && adc_state->raw_sample_count > 0U
             && (adc_state->invalid_reason_flags & invalid_mask) == 0UL)

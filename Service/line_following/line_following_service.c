@@ -1,5 +1,6 @@
 #include "line_following_service.h"
 #include "line_calibration_coordinator.h"
+#include "line_parameter_sync.h"
 #include "line_sensor_calibration.h"
 #include "platform_critical.h"
 #include "platform_time.h"
@@ -32,6 +33,7 @@ static uint32_t                             g_previous_timestamp_ms;
 static uint32_t                             g_line_last_processed_timestamp;
 static uint32_t                             g_line_control_generation;
 static uint32_t                             g_line_applied_control_generation;
+static line_parameter_sync_t                g_line_parameter_sync;
 
 static uint8_t LineFollowing_Publish(line_following_status_t *state, uint32_t expected_control_generation)
 {
@@ -103,11 +105,14 @@ uint8_t LineFollowing_Init(const line_following_config_t *config)
     g_line_control_generation                = 1UL;
     g_line_applied_control_generation        = 1UL;
     g_line_state.generation                  = 1UL;
+    LineParameterSync_Init(&g_line_parameter_sync);
+    (void)LineParameterSync_Update(&g_line_parameter_sync);
     return 1U;
 }
 
 void LineFollowing_Update(void)
 {
+    (void)LineParameterSync_Update(&g_line_parameter_sync);
     LineSensorDriver_Update();
     LineSensorDriver_RequestAnalog();
     LineCalibrationCoordinator_ProcessRequest();
@@ -410,7 +415,12 @@ uint8_t LineFollowing_CalibrationApplyToRam(void)
         params.line_threshold_raw[i] = thresholds[i];
     }
     params.line_active_low = active_low;
-    return ParameterManagement_Set(&params);
+    if (ParameterManagement_Set(&params) == 0U)
+    {
+        return 0U;
+    }
+    (void)LineParameterSync_Update(&g_line_parameter_sync);
+    return 1U;
 }
 
 void LineFollowing_CalibrationGet(line_sensor_calibration_t *calibration)

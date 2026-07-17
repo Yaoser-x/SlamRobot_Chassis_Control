@@ -24,6 +24,10 @@ static motion_control_maintenance_result_t fake_maintenance_result;
 static uint8_t                             fake_save_success;
 static uint32_t                            maintenance_end_count;
 static uint32_t                            flash_save_count;
+static uint32_t                            fake_parameter_generation;
+static uint32_t                            threshold_apply_count;
+static uint16_t                            applied_threshold[LINE_SENSOR_CHANNELS];
+static uint8_t                             applied_active_low;
 
 static uint8_t fake_begin_maintenance_port(void)
 {
@@ -49,12 +53,23 @@ void LineSensorDriver_RequestAnalog(void)
 uint32_t ParameterManagement_GetSnapshot(param_model_t *params)
 {
     *params = fake_params;
-    return 1U;
+    return fake_parameter_generation;
 }
 uint8_t ParameterManagement_Set(const param_model_t *params)
 {
     fake_params = *params;
+    fake_parameter_generation++;
     return 1U;
+}
+
+void LineSensorDriver_SetThresholdConfig(const uint16_t threshold[LINE_SENSOR_CHANNELS], uint8_t active_low)
+{
+    for (uint8_t index = 0U; index < LINE_SENSOR_CHANNELS; ++index)
+    {
+        applied_threshold[index] = threshold[index];
+    }
+    applied_active_low = active_low;
+    threshold_apply_count++;
 }
 
 uint8_t ParameterManagement_Save(void)
@@ -151,13 +166,23 @@ static void reset_fake(void)
     fake_save_success                       = 1U;
     maintenance_end_count                   = 0U;
     flash_save_count                        = 0U;
-    const line_following_config_t config    = {
-           .angular_max_rps        = 2.0f,
-           .sensor_timeout_ms      = 50U,
-           .default_enabled        = 0U,
-           .detect_threshold_count = 1U,
+    fake_parameter_generation               = 1UL;
+    threshold_apply_count                   = 0UL;
+    applied_active_low                      = 0U;
+    for (uint8_t index = 0U; index < LINE_SENSOR_CHANNELS; ++index)
+    {
+        fake_params.line_threshold_raw[index] = 500U;
+        applied_threshold[index]              = 0U;
+    }
+    const line_following_config_t config = {
+        .angular_max_rps        = 2.0f,
+        .sensor_timeout_ms      = 50U,
+        .default_enabled        = 0U,
+        .detect_threshold_count = 1U,
     };
     require_int(LineFollowing_Init(&config) != 0U, "line config accepted");
+    require_int(threshold_apply_count == 1U && applied_threshold[0] == 500U,
+                "line init applies current parameter generation");
     LineFollowing_SetCalibrationPorts(&fake_calibration_ports);
     LineFollowing_Enable(1U);
 }
@@ -190,6 +215,8 @@ static void test_calibration_apply_and_commit_are_explicit(void)
     require_int(LineFollowing_CalibrationApplyToRam() != 0U, "two separated surfaces apply to RAM");
     require_int(fake_params.line_threshold_raw[0] == 551U && fake_params.line_active_low != 0U,
                 "RAM apply updates thresholds and polarity");
+    require_int(applied_threshold[0] == 551U && applied_active_low != 0U && threshold_apply_count == 2U,
+                "RAM apply immediately updates the line driver");
     require_int(flash_save_count == 0U, "RAM apply does not write flash");
     maintenance_end_count = 0U;
 
@@ -206,6 +233,23 @@ static void test_calibration_apply_and_commit_are_explicit(void)
     fake_save_success       = 0U;
     require_int(LineCalibrationCoordinator_CommitToFlash() == 0U, "flash write failure is reported");
     require_int(flash_save_count == 2U && maintenance_end_count == 2U, "failed flash write still releases maintenance");
+    require_int(applied_threshold[0] == 551U && applied_active_low != 0U,
+                "failed flash write does not roll back RAM line parameters");
+}
+
+static void test_parameter_generation_applies_before_next_sensor_frame(void)
+{
+    reset_fake();
+    fake_params.line_threshold_raw[0] = 777U;
+    fake_params.line_active_low       = 0U;
+    fake_parameter_generation++;
+
+    LineFollowing_Update();
+    require_int(threshold_apply_count == 2U, "changed generation applies exactly once");
+    require_int(applied_threshold[0] == 777U && applied_active_low == 0U,
+                "next update uses the new threshold and polarity");
+    LineFollowing_Update();
+    require_int(threshold_apply_count == 2U, "unchanged generation is not applied twice");
 }
 
 static void test_calibration_begin_requires_stationary_safe_chassis(void)
@@ -401,6 +445,7 @@ int main(void)
     test_stale_sensor_clears_tracking_view_state();
     test_status_generation_is_monotonic_on_whole_publish();
     test_calibration_apply_and_commit_are_explicit();
+    test_parameter_generation_applies_before_next_sensor_frame();
     test_calibration_begin_requires_stationary_safe_chassis();
     test_service_request_is_resolved_by_app_maintenance_gate();
     (void)printf("PASS: line control safety generation tests\n");

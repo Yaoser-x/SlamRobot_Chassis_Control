@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FINAL_LAYERS = ("Algorithm", "Platform", "BSP", "Service", "App")
 SOURCE_SUFFIXES = {".c", ".h"}
+FORBIDDEN_TOP_LEVEL = {"Domain", "Device", "Common", "Shared", "Model", "Utils", "Manager"}
 
 ALLOWED = {
     "Algorithm": {"Algorithm"},
@@ -54,6 +55,11 @@ FORBIDDEN_HEADER_MARKERS = {
     "Algorithm": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
     "Service": ("stm32", "cmsis", "freertos", "main.h", "gpio.h", "tim.h", "usart.h", "adc.h", "spi.h"),
 }
+
+PUBLIC_SERVICE_HARDWARE_TYPE = re.compile(
+    r"\b(?:HAL_[A-Za-z0-9_]*TypeDef|os[A-Za-z0-9_]*_t|"
+    r"[A-Za-z0-9_]*(?:driver|device|handle)[A-Za-z0-9_]*_t)\b"
+)
 
 OLD_SYMBOLS = re.compile(
     r"\b(?:ChassisTasks_|ControlManager_|SystemMonitor_|ParamStore_)|"
@@ -216,8 +222,9 @@ def analyze(root: Path, final: bool = True) -> list[str]:
     adapters = app_adapter_sources(root)
     adapter_directories = {Path(path).parent.as_posix() for path in adapters}
 
-    if (root / "Domain").exists():
-        errors.append("Domain/: legacy layer must be removed before Beta5 final")
+    for name in sorted(FORBIDDEN_TOP_LEVEL):
+        if (root / name).exists():
+            errors.append(f"{name}/: forbidden top-level architecture directory")
     if not (root / "Algorithm").is_dir():
         errors.append("Algorithm/: required final layer is missing")
 
@@ -272,6 +279,12 @@ def analyze(root: Path, final: bool = True) -> list[str]:
                 if match:
                     line = code.count("\n", 0, match.start()) + 1
                     errors.append(f"{relative}:{line}: forbidden {layer} API {match.group(0)}")
+            public_service_header = layer == "Service" and path.suffix.lower() == ".h" and "internal" not in relative_path.parts
+            if public_service_header:
+                match = PUBLIC_SERVICE_HARDWARE_TYPE.search(code)
+                if match:
+                    line = code.count("\n", 0, match.start()) + 1
+                    errors.append(f"{relative}:{line}: public Service header leaks hardware type {match.group(0)}")
             match = OLD_SYMBOLS.search(code)
             if match:
                 line = code.count("\n", 0, match.start()) + 1

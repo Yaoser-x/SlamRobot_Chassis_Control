@@ -144,16 +144,14 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
     }
     if (params_loaded != 0U)
     {
-        (void)StateEstimation_ApplyImuCalibration(&parameter_status.imu_calibration);
+        uint8_t calibration_valid = ParameterImuCalibration_Validate(&parameter_status.imu_calibration);
+        uint8_t calibration_applied =
+            (calibration_valid != 0U) ? StateEstimation_ApplyImuCalibration(&parameter_status.imu_calibration) : 0U;
         if (params.current_zero_valid != 0U)
         {
             PowerManagement_ApplyCurrentZeroCalibration(params.current_zero_raw);
         }
-        first_calibration_save_needed = (parameter_status.imu_calibration.gyro_bias_dps[0] == 0.0f
-                                         && parameter_status.imu_calibration.gyro_bias_dps[1] == 0.0f
-                                         && parameter_status.imu_calibration.gyro_bias_dps[2] == 0.0f)
-                                            ? 1U
-                                            : 0U;
+        first_calibration_save_needed = (calibration_applied != 0U) ? 0U : 1U;
     }
     StateEstimation_InitCalibrationCoordinator(&calibration_ports,
                                                first_calibration_save_needed,

@@ -142,6 +142,44 @@ static void SeedInputs(void)
     fake_line.sensor_timestamp_ms                  = 980U;
 }
 
+static void TestCalibrationStateMapping(void)
+{
+    static const uint8_t internal_states[] = {
+        STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED,
+        STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE,
+        STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_STATIONARY,
+        STATE_ESTIMATION_IMU_AUTO_CAL_COLLECTING,
+        STATE_ESTIMATION_IMU_AUTO_CAL_SUCCESS,
+        STATE_ESTIMATION_IMU_AUTO_CAL_RETRY_WAIT,
+        STATE_ESTIMATION_IMU_AUTO_CAL_FAILED,
+        0xFFU,
+    };
+    static const uint8_t published_states[] = {
+        SYSTEM_IMU_CAL_DISABLED,
+        SYSTEM_IMU_CAL_WAIT,
+        SYSTEM_IMU_CAL_WAIT,
+        SYSTEM_IMU_CAL_RUNNING,
+        SYSTEM_IMU_CAL_DONE,
+        SYSTEM_IMU_CAL_RETRY_WAIT,
+        SYSTEM_IMU_CAL_FAILED,
+        SYSTEM_IMU_CAL_FAILED,
+    };
+    const communication_publish_model_config_t config = {
+        .host_timeout_ms   = 500U,
+        .esp12f_timeout_ms = 500U,
+        .line_timeout_ms   = 50U,
+    };
+    communication_publish_model_t snapshot;
+
+    SeedInputs();
+    for (uint32_t index = 0U; index < sizeof(internal_states) / sizeof(internal_states[0]); ++index)
+    {
+        fake_state.imu.gyro_auto_cal_state = internal_states[index];
+        AppSystemPublishSnapshot_Collect(1000U, &config, &snapshot);
+        assert(snapshot.imu.calibration_state == published_states[index]);
+    }
+}
+
 int main(void)
 {
     communication_publish_model_t              snapshot;
@@ -183,6 +221,7 @@ int main(void)
     assert(snapshot.modules.upper_online == 0U);
     assert(snapshot.modules.esp12f_online == 0U);
     assert(snapshot.modules.line_online == 0U);
+    TestCalibrationStateMapping();
     puts("app publish model tests passed");
     return 0;
 }

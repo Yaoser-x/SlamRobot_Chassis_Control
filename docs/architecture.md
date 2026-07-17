@@ -41,7 +41,14 @@ Service/
 
 ## 构建边界
 
-最终 CMake 静态目标固定为 `f407_algorithm / f407_platform / f407_bsp / f407_service / f407_app / f407_app_adapters`。普通 `f407_app` 只链接 Service 与 Platform；`f407_app_adapters` 显式隔离硬件调试、显示、ISR 和传输适配代码。生产树禁止存在 `Domain/`。
+最终 CMake 静态目标固定为 `f407_algorithm / f407_platform / f407_bsp / f407_service / f407_app / f407_app_adapters`。普通 `f407_app` 只链接 Service 与 Platform；`f407_app_adapters` 显式隔离硬件调试、显示、ISR 和传输适配代码。生产树禁止存在 `Domain/`、`Device/`、`Common/`、`Shared/`、`Model/`、`Utils/` 或 `Manager/` 顶层目录。
+
+## Beta5.3 运行时边界
+
+- 巡线 Service 按 Parameter generation 同步阈值和极性；RAM apply 在下一帧前生效，只有显式 save 持久化。
+- IMU 启停、探测、重初始化、Profile 切换和诊断只通过 State Estimation Service；App/Debug 不直接控制 BMI270 BSP 生命周期。
+- IMU 瞬时质量位按周期重算，锁存位保留历史；事件计数只由新设备事件或新样本推进。
+- Motion 的停车、命令撤销和安全复位路径同时清空直行控制器及全部直行诊断字段。
 
 ## 自动门禁
 

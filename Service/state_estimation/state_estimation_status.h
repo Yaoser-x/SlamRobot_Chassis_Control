@@ -40,6 +40,34 @@ typedef enum
     STATE_ESTIMATION_IMU_INIT_STATE_DISABLED       = 6
 } state_estimation_imu_init_state_t;
 
+typedef enum
+{
+    STATE_ESTIMATION_IMU_PROFILE_NORMAL      = 0,
+    STATE_ESTIMATION_IMU_PROFILE_PERFORMANCE = 1,
+    STATE_ESTIMATION_IMU_PROFILE_DEBUG       = 2
+} state_estimation_imu_profile_t;
+
+typedef enum
+{
+    STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED        = 0,
+    STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE     = 1,
+    STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_STATIONARY = 2,
+    STATE_ESTIMATION_IMU_AUTO_CAL_COLLECTING      = 3,
+    STATE_ESTIMATION_IMU_AUTO_CAL_SUCCESS         = 4,
+    STATE_ESTIMATION_IMU_AUTO_CAL_RETRY_WAIT      = 5,
+    STATE_ESTIMATION_IMU_AUTO_CAL_FAILED          = 6
+} state_estimation_imu_auto_cal_state_t;
+
+typedef struct
+{
+    uint8_t hal_status[2];
+    uint8_t hal_rx[2][3];
+    uint8_t bitbang_rx[3];
+    uint8_t miso_nopull;
+    uint8_t miso_pullup;
+    uint8_t miso_pulldown;
+} state_estimation_imu_diagnostic_t;
+
 typedef struct
 {
     int32_t  count[STATE_ESTIMATION_MOTOR_COUNT];

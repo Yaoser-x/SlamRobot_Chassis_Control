@@ -2,6 +2,18 @@
 
 本检查表只记录可追溯的验证结果。未附固件 SHA、日志或测量记录的项目不得勾选。
 
+## Beta5.3 静态门禁
+
+- [x] `VERSION` 为 `1.0.0-beta5.3`
+- [x] 五层依赖、命名和 Service 所有权门禁通过
+- [x] 53/53 Host tests 通过
+- [x] Upper Protocol V2 固定金样通过
+- [x] Flash Schema 4 编解码、尺寸和迁移测试通过
+- [x] Debug clean build 通过
+- [x] Release clean build 通过
+- [x] `git diff --check` 通过
+- [ ] Beta5.3 板级 HIL（进入 `1.0.0-rc1` 前执行）
+
 ## Beta2 静态门禁
 
 - [x] `VERSION` 为 `1.0.0-beta2`

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate final unique runtime motor-output ownership."""
+"""Validate final motor-output and BMI270-lifecycle ownership."""
 
 from __future__ import annotations
 
@@ -14,6 +14,11 @@ SOURCE_SUFFIXES = {".c", ".h"}
 MOTOR_OUTPUT_API = re.compile(
     r"\bMotorDriver_(?:Init|SetSpeedGetter|SetDirectionConfig|SetPermille|SetSidePermille|Stop|StopSide|StopAll)\s*\("
 )
+IMU_LIFECYCLE_API = re.compile(
+    r"\bBmi270Driver_(?:SetEnabled|SetProfile|ProbeNow|ConfigNow|Diagnose)\s*\("
+)
+
+
 def strip_comments(text: str) -> str:
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
     return re.sub(r"//[^\n]*", " ", text)
@@ -36,6 +41,13 @@ def analyze(root: Path, final: bool = True) -> list[str]:
                 if not final_owner:
                     line = code.count("\n", 0, match.start()) + 1
                     errors.append(f"{relative}:{line}: runtime motor output API is owned only by Motion Control")
+            for match in IMU_LIFECYCLE_API.finditer(code):
+                final_owner = relative == "Service/state_estimation/state_estimation_service.c"
+                if not final_owner:
+                    line = code.count("\n", 0, match.start()) + 1
+                    errors.append(
+                        f"{relative}:{line}: BMI270 lifecycle API is owned only by State Estimation"
+                    )
     return sorted(set(errors))
 
 
@@ -54,7 +66,7 @@ def main(final: bool | None = None) -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
-    print("Service ownership check passed (final motor output owner).")
+    print("Service ownership check passed (motor output and BMI270 lifecycle owners).")
     return 0
 
 

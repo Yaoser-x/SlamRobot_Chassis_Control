@@ -141,6 +141,7 @@ set(F407_SERVICE_SOURCES
     Service/command_management/command_management_service.c
     Service/line_following/line_following_service.c
     Service/line_following/internal/line_calibration_coordinator.c
+    Service/line_following/internal/line_parameter_sync.c
     Service/teleoperation/teleoperation_service.c
     Service/safety_management/internal/battery_voltage_monitor.c
     Service/safety_management/internal/fault_stop_policy.c
@@ -157,6 +158,7 @@ set(F407_SERVICE_SOURCES
     Service/state_estimation/state_estimation_service.c
     Service/parameter_management/parameter_imu_calibration.c
     Service/state_estimation/internal/imu_estimation_pipeline.c
+    Service/state_estimation/internal/imu_quality_monitor.c
     Service/state_estimation/internal/imu_calibration_coordinator.c
     Service/state_estimation/internal/wheel_estimation_pipeline.c
     Service/system_monitoring/system_monitoring_service.c

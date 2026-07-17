@@ -6,19 +6,19 @@
 #define IMU_AUTOSAVE_RETRY_MS     1000U
 #define IMU_AUTOSAVE_MAX_ATTEMPTS 3U
 
-static imu_calibration_guard_t calibration_gate;
-static uint8_t                 first_save_needed;
-static uint8_t                 save_pending;
-static uint8_t                 save_attempts;
-static uint32_t                save_next_ms;
-static uint8_t                 persist_imu_calibration;
-static uint8_t                 persist_current_zero;
+static imu_calibration_guard_t              calibration_gate;
+static uint8_t                              first_save_needed;
+static uint8_t                              save_pending;
+static uint8_t                              save_attempts;
+static uint32_t                             save_next_ms;
+static uint8_t                              persist_imu_calibration;
+static uint8_t                              persist_current_zero;
 static state_estimation_calibration_ports_t calibration_ports;
 
 void ImuCalibrationCoordinator_Init(const state_estimation_calibration_ports_t *ports,
-                                    uint8_t needs_first_save,
-                                    uint8_t persist_imu,
-                                    uint8_t persist_current)
+                                    uint8_t                                     needs_first_save,
+                                    uint8_t                                     persist_imu,
+                                    uint8_t                                     persist_current)
 {
     ImuCalibrationGuard_Init(&calibration_gate);
     first_save_needed       = needs_first_save;
@@ -39,7 +39,7 @@ void ImuCalibrationCoordinator_ProcessSample(uint32_t now_ms)
     state_estimation_wheel_status_t wheel;
     state_estimation_imu_status_t   imu;
     int16_t                         output_permille[4] = {0};
-    uint8_t                         enabled_mask = 0U;
+    uint8_t                         enabled_mask       = 0U;
     uint8_t                         was_calibrated;
     uint8_t                         stationary;
 

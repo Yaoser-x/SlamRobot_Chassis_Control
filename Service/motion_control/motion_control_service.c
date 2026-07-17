@@ -94,6 +94,7 @@ static void ChassisService_ResetRamps(void)
     chassis_state.straight_total_correction_mps   = 0.0f;
     chassis_state.straight_heading_degraded       = 0U;
     chassis_state.straight_derated                = 0U;
+    chassis_state.straight_out_of_range           = 0U;
     chassis_state.pwm_saturated                   = 0U;
     chassis_state.control_source                  = COMMAND_SOURCE_NONE;
 }

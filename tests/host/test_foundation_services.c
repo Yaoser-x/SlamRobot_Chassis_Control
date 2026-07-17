@@ -130,6 +130,43 @@ void Bmi270Driver_GetState(bmi270_driver_state_t *state)
     *state = fake_imu_device;
 }
 
+uint8_t Bmi270Driver_SetEnabled(uint8_t enabled)
+{
+    fake_imu_device.enabled = enabled;
+    fake_imu_device.online  = 0U;
+    return 1U;
+}
+
+uint8_t Bmi270Driver_SetProfile(imu_bmi270_profile_id_t profile)
+{
+    fake_imu_device.profile = (uint8_t)profile;
+    return 1U;
+}
+
+uint8_t Bmi270Driver_ProbeNow(void)
+{
+    return 1U;
+}
+
+uint8_t Bmi270Driver_ConfigNow(void)
+{
+    fake_imu_device.online = 1U;
+    return 1U;
+}
+
+uint8_t Bmi270Driver_Diagnose(imu_bmi270_diag_t *diag)
+{
+    *diag = (imu_bmi270_diag_t){0};
+    return 1U;
+}
+
+void ImuEstimationPipeline_ResetRuntime(void)
+{
+    fake_imu.last_update_ms     = 0UL;
+    fake_imu.sensor_time        = 0UL;
+    fake_imu.filter_initialized = 0U;
+}
+
 void ImuEstimationPipeline_Init(void)
 {
     fake_imu                 = (state_estimation_imu_status_t){0};
@@ -149,8 +186,14 @@ void ImuEstimationPipeline_Process(const bmi270_sample_t         *sample,
     {
         fake_imu.body_accel_g[axis]       = sample->accel_g[axis];
         fake_imu.gyro_corrected_dps[axis] = sample->gyro_dps[axis];
+        status->body_accel_g[axis]        = fake_imu.body_accel_g[axis];
+        status->gyro_corrected_dps[axis]  = fake_imu.gyro_corrected_dps[axis];
     }
-    *status = fake_imu;
+    status->chip_id            = fake_imu.chip_id;
+    status->last_update_ms     = fake_imu.last_update_ms;
+    status->sample_count       = fake_imu.sample_count;
+    status->gyro_calibrated    = fake_imu.gyro_calibrated;
+    status->filter_initialized = fake_imu.filter_initialized;
 }
 
 void ImuEstimationPipeline_ServiceCalibration(uint32_t                       now_ms,
@@ -382,6 +425,31 @@ static void test_state_generations_and_freshness_are_independent(void)
                 "IMU freshness expires independently of wheel freshness");
 }
 
+static void test_state_estimation_owns_imu_lifecycle(void)
+{
+    state_estimation_imu_status_t     status;
+    state_estimation_imu_diagnostic_t diagnostic;
+
+    require_int(StateEstimation_SetImuEnabled(0U) != 0U, "service disables IMU");
+    (void)StateEstimation_GetImu(&status);
+    require_int(status.enabled == 0U && status.online == 0U && status.last_update_ms == 0U,
+                "disable clears online and freshness state");
+    fake_imu_device.poll_fallback_count = 7U;
+    require_int(StateEstimation_SetImuProfile(STATE_ESTIMATION_IMU_PROFILE_DEBUG) != 0U, "service changes IMU profile");
+    (void)StateEstimation_GetImu(&status);
+    require_int(status.enabled == 0U && status.poll_fallback_count == 7U,
+                "profile change preserves disabled state and synchronizes fallback baseline");
+    require_int(StateEstimation_RunImuCycle() != 0U, "profile reset resumes IMU sampling");
+    (void)StateEstimation_GetImu(&status);
+    require_int((status.quality_flags & STATE_ESTIMATION_IMU_QUALITY_POLL_FALLBACK) == 0U,
+                "runtime reset synchronizes the persistent driver fallback counter");
+    require_int(StateEstimation_ReinitializeImu() != 0U, "service reinitializes and enables IMU");
+    (void)StateEstimation_GetImu(&status);
+    require_int(status.enabled != 0U && status.online != 0U, "reinitialize publishes device state");
+    require_int(StateEstimation_ProbeImu() != 0U, "service probes IMU");
+    require_int(StateEstimation_DiagnoseImu(&diagnostic) != 0U, "service maps diagnostic DTO");
+}
+
 static void test_power_owner_publishes_and_gates_zero_calibration(void)
 {
     const robot_config_t     *robot = RobotConfig_GetDefault();
@@ -489,6 +557,7 @@ int main(void)
 {
     test_parameter_owner_uses_injected_factory_and_monotonic_generation();
     test_state_generations_and_freshness_are_independent();
+    test_state_estimation_owns_imu_lifecycle();
     test_power_owner_publishes_and_gates_zero_calibration();
     test_system_owner_uses_injected_strict_timeout_boundary();
     test_factory_reset_persists_before_publishing_defaults();

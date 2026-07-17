@@ -17,20 +17,41 @@ static uint8_t AppSystemPublishSnapshot_IsFresh(uint32_t now_ms, uint32_t timest
     return (timestamp_ms != 0U && (uint32_t)(now_ms - timestamp_ms) <= timeout_ms) ? 1U : 0U;
 }
 
-void AppSystemPublishSnapshot_Collect(uint32_t now_ms,
-                                      const communication_publish_model_config_t *config,
-                                      communication_publish_model_t *snapshot)
+static uint8_t AppSystemPublishSnapshot_MapImuCalibrationState(uint8_t calibration_state)
 {
-    motion_control_status_t      motion;
-    state_estimation_status_t    state;
-    power_management_status_t    power;
-    safety_management_status_t   safety;
-    system_monitoring_status_t   system;
-    line_following_status_t      line;
-    teleoperation_status_t       teleoperation;
-    host_communication_state_t   upper;
+    switch (calibration_state)
+    {
+        case STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED:
+            return SYSTEM_IMU_CAL_DISABLED;
+        case STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE:
+        case STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_STATIONARY:
+            return SYSTEM_IMU_CAL_WAIT;
+        case STATE_ESTIMATION_IMU_AUTO_CAL_COLLECTING:
+            return SYSTEM_IMU_CAL_RUNNING;
+        case STATE_ESTIMATION_IMU_AUTO_CAL_SUCCESS:
+            return SYSTEM_IMU_CAL_DONE;
+        case STATE_ESTIMATION_IMU_AUTO_CAL_RETRY_WAIT:
+            return SYSTEM_IMU_CAL_RETRY_WAIT;
+        case STATE_ESTIMATION_IMU_AUTO_CAL_FAILED:
+        default:
+            return SYSTEM_IMU_CAL_FAILED;
+    }
+}
+
+void AppSystemPublishSnapshot_Collect(uint32_t                                    now_ms,
+                                      const communication_publish_model_config_t *config,
+                                      communication_publish_model_t              *snapshot)
+{
+    motion_control_status_t        motion;
+    state_estimation_status_t      state;
+    power_management_status_t      power;
+    safety_management_status_t     safety;
+    system_monitoring_status_t     system;
+    line_following_status_t        line;
+    teleoperation_status_t         teleoperation;
+    host_communication_state_t     upper;
     wireless_communication_state_t esp;
-    power_on_self_test_result_t  post;
+    power_on_self_test_result_t    post;
 
     if (config == 0 || snapshot == 0)
     {
@@ -95,20 +116,20 @@ void AppSystemPublishSnapshot_Collect(uint32_t now_ms,
     snapshot->current.valid_flags          = power.valid_flags;
     snapshot->current.current_valid        = power.current_valid;
 
-    snapshot->imu.online                   = state.imu.online;
-    snapshot->imu.chip_id                  = state.imu.chip_id;
-    snapshot->imu.calibrated               = state.imu.gyro_calibrated;
-    snapshot->imu.sensor_time_valid        = state.imu.sensor_time_valid;
-    snapshot->imu.last_error               = state.imu.last_error;
-    snapshot->imu.timestamp_ms             = state.imu.last_update_ms;
-    snapshot->imu.sensor_time              = state.imu.sensor_time;
-    snapshot->imu.sample_count             = state.imu.sample_count;
-    snapshot->imu.quality_flags            = state.imu.quality_flags;
-    snapshot->imu.roll_deg                 = state.imu.roll_deg;
-    snapshot->imu.pitch_deg                = state.imu.pitch_deg;
-    snapshot->imu.yaw_deg                  = state.imu.yaw_deg;
-    snapshot->imu.temperature_c            = state.imu.temperature_c;
-    snapshot->imu.calibration_state        = state.imu.gyro_auto_cal_state;
+    snapshot->imu.online            = state.imu.online;
+    snapshot->imu.chip_id           = state.imu.chip_id;
+    snapshot->imu.calibrated        = state.imu.gyro_calibrated;
+    snapshot->imu.sensor_time_valid = state.imu.sensor_time_valid;
+    snapshot->imu.last_error        = state.imu.last_error;
+    snapshot->imu.timestamp_ms      = state.imu.last_update_ms;
+    snapshot->imu.sensor_time       = state.imu.sensor_time;
+    snapshot->imu.sample_count      = state.imu.sample_count;
+    snapshot->imu.quality_flags     = state.imu.quality_flags;
+    snapshot->imu.roll_deg          = state.imu.roll_deg;
+    snapshot->imu.pitch_deg         = state.imu.pitch_deg;
+    snapshot->imu.yaw_deg           = state.imu.yaw_deg;
+    snapshot->imu.temperature_c     = state.imu.temperature_c;
+    snapshot->imu.calibration_state = AppSystemPublishSnapshot_MapImuCalibrationState(state.imu.gyro_auto_cal_state);
     snapshot->imu.calibration_fail_reason  = state.imu.gyro_cal_fail_reason;
     snapshot->imu.calibration_sample_count = state.imu.gyro_cal_sample_count;
     snapshot->imu.quality_counters[0]      = state.imu.spi_error_count;
@@ -128,16 +149,16 @@ void AppSystemPublishSnapshot_Collect(uint32_t now_ms,
         snapshot->imu.quaternion[index] = state.imu.quaternion[index];
     }
 
-    snapshot->control.emergency_stop     = safety.emergency_stop;
-    snapshot->control.fault_stop         = safety.fault_stop;
-    snapshot->control.line_enabled       = line.globally_enabled;
-    snapshot->control.active_source      = (uint8_t)CommandManagement_GetActiveSource(now_ms);
-    snapshot->control.reset_reason_flags = system.reset_reason_flags;
-    snapshot->communication.upper.checksum_errors     = upper.rx_checksum_errors;
-    snapshot->communication.upper.timeout_resets      = upper.rx_timeout_resets;
-    snapshot->communication.upper.rx_overflows        = upper.rx_overwrite_count;
-    snapshot->communication.upper.tx_drops            = upper.tx_busy_drops;
-    snapshot->communication.upper.last_valid_frame_ms = upper.last_valid_frame_ms;
+    snapshot->control.emergency_stop                   = safety.emergency_stop;
+    snapshot->control.fault_stop                       = safety.fault_stop;
+    snapshot->control.line_enabled                     = line.globally_enabled;
+    snapshot->control.active_source                    = (uint8_t)CommandManagement_GetActiveSource(now_ms);
+    snapshot->control.reset_reason_flags               = system.reset_reason_flags;
+    snapshot->communication.upper.checksum_errors      = upper.rx_checksum_errors;
+    snapshot->communication.upper.timeout_resets       = upper.rx_timeout_resets;
+    snapshot->communication.upper.rx_overflows         = upper.rx_overwrite_count;
+    snapshot->communication.upper.tx_drops             = upper.tx_busy_drops;
+    snapshot->communication.upper.last_valid_frame_ms  = upper.last_valid_frame_ms;
     snapshot->communication.upper_last_rx_timestamp_ms = HostCommunication_GetLastRxTimestamp();
     snapshot->communication.esp12f.rx_frames           = esp.rx_frames;
     snapshot->communication.esp12f.checksum_errors     = esp.rx_checksum_errors;
@@ -152,8 +173,10 @@ void AppSystemPublishSnapshot_Collect(uint32_t now_ms,
     snapshot->modules.encoder_online = state.wheel.speed_valid_all;
     snapshot->modules.motor_online   = ((safety.error_flags & SYSTEM_ERROR_DRV_FAULT) == 0U) ? 1U : 0U;
     snapshot->modules.adc_online     = power.current_valid;
-    snapshot->modules.upper_online = AppSystemPublishSnapshot_IsFresh(
-        now_ms, snapshot->communication.upper_last_rx_timestamp_ms, config->host_timeout_ms);
+    snapshot->modules.upper_online =
+        AppSystemPublishSnapshot_IsFresh(now_ms,
+                                         snapshot->communication.upper_last_rx_timestamp_ms,
+                                         config->host_timeout_ms);
     snapshot->modules.esp12f_online =
         (esp.boot_mode_download == 0U)
             ? AppSystemPublishSnapshot_IsFresh(now_ms, esp.last_rx_timestamp_ms, config->esp12f_timeout_ms)

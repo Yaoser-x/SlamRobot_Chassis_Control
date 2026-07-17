@@ -18,6 +18,13 @@ static uint8_t                 queue_count;
 static uint32_t                next_init_retry_ms;
 static imu_bmi270_profile_id_t selected_profile = IMU_BMI270_PROFILE_PERFORMANCE;
 
+static void Bmi270Driver_ClearQueue(void)
+{
+    queue_read  = 0U;
+    queue_write = 0U;
+    queue_count = 0U;
+}
+
 static int16_t Bmi270Driver_ReadI16(const uint8_t *data)
 {
     return (int16_t)(((uint16_t)data[1] << 8) | data[0]);
@@ -149,20 +156,25 @@ void Bmi270Driver_Init(void)
     driver_state            = (bmi270_driver_state_t){0};
     driver_state.enabled    = 1U;
     driver_state.profile    = (uint8_t)selected_profile;
-    driver_state.init_state = BMI270_DRIVER_INIT_RESET;
-    queue_read              = 0U;
-    queue_write             = 0U;
-    queue_count             = 0U;
-    next_init_retry_ms      = 0U;
+    driver_state.init_state = (driver_state.enabled != 0U) ? BMI270_DRIVER_INIT_RESET : BMI270_DRIVER_INIT_DISABLED;
+    Bmi270Driver_ClearQueue();
+    next_init_retry_ms = 0U;
     Bmi270Bus_Deselect();
 }
 
 uint8_t Bmi270Driver_SetEnabled(uint8_t enabled)
 {
     driver_state.enabled = (enabled != 0U) ? 1U : 0U;
-    if (enabled == 0U)
+    driver_state.online  = 0U;
+    Bmi270Driver_ClearQueue();
+    if (driver_state.enabled == 0U)
     {
         driver_state.init_state = BMI270_DRIVER_INIT_DISABLED;
+    }
+    else
+    {
+        driver_state.init_state = BMI270_DRIVER_INIT_RESET;
+        next_init_retry_ms      = 0U;
     }
     return 1U;
 }
@@ -177,6 +189,7 @@ uint8_t Bmi270Driver_SetProfile(imu_bmi270_profile_id_t profile)
     driver_state.profile    = (uint8_t)profile;
     driver_state.online     = 0U;
     driver_state.init_state = BMI270_DRIVER_INIT_RESET;
+    Bmi270Driver_ClearQueue();
     return 1U;
 }
 
@@ -205,6 +218,7 @@ uint8_t Bmi270Driver_ConfigNow(void)
     const imu_bmi270_profile_t *profile = ImuBmi270Profile_Get(selected_profile);
     bmi270_device_status_t      status;
 
+    Bmi270Driver_ClearQueue();
     driver_state.online     = 0U;
     driver_state.init_state = BMI270_DRIVER_INIT_PROBE;
     if (profile == 0 || Bmi270Driver_WriteReg(BMI270_REG_CMD, BMI270_CMD_SOFT_RESET) == 0U)
@@ -216,6 +230,7 @@ uint8_t Bmi270Driver_ConfigNow(void)
     {
         return 0U;
     }
+    HAL_Delay(1U);
     driver_state.init_state = BMI270_DRIVER_INIT_LOAD_CONFIG;
     status                  = Bmi270Device_LoadConfig(&device_io);
     if (status != BMI270_DEVICE_OK || Bmi270Device_WaitInitOk(&device_io) != BMI270_DEVICE_OK)

@@ -6,8 +6,6 @@
 #include <string.h>
 
 #ifndef POWER_ON_SELF_TEST_HOST_TEST
-#include "bmi270_driver.h"
-
 #include "status_led_driver.h"
 
 #include "motor_driver.h"
@@ -136,7 +134,7 @@ void PostService_Run(void)
         }
     }
 
-    inputs.imu_chip_id = (Bmi270Driver_ProbeNow() != 0U) ? 0x24U : 0x00U;
+    inputs.imu_chip_id = (StateEstimation_ProbeImu() != 0U) ? 0x24U : 0x00U;
 
     PowerOnSelfTest_Evaluate(&inputs, &last_post_result);
     post_runtime_start_ms = PlatformTime_NowMs();

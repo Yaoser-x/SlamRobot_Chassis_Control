@@ -1,7 +1,6 @@
 #include "debug_cmd_imu.h"
 
 #include "debug_console_writer.h"
-#include "bmi270_driver.h"
 #include "state_estimation_service.h"
 
 #include <stdio.h>
@@ -40,10 +39,10 @@ static const char *DebugCmdImu_FailReason(uint8_t reason)
 
 static void DebugCmdImu_PrintDiag(void)
 {
-    char              tx[DEBUG_CMD_IMU_TX_SIZE];
-    imu_bmi270_diag_t diag;
+    char                              tx[DEBUG_CMD_IMU_TX_SIZE];
+    state_estimation_imu_diagnostic_t diag;
 
-    if (Bmi270Driver_Diagnose(&diag) == 0U)
+    if (StateEstimation_DiagnoseImu(&diag) == 0U)
     {
         IMU_LOG("WARN", "bmi270 diag failed");
         return;
@@ -123,7 +122,7 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imutest") == 0)
     {
-        uint8_t probe_ok = Bmi270Driver_ProbeNow();
+        uint8_t probe_ok = StateEstimation_ProbeImu();
         if (probe_ok != 0U)
         {
             IMU_LOG("INFO", "bmi270 probe ok");
@@ -141,14 +140,14 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (strcmp(line, "imuinit") == 0)
     {
-        bmi270_driver_state_t state;
-        if (Bmi270Driver_ConfigNow() != 0U)
+        state_estimation_imu_status_t state;
+        if (StateEstimation_ReinitializeImu() != 0U)
         {
             IMU_LOG("INFO", "bmi270 init ok");
         }
         else
         {
-            Bmi270Driver_GetState(&state);
+            (void)StateEstimation_GetImu(&state);
             IMU_LOG("WARN",
                     "bmi270 init failed init=%u err=%u chip=0x%02X online=%u",
                     state.init_state,
@@ -171,7 +170,7 @@ uint8_t DebugCmdImu_TryHandle(const char *line)
     }
     if (sscanf(line, "imu %d", &value) == 1)
     {
-        (void)Bmi270Driver_SetEnabled((value != 0) ? 1U : 0U);
+        (void)StateEstimation_SetImuEnabled((value != 0) ? 1U : 0U);
         IMU_LOG("INFO", "imu %s", (value != 0) ? "enabled" : "disabled");
         return 1U;
     }

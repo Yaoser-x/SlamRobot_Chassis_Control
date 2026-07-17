@@ -15,6 +15,11 @@ extern "C"
     /** Initialize the wheel and IMU estimation owner without merging their schedulers. */
     uint8_t StateEstimation_Init(const state_estimation_config_t *config);
     uint8_t StateEstimation_IsInitialized(void);
+    uint8_t StateEstimation_SetImuEnabled(uint8_t enabled);
+    uint8_t StateEstimation_ProbeImu(void);
+    uint8_t StateEstimation_ReinitializeImu(void);
+    uint8_t StateEstimation_SetImuProfile(state_estimation_imu_profile_t profile);
+    uint8_t StateEstimation_DiagnoseImu(state_estimation_imu_diagnostic_t *diagnostic);
     /** Run the 10 ms wheel-count and wheel-speed chain. */
     void StateEstimation_UpdateWheel(uint32_t now_ms);
     /** Run one DRDY-triggered or 10 ms timeout IMU chain iteration. */

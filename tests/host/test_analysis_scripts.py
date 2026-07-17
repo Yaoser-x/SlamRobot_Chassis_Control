@@ -67,6 +67,20 @@ class AnalysisTests(unittest.TestCase):
             errors = architecture.analyze(root)
             self.assertTrue(any("public Service header leaks BSP" in error for error in errors), errors)
 
+    def test_architecture_rejects_public_service_hardware_type_leak(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "Service/power/power_status.h", "typedef struct motor_driver_state_t power_status_t;\n")
+            errors = architecture.analyze(root)
+            self.assertTrue(any("public Service header leaks hardware type" in error for error in errors), errors)
+
+    def test_architecture_rejects_forbidden_top_level_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "Common/common.h", "#pragma once\n")
+            errors = architecture.analyze(root)
+            self.assertIn("Common/: forbidden top-level architecture directory", errors)
+
     def test_architecture_rejects_new_mixed_configuration_consumer(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -160,6 +174,17 @@ class AnalysisTests(unittest.TestCase):
             )
             errors = ownership.analyze(root)
             self.assertTrue(any("owned only by Motion Control" in error for error in errors), errors)
+
+    def test_ownership_rejects_bmi270_lifecycle_outside_state_estimation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "Service/safety_management/internal/power_on_self_test.c",
+                "void probe(void) { (void)Bmi270Driver_ProbeNow(); }\n",
+            )
+            errors = ownership.analyze(root)
+            self.assertTrue(any("owned only by State Estimation" in error for error in errors), errors)
 
     def test_straight_hil_excludes_caster_transition_and_emits_ram_only_commands(self):
         telemetry = [
