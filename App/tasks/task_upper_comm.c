@@ -14,7 +14,7 @@ void Task_RpiComm(void *argument)
     {
         communication_publish_model_t publish_model;
 
-        (void)CommunicationPublishModel_Get(&publish_model);
+        (void)SystemPublishSnapshot_Get(&publish_model);
         HostCommunication_Update(&publish_model);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_HOST,
                                     &next_wake,

@@ -1,6 +1,7 @@
 #include "motion_maintenance.h"
 
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "motor_hardware_layout.h"
 #include "motor_driver.h"
 #include "safety_management_service.h"

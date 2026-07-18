@@ -71,6 +71,7 @@ set(F407_APP_SOURCES
     App/app_init.c
     App/config/robot_config.c
     App/composition/system_publish_snapshot_provider.c
+    App/composition/operator_action_router.c
     App/tasks/task_debug.c
     App/tasks/task_esp12f.c
     App/tasks/task_imu.c

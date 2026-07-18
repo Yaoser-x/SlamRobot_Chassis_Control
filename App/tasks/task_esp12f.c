@@ -19,7 +19,7 @@ void Task_Esp12f(void *argument)
 
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_ESP, now_ms);
         Esp12fFlashBridge_Update(now_ms);
-        (void)CommunicationPublishModel_Get(&publish_model);
+        (void)SystemPublishSnapshot_Get(&publish_model);
         WirelessCommunication_Update(&publish_model);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_ESP,
                                     &next_wake,

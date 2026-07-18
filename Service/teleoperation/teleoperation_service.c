@@ -4,10 +4,6 @@
 
 #include "command_management_service.h"
 
-#include "status_led_driver.h"
-
-#include "line_following_service.h"
-
 #include "ps2_controller_driver.h"
 
 #include "relative_heading_controller.h"
@@ -277,7 +273,7 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     return 1U;
 }
 
-void Teleoperation_Update(void)
+void Teleoperation_Update(teleoperation_action_t *action)
 {
     ps2_controller_driver_sample_t sample;
     ps2_control_service_state_t    next_state;
@@ -291,6 +287,11 @@ void Teleoperation_Update(void)
     uint8_t                        input_revoked;
     uint32_t                       now_ms           = PlatformTime_TaskNowMs();
     uint32_t                       input_generation = CommandManagement_GetMotionRevokeGeneration();
+
+    if (action != 0)
+    {
+        *action = (teleoperation_action_t){TELEOPERATION_ACTION_NONE, now_ms, input_generation, 0U};
+    }
 
     if (Ps2ControllerDriver_ReadSample(&sample) == 0U)
     {
@@ -346,61 +347,27 @@ void Teleoperation_Update(void)
     /* 巡线模式切换：三角键上升沿触发 */
     if (input_revoked == 0U && (pressed_btn2 & teleoperation_config.line_toggle_mask) != 0U)
     {
-        LineFollowing_Enable((LineFollowing_IsEnabled() == 0U) ? 1U : 0U);
+        if (action != 0)
+        {
+            action->type = TELEOPERATION_ACTION_TOGGLE_LINE;
+        }
     }
 
-    /* 巡线标定：方块=地板，圆形=黑线（上升沿触发，不与其他操作冲突） */
+    /* 巡线标定：方块=地板，圆形=黑线（上升沿触发 */
     if (input_revoked == 0U)
     {
-        line_sensor_calibration_t cal_state;
-
-        LineFollowing_CalibrationGet(&cal_state);
-
         if ((pressed_btn2 & teleoperation_config.linecal_floor_mask) != 0U)
         {
-            if (cal_state.collecting == 0U)
+            if (action != 0 && action->type == TELEOPERATION_ACTION_NONE)
             {
-                (void)LineFollowing_RequestCalibration(LINE_CALIBRATION_SURFACE_FLOOR, 100U);
-                StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_RUNNING);
+                action->type = TELEOPERATION_ACTION_CALIBRATE_LINE_FLOOR;
             }
         }
         if ((pressed_btn2 & teleoperation_config.linecal_line_mask) != 0U)
         {
-            if (cal_state.collecting == 0U)
+            if (action != 0 && action->type == TELEOPERATION_ACTION_NONE)
             {
-                (void)LineFollowing_RequestCalibration(LINE_CALIBRATION_SURFACE_LINE, 100U);
-                StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_RUNNING);
-            }
-        }
-
-        /* 采集完成后提示单面成功 / 双面完成自动 apply */
-        {
-            static uint8_t prev_ready_mask;
-
-            if (cal_state.collecting == 0U && cal_state.ready_mask != prev_ready_mask)
-            {
-                if ((cal_state.ready_mask & 0x03U) == 0x03U)
-                {
-                    /* 双面采集完成 → 自动 apply */
-                    if (LineFollowing_CalibrationApplyToRam() != 0U)
-                    {
-                        StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_APPLIED);
-                    }
-                    else
-                    {
-                        /* 分离度不足，标定失败 — 快闪提示 */
-                        StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_RUNNING);
-                    }
-                    /* 清标定状态，防止重复触发 apply */
-                    LineFollowing_CalibrationCancel();
-                    prev_ready_mask = 0U;
-                }
-                else
-                {
-                    /* 单面完成 */
-                    StatusLedDriver_SetMode(STATUS_LED_DRIVER_CAL_OK);
-                    prev_ready_mask = cal_state.ready_mask;
-                }
+                action->type = TELEOPERATION_ACTION_CALIBRATE_LINE_SURFACE;
             }
         }
     }
@@ -497,7 +464,7 @@ void Teleoperation_Update(void)
     next_state.heading_accumulated_deg = heading_control.accumulated_delta_deg;
     next_state.linear_x                = linear_x;
     next_state.angular_z               = angular_z;
-    next_state.line_tracking_enabled   = LineFollowing_IsEnabled();
+    next_state.line_tracking_enabled   = (action != 0) ? action->line_tracking_enabled : 0U;
     next_state.generation++;
     Ps2ControlService_CopyState(&ps2_state, &next_state);
 
@@ -519,12 +486,6 @@ void Teleoperation_Update(void)
         heading_zero_pending = 0U;
         ps2_idle_start_ms    = 0U;
         Ps2ControlService_SubmitCommand(0.0f, 0.0f, input_generation);
-        return;
-    }
-    if (LineFollowing_IsEnabled() != 0U)
-    {
-        ps2_idle_start_ms = 0U;
-        CommandManagement_ClearSource(COMMAND_SOURCE_PS2);
         return;
     }
     /* PS2 is online but idle — after a grace period, release the slot so

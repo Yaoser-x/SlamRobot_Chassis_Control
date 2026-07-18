@@ -1,6 +1,7 @@
 #include "esp12f_flash_bridge.h"
 
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "uart_bridge_transport.h"
 
 #include <assert.h>

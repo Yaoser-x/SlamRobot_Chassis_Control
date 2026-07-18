@@ -1,6 +1,7 @@
 #include "ps2_control_service.h"
 
 #include "control_config.h"
+#include "line_following_service.h"
 #include "teleoperation_service.h"
 
 void Ps2ControlService_Init(void)
@@ -32,7 +33,9 @@ void Ps2ControlService_Init(void)
 
 void Ps2ControlService_Update(void)
 {
-    Teleoperation_Update();
+    teleoperation_action_t a   = {0};
+    a.line_tracking_enabled    = LineFollowing_IsEnabled();
+    Teleoperation_Update(&a);
 }
 
 void Ps2ControlService_GetState(ps2_control_service_state_t *state)

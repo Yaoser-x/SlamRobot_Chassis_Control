@@ -1,4 +1,5 @@
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "wheel_feedback_monitor.h"
 #include "motor_output_coordinator.h"
 #include "motion_parameter_sync.h"

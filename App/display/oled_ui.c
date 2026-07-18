@@ -123,7 +123,7 @@ void OLED_UI_Update(void)
     uint32_t                      now     = osKernelGetTickCount();
     uint32_t                      elapsed = now - phase_start_tick;
 
-    (void)CommunicationPublishModel_Get(&snapshot);
+    (void)SystemPublishSnapshot_Get(&snapshot);
     if (snapshot.imu.calibration_state != last_calibration_state)
     {
         last_calibration_state        = snapshot.imu.calibration_state;

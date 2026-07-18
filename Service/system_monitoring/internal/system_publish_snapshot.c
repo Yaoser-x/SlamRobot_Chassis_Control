@@ -9,7 +9,7 @@ static uint32_t                             publish_generation;
 static communication_publish_model_config_t publish_config;
 static system_publish_snapshot_provider_t   snapshot_provider;
 
-uint8_t CommunicationPublishModel_Init(const communication_publish_model_config_t *config,
+uint8_t SystemPublishSnapshot_Init(const communication_publish_model_config_t *config,
                                        system_publish_snapshot_provider_t          provider)
 {
     platform_critical_state_t state;
@@ -30,7 +30,7 @@ uint8_t CommunicationPublishModel_Init(const communication_publish_model_config_
     return 1U;
 }
 
-void CommunicationPublishModel_Update(uint32_t now_ms)
+void SystemPublishSnapshot_Update(uint32_t now_ms)
 {
     communication_publish_model_t     next = {0};
     system_monitoring_module_health_t modules;
@@ -63,7 +63,7 @@ void CommunicationPublishModel_Update(uint32_t now_ms)
     PlatformCritical_Exit(critical);
 }
 
-uint32_t CommunicationPublishModel_Get(communication_publish_model_t *out)
+uint32_t SystemPublishSnapshot_Get(communication_publish_model_t *out)
 {
     platform_critical_state_t state;
     uint32_t                  generation;

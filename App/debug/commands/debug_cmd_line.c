@@ -1,8 +1,10 @@
 #include "debug_cmd_line.h"
 
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "debug_console_writer.h"
 #include "line_following_service.h"
+#include "line_following_maintenance.h"
 #include "line_sensor_driver.h"
 
 #include <stdio.h>
@@ -111,7 +113,7 @@ static void DebugCmdLine_ApplyCalibration(void)
         LINE_LOG("WARN", "linecal apply rejected: chassis not stationary");
         return;
     }
-    if (LineFollowing_CalibrationApplyToRam() != 0U)
+    if (LineFollowing_ApplyCalibration() != 0U)
     {
         LINE_LOG("INFO", "linecal applied to RAM; run set save to persist");
     }
@@ -135,7 +137,7 @@ static void DebugCmdLine_HandleCalibration(const char *line)
     {
         line_sensor_calibration_surface_t surface =
             (strcmp(action, "floor") == 0) ? LINE_CALIBRATION_SURFACE_FLOOR : LINE_CALIBRATION_SURFACE_LINE;
-        if (LineFollowing_CalibrationBeginCoordinated(surface, (uint16_t)samples) != 0U)
+        if (LineFollowing_RequestCalibration(surface, (uint16_t)samples) != 0U)
         {
             LINE_LOG("INFO", "linecal %s collecting %u samples", action, samples);
         }

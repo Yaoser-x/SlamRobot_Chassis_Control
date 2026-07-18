@@ -5,6 +5,7 @@
 #include "platform_time.h"
 #include "motor_config.h"
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "safety_management_service.h"
 
 #include <stdio.h>

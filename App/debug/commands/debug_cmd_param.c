@@ -1,11 +1,13 @@
 #include "debug_cmd_param.h"
 
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "debug_console_parser.h"
 #include "debug_console_writer.h"
 #include "parameter_management_service.h"
 #include "power_management_service.h"
 #include "state_estimation_service.h"
+#include "state_estimation_maintenance.h"
 
 #include <stdio.h>
 #include <string.h>

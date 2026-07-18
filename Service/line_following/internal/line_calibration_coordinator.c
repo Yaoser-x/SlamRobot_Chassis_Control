@@ -1,6 +1,7 @@
 #include "line_calibration_coordinator.h"
 
 #include "line_following_service.h"
+#include "line_following_internal.h"
 
 static line_following_calibration_ports_t calibration_ports;
 
@@ -18,7 +19,7 @@ uint8_t LineCalibrationCoordinator_Begin(line_sensor_calibration_surface_t surfa
     {
         return 0U;
     }
-    started = LineFollowing_CalibrationStart(surface, samples);
+    started = LineFollowingInternal_CalibrationStart(surface, samples);
     calibration_ports.end_maintenance();
     return started;
 }
@@ -27,15 +28,15 @@ void LineCalibrationCoordinator_ProcessRequest(void)
 {
     line_following_calibration_request_t request;
 
-    if (LineFollowing_TakeCalibrationRequest(&request) != 0U)
+    if (LineFollowingInternal_TakeCalibrationRequest(&request) != 0U)
     {
         if (calibration_ports.begin_maintenance == 0 || calibration_ports.end_maintenance == 0
             || calibration_ports.begin_maintenance() == 0U)
         {
-            (void)LineFollowing_ResolveCalibrationRequest(0U);
+            (void)LineFollowingInternal_ResolveCalibrationRequest(0U);
             return;
         }
-        (void)LineFollowing_ResolveCalibrationRequest(1U);
+        (void)LineFollowingInternal_ResolveCalibrationRequest(1U);
         calibration_ports.end_maintenance();
     }
 }

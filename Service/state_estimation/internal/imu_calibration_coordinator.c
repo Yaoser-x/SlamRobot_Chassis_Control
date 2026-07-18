@@ -2,6 +2,8 @@
 
 #include "imu_calibration_guard.h"
 #include "state_estimation_service.h"
+#include "state_estimation_maintenance.h"
+#include "state_estimation_composition.h"
 
 #define IMU_AUTOSAVE_RETRY_MS     1000U
 #define IMU_AUTOSAVE_MAX_ATTEMPTS 3U

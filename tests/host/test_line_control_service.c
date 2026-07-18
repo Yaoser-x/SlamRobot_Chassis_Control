@@ -1,9 +1,12 @@
 #include "line_calibration_coordinator.h"
 #include "line_following_service.h"
+#include "line_following_maintenance.h"
+#include "line_following_composition.h"
 
 #include "command_management_service.h"
 #include "line_sensor_driver.h"
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "parameter_management_service.h"
 #include "safety_management_service.h"
 
@@ -183,7 +186,7 @@ static void reset_fake(void)
     require_int(LineFollowing_Init(&config) != 0U, "line config accepted");
     require_int(threshold_apply_count == 1U && applied_threshold[0] == 500U,
                 "line init applies current parameter generation");
-    LineFollowing_SetCalibrationPorts(&fake_calibration_ports);
+    LineFollowing_ConfigureCalibrationPorts(&fake_calibration_ports);
     LineFollowing_Enable(1U);
 }
 
@@ -209,10 +212,10 @@ static void test_calibration_apply_and_commit_are_explicit(void)
     reset_fake();
     old_threshold = fake_params.line_threshold_raw[0];
     collect_calibration_surface(LINE_CALIBRATION_SURFACE_FLOOR, 900U);
-    require_int(LineFollowing_CalibrationApplyToRam() == 0U, "single surface cannot overwrite RAM parameters");
+    require_int(LineFollowing_ApplyCalibration() == 0U, "single surface cannot overwrite RAM parameters");
     require_int(fake_params.line_threshold_raw[0] == old_threshold, "rejected apply preserves prior parameters");
     collect_calibration_surface(LINE_CALIBRATION_SURFACE_LINE, 200U);
-    require_int(LineFollowing_CalibrationApplyToRam() != 0U, "two separated surfaces apply to RAM");
+    require_int(LineFollowing_ApplyCalibration() != 0U, "two separated surfaces apply to RAM");
     require_int(fake_params.line_threshold_raw[0] == 551U && fake_params.line_active_low != 0U,
                 "RAM apply updates thresholds and polarity");
     require_int(applied_threshold[0] == 551U && applied_active_low != 0U && threshold_apply_count == 2U,

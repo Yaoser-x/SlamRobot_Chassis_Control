@@ -2,6 +2,7 @@
 
 #include "debug_console_writer.h"
 #include "state_estimation_service.h"
+#include "state_estimation_maintenance.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,6 +1,7 @@
 #include "chassis_maintenance_service.h"
 
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 
 chassis_maintenance_service_result_t ChassisMaintenanceService_Begin(void)
 {

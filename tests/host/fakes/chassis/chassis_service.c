@@ -2,6 +2,7 @@
 
 #include "control_config.h"
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 
 void ChassisService_Init(void)
 {

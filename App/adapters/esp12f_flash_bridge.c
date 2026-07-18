@@ -2,6 +2,7 @@
 
 #include "command_management_service.h"
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "esp12f_boot_control.h"
 #include "wireless_communication_service.h"
 #include "platform_time.h"

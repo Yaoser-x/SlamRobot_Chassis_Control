@@ -7,7 +7,9 @@
 #include "esp12f_flash_bridge.h"
 #include "wireless_communication_service.h"
 #include "line_following_service.h"
+#include "line_following_composition.h"
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "oled_ui.h"
 #include "parameter_management_service.h"
 #include "power_on_self_test_service.h"
@@ -15,6 +17,8 @@
 #include "platform_reset.h"
 #include "safety_management_service.h"
 #include "state_estimation_service.h"
+#include "state_estimation_maintenance.h"
+#include "state_estimation_composition.h"
 #include "system_monitoring_service.h"
 #include "teleoperation_service.h"
 #include "host_communication_service.h"
@@ -168,7 +172,7 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
     }
     (void)ParameterManagement_GetSnapshot(&params);
     AppHardware_InitLineSensor(params.line_threshold_raw, params.line_active_low);
-    LineFollowing_SetCalibrationPorts(&line_calibration_ports);
+    LineFollowing_ConfigureCalibrationPorts(&line_calibration_ports);
     if (LineFollowing_Init(&config->line) == 0U || Teleoperation_Init(&config->teleoperation) == 0U)
     {
         return 0U;
@@ -182,7 +186,7 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
         .esp12f_timeout_ms = config->command.esp12f_timeout_ms,
         .line_timeout_ms   = config->display.line_timeout_ms,
     };
-    if (CommunicationPublishModel_Init(&publish_config, AppSystemPublishSnapshot_Collect) == 0U)
+    if (SystemPublishSnapshot_Init(&publish_config, AppSystemPublishSnapshot_Collect) == 0U)
     {
         return 0U;
     }

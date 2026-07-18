@@ -22,12 +22,12 @@ extern "C"
                                                        communication_publish_model_t              *snapshot);
 
     /** Initialize the System Monitoring-owned double-buffered publish snapshot. */
-    uint8_t CommunicationPublishModel_Init(const communication_publish_model_config_t *config,
+    uint8_t SystemPublishSnapshot_Init(const communication_publish_model_config_t *config,
                                            system_publish_snapshot_provider_t          provider);
     /** Assemble one consistent product read model and publish it atomically. */
-    void CommunicationPublishModel_Update(uint32_t now_ms);
+    void SystemPublishSnapshot_Update(uint32_t now_ms);
     /** Copy the latest complete read model and return its generation. */
-    uint32_t CommunicationPublishModel_Get(communication_publish_model_t *out);
+    uint32_t SystemPublishSnapshot_Get(communication_publish_model_t *out);
 
 #ifdef __cplusplus
 }

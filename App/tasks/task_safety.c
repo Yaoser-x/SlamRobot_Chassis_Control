@@ -11,6 +11,7 @@
 #include "safety_management_service.h"
 #include "system_monitoring_service.h"
 #include "state_estimation_service.h"
+#include "state_estimation_composition.h"
 
 void Task_Safety(void *argument)
 {
@@ -28,7 +29,7 @@ void Task_Safety(void *argument)
                                               params.current_fault_debounce_ms);
         SafetyManagement_Update();
         PostService_UpdateRuntime(now_ms);
-        CommunicationPublishModel_Update(now_ms);
+        SystemPublishSnapshot_Update(now_ms);
         PlatformResetTrace_UpdateControl((uint8_t)CommandManagement_GetActiveSource(now_ms),
                                          SafetyManagement_IsEmergencyStop(),
                                          SafetyManagement_IsFaultStop());

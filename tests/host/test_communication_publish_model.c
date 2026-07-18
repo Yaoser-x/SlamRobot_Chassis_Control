@@ -190,11 +190,11 @@ int main(void)
     };
 
     SeedInputs();
-    assert(CommunicationPublishModel_Init(&config, AppSystemPublishSnapshot_Collect) != 0U);
-    assert(CommunicationPublishModel_Get(0) == 0U);
-    assert(CommunicationPublishModel_Get(&snapshot) == 0U);
-    CommunicationPublishModel_Update(1000U);
-    assert(CommunicationPublishModel_Get(&snapshot) == 1U);
+    assert(SystemPublishSnapshot_Init(&config, AppSystemPublishSnapshot_Collect) != 0U);
+    assert(SystemPublishSnapshot_Get(0) == 0U);
+    assert(SystemPublishSnapshot_Get(&snapshot) == 0U);
+    SystemPublishSnapshot_Update(1000U);
+    assert(SystemPublishSnapshot_Get(&snapshot) == 1U);
     assert(snapshot.generation == 1U);
     assert(snapshot.chassis.motor_target_mps[0] == 0.5f);
     assert(snapshot.chassis.motor_output_permille[0] == 123);
@@ -216,8 +216,8 @@ int main(void)
     fake_upper_last_rx_timestamp_ms = 1U;
     fake_esp.boot_mode_download     = 1U;
     fake_line.sensor_timestamp_ms   = 1U;
-    CommunicationPublishModel_Update(2000U);
-    assert(CommunicationPublishModel_Get(&snapshot) == 2U);
+    SystemPublishSnapshot_Update(2000U);
+    assert(SystemPublishSnapshot_Get(&snapshot) == 2U);
     assert(snapshot.modules.upper_online == 0U);
     assert(snapshot.modules.esp12f_online == 0U);
     assert(snapshot.modules.line_online == 0U);

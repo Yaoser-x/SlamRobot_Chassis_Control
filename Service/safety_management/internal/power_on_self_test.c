@@ -12,6 +12,7 @@
 
 #include "power_management_service.h"
 #include "state_estimation_service.h"
+#include "state_estimation_maintenance.h"
 
 #endif
 

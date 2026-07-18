@@ -16,7 +16,7 @@ FINAL_SERVICE_DIRS = {
 }
 SOURCE_NAME = re.compile(r"^[a-z][a-z0-9_]*\.(?:c|h)$")
 DIRECTORY_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
-PUBLIC_SERVICE_HEADER = re.compile(r"^[a-z][a-z0-9_]*(?:_service|_config|_status|_types)\.h$")
+PUBLIC_SERVICE_HEADER = re.compile(r"^[a-z][a-z0-9_]*(?:_service|_config|_status|_types|_maintenance|_composition)\.h$")
 
 
 def analyze(root: Path, final: bool = True) -> list[str]:

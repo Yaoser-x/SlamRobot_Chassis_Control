@@ -1,6 +1,7 @@
 #include "usart1_debug_console.h"
 
 #include "motion_control_service.h"
+#include "motion_control_maintenance.h"
 #include "cmsis_os2.h"
 #include "command_management_service.h"
 #include "debug_maintenance_policy.h"

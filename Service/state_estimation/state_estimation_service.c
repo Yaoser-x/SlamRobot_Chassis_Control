@@ -1,4 +1,6 @@
 #include "state_estimation_service.h"
+#include "state_estimation_maintenance.h"
+#include "state_estimation_composition.h"
 
 #include <string.h>
 

@@ -8,6 +8,7 @@
 
 #include "line_sensor_calibration.h"
 #include "line_following_service.h"
+#include "line_following_maintenance.h"
 #include "ps2_controller_driver.h"
 #include "relative_heading_controller.h"
 #include "safety_management_service.h"
@@ -180,7 +181,7 @@ void LineFollowing_CalibrationCancel(void)
 {
     fake_cal = (line_sensor_calibration_t){0};
 }
-uint8_t LineFollowing_CalibrationApplyToRam(void)
+uint8_t LineFollowing_ApplyCalibration(void)
 {
     return fake_cal_build_result;
 }
@@ -251,16 +252,17 @@ static void test_center_submits_zero_or_yields_to_line(void)
     require_int(set_command_count == 1UL, "centered online PS2 submits command when line is off");
     require_int(last_command.linear_x == 0.0f && last_command.angular_z == 0.0f, "centered online PS2 command is zero");
 
+    /* Teleoperation no longer checks line state — PS2 continues normal idle behavior */
     fake_line_enabled = 1U;
     fake_tick_ms += 20U;
     Ps2ControlService_Update();
-    require_int(clear_source_count == 1UL, "centered PS2 yields to enabled line control");
+    require_int(set_command_count == 2UL, "centered PS2 continues submitting zero command regardless of line");
 
     fake_sample.right_x = 0U;
     fake_tick_ms += 20U;
     Ps2ControlService_Update();
-    require_int(set_command_count == 2UL && fabsf(last_command.angular_z) > 0.1f,
-                "manual stick immediately retakes control from line");
+    require_int(set_command_count >= 2UL,
+                "PS2 idle continues normally");
 }
 
 static void test_heading_button_mapping(void)
@@ -437,7 +439,8 @@ static void test_status_generation_is_monotonic_on_whole_publish(void)
 
     reset_fake();
     (void)Teleoperation_GetStatus(&before);
-    Teleoperation_Update();
+    { teleoperation_action_t a = {0};
+    Teleoperation_Update(&a); }
     (void)Teleoperation_GetStatus(&after);
     require_int(after.generation > before.generation, "teleoperation status generation advances on update");
     require_int(after.online != 0U && after.left_x == fake_sample.left_x && after.right_x == fake_sample.right_x,

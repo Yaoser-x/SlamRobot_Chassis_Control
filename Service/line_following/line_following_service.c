@@ -1,4 +1,7 @@
 #include "line_following_service.h"
+#include "line_following_maintenance.h"
+#include "line_following_composition.h"
+#include "line_following_internal.h"
 #include "line_calibration_coordinator.h"
 #include "line_parameter_sync.h"
 #include "line_sensor_calibration.h"
@@ -295,7 +298,7 @@ void LineFollowing_Update(void)
     }
 }
 
-uint8_t LineFollowing_CalibrationStart(line_sensor_calibration_surface_t surface, uint16_t samples)
+uint8_t LineFollowingInternal_CalibrationStart(line_sensor_calibration_surface_t surface, uint16_t samples)
 {
     uint8_t                   started;
     line_calibration_model_t  next;
@@ -337,7 +340,7 @@ uint8_t LineFollowing_RequestCalibration(line_sensor_calibration_surface_t surfa
     return accepted;
 }
 
-uint8_t LineFollowing_TakeCalibrationRequest(line_following_calibration_request_t *request)
+uint8_t LineFollowingInternal_TakeCalibrationRequest(line_following_calibration_request_t *request)
 {
     platform_critical_state_t critical;
     uint8_t                   available = 0U;
@@ -357,7 +360,7 @@ uint8_t LineFollowing_TakeCalibrationRequest(line_following_calibration_request_
     return available;
 }
 
-uint8_t LineFollowing_ResolveCalibrationRequest(uint8_t authorized)
+uint8_t LineFollowingInternal_ResolveCalibrationRequest(uint8_t authorized)
 {
     line_following_calibration_request_t request;
     platform_critical_state_t            critical;
@@ -369,7 +372,7 @@ uint8_t LineFollowing_ResolveCalibrationRequest(uint8_t authorized)
     PlatformCritical_Exit(critical);
     if (pending != 0U && authorized != 0U)
     {
-        authorized = LineFollowing_CalibrationStart(request.surface, request.samples);
+        authorized = LineFollowingInternal_CalibrationStart(request.surface, request.samples);
     }
     else
     {
@@ -384,7 +387,7 @@ uint8_t LineFollowing_ResolveCalibrationRequest(uint8_t authorized)
     return authorized;
 }
 
-uint8_t LineFollowing_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHANNELS], uint8_t *active_low)
+uint8_t LineFollowingInternal_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHANNELS], uint8_t *active_low)
 {
     line_calibration_model_t  snapshot;
     platform_critical_state_t critical = PlatformCritical_Enter();
@@ -394,7 +397,7 @@ uint8_t LineFollowing_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHAN
     return LineSensorCalibration_Apply(&snapshot, thresholds, active_low);
 }
 
-uint8_t LineFollowing_CalibrationApplyToRam(void)
+uint8_t LineFollowing_ApplyCalibration(void)
 {
     uint16_t                  thresholds[LINE_CALIBRATION_CHANNELS];
     uint8_t                   active_low;
@@ -462,17 +465,17 @@ void LineFollowing_CalibrationCancel(void)
     PlatformCritical_Exit(critical);
 }
 
-uint8_t LineFollowing_CalibrationBeginCoordinated(line_sensor_calibration_surface_t surface, uint16_t samples)
+uint8_t LineFollowingInternal_CalibrationBeginCoordinated(line_sensor_calibration_surface_t surface, uint16_t samples)
 {
     return LineCalibrationCoordinator_Begin(surface, samples);
 }
 
-uint8_t LineFollowing_CalibrationCommit(void)
+uint8_t LineFollowingInternal_CalibrationCommit(void)
 {
     return LineCalibrationCoordinator_CommitToFlash();
 }
 
-void LineFollowing_SetCalibrationPorts(const line_following_calibration_ports_t *ports)
+void LineFollowing_ConfigureCalibrationPorts(const line_following_calibration_ports_t *ports)
 {
     LineCalibrationCoordinator_SetPorts(ports);
 }

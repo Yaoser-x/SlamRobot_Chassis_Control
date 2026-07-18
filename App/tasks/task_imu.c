@@ -2,6 +2,7 @@
 
 #include "robot_config.h"
 #include "state_estimation_service.h"
+#include "state_estimation_composition.h"
 #include "platform_task_event.h"
 #include "platform_time.h"
 #include "system_monitoring_service.h"

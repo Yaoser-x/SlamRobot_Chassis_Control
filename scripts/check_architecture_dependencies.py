@@ -28,7 +28,7 @@ FINAL_SERVICE_DEPENDENCIES = {
     "power_management": {"state_estimation", "parameter_management"},
     "safety_management": {"power_management", "state_estimation", "system_monitoring", "command_management"},
     "command_management": {"parameter_management"},
-    "teleoperation": {"state_estimation", "line_following", "command_management", "parameter_management"},
+    "teleoperation": {"state_estimation", "command_management"},
     "line_following": {"safety_management", "command_management", "parameter_management"},
     "communication": {"command_management", "line_following", "safety_management", "system_monitoring"},
     "parameter_management": set(),
@@ -222,6 +222,74 @@ def cmake_dependency_errors(root: Path) -> list[str]:
     return errors
 
 
+MAINTENANCE_ALLOWED_CALLER = {"App/debug", "App/composition", "App/adapters", "tests"}
+COMPOSITION_ALLOWED_CALLER = {"App/composition"}
+COMPOSITION_ALLOWED_FILES = {"App/app_init.c", "App/tasks/task_imu.c", "App/tasks/task_safety.c"}
+
+DANGEROUS_SERVICE_KEYWORDS = re.compile(
+    r"\b(?:[A-Z][a-z]+_)"
+    r"(?:Raw|OpenLoopTest|Probe(?:Now)?|Flash|Persistence"
+    r"|ConfigurePorts|TakeRequest|Commit|Build"
+    r"|BeginCalibration|EndCalibration|CancelCalibration"
+    r"|EmergencyStop|CancelTest"
+    r")\b"
+)
+
+
+def maintenance_header_errors(root: Path, _header_index: dict, _internal_index: dict) -> list[str]:
+    errors: list[str] = []
+    for header in sorted((root / "Service").glob("*/*_maintenance.h")):
+        service = header.parent.name
+        for path in sorted(root.rglob("*.c")):
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            without_comments = LINE_COMMENT.sub(" ", BLOCK_COMMENT.sub(" ", raw))
+            if f'"{header.relative_to(root).as_posix()}"' not in without_comments and f"<{header.relative_to(root).as_posix()}>" not in without_comments:
+                continue
+            relative = path.relative_to(root).as_posix()
+            if path.parts[0] == "Service" and path.parts[1] == service:
+                continue
+            if any(str(path).startswith(str(root / prefix).replace("\\", "/")) for prefix in MAINTENANCE_ALLOWED_CALLER):
+                continue
+            if relative.startswith("tests/"):
+                continue
+            errors.append(f"{relative}: includes {header.name} (maintenance headers restricted to Service owner / App/debug / App/composition / App/adapters / tests)")
+    return errors
+
+
+def composition_header_errors(root: Path, _header_index: dict, _internal_index: dict) -> list[str]:
+    errors: list[str] = []
+    for header in sorted((root / "Service").glob("*/*_composition.h")):
+        service = header.parent.name
+        for path in sorted(root.rglob("*.c")):
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            without_comments = LINE_COMMENT.sub(" ", BLOCK_COMMENT.sub(" ", raw))
+            if f'"{header.relative_to(root).as_posix()}"' not in without_comments and f"<{header.relative_to(root).as_posix()}>" not in without_comments:
+                continue
+            relative = path.relative_to(root).as_posix()
+            if path.parts[0] == "Service" and path.parts[1] == service:
+                continue
+            if relative in COMPOSITION_ALLOWED_FILES:
+                continue
+            if any(str(path).startswith(str(root / prefix).replace("\\", "/")) for prefix in COMPOSITION_ALLOWED_CALLER):
+                continue
+            if relative.startswith("tests/"):
+                continue
+            errors.append(f"{relative}: includes {header.name} (composition headers restricted to Service owner / App/composition / specified tasks / tests)")
+    return errors
+
+
+def service_header_keyword_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    for header in sorted((root / "Service").glob("*/*_service.h")):
+        raw = header.read_text(encoding="utf-8", errors="replace")
+        code = strip_non_code(raw)
+        for match in DANGEROUS_SERVICE_KEYWORDS.finditer(code):
+            line = code.count("\n", 0, match.start()) + 1
+            relative = header.relative_to(root).as_posix()
+            errors.append(f"{relative}:{line}: public service header exposes dangerous interface keyword {match.group(0)}")
+    return errors
+
+
 def analyze(root: Path, final: bool = True) -> list[str]:
     root = Path(root).resolve()
     errors: list[str] = []
@@ -299,6 +367,9 @@ def analyze(root: Path, final: bool = True) -> list[str]:
 
     errors.extend(final_service_graph_errors(root))
     errors.extend(cmake_dependency_errors(root))
+    errors.extend(maintenance_header_errors(root, header_index, internal_header_index))
+    errors.extend(composition_header_errors(root, header_index, internal_header_index))
+    errors.extend(service_header_keyword_errors(root))
     return sorted(set(errors))
 
 
