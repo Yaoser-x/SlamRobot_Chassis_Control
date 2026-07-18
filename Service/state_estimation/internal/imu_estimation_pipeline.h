@@ -10,6 +10,8 @@
 void ImuEstimationPipeline_Init(void);
 /** Reset runtime estimation and calibration scheduling while preserving the applied calibration model. */
 void ImuEstimationPipeline_ResetRuntime(uint32_t now_ms);
+/** Arm one automatic calibration cycle while preserving the applied calibration model as its bias seed. */
+void ImuEstimationPipeline_ArmAutomaticCalibration(uint32_t now_ms, state_estimation_imu_status_t *status);
 /** @brief Explicitly map device facts and estimate calibrated robot attitude. */
 void    ImuEstimationPipeline_Process(const bmi270_sample_t         *sample,
                                       const bmi270_driver_state_t   *device,

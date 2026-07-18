@@ -10,12 +10,10 @@ extern "C"
 {
 #endif
 
-    void StateEstimation_InitCalibrationCoordinator(const state_estimation_calibration_ports_t *ports,
-                                                     uint8_t                                     first_save_needed,
-                                                     uint8_t                                     persist_imu_calibration,
-                                                     uint8_t                                     persist_current_zero);
-    void StateEstimation_ServiceCalibrationCoordinator(uint32_t now_ms);
-    void StateEstimation_ServiceCalibrationPersistence(uint32_t now_ms);
+    void StateEstimation_InitCalibrationCoordinator(void);
+    uint8_t
+    StateEstimation_ServiceCalibrationCoordinator(uint32_t                                           now_ms,
+                                                  const state_estimation_calibration_motion_facts_t *motion_facts);
 
 #ifdef __cplusplus
 }

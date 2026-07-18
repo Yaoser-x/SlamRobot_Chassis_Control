@@ -84,6 +84,17 @@ static void StatusLedDriver_SelectParams(void)
             }
             break;
         }
+        case STATUS_LED_DRIVER_CAL_FAILED:
+            if (led_mode_elapsed_ms >= 2000U)
+            {
+                StatusLedDriver_SetMode(STATUS_LED_DRIVER_NORMAL);
+            }
+            else
+            {
+                led_period  = 200U;
+                led_on_time = 50U;
+            }
+            break;
         case STATUS_LED_DRIVER_NORMAL:
         default:
             led_period  = 1000U;

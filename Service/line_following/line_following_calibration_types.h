@@ -24,11 +24,12 @@ typedef struct
     uint8_t  fail_mask;
 } line_sensor_calibration_t;
 
-typedef struct
+typedef enum
 {
-    uint8_t (*begin_maintenance)(void);
-    void (*end_maintenance)(void);
-    uint8_t (*save_parameters)(void);
-} line_following_calibration_ports_t;
+    LINE_CALIBRATION_APPLY_OK = 0,
+    LINE_CALIBRATION_APPLY_INCOMPLETE,
+    LINE_CALIBRATION_APPLY_LOW_SEPARATION,
+    LINE_CALIBRATION_APPLY_PARAMETER_REJECTED
+} line_calibration_apply_result_t;
 
 #endif /* LINE_FOLLOWING_CALIBRATION_TYPES_H */

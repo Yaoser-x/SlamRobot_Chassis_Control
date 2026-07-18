@@ -20,11 +20,13 @@ extern "C"
     /** Request a calibration operation through the maintenance gateway. */
     uint8_t LineFollowing_RequestCalibration(line_sensor_calibration_surface_t surface, uint16_t samples);
     /** Read the current calibration snapshot. */
-    void    LineFollowing_CalibrationGet(line_sensor_calibration_t *calibration);
+    void LineFollowing_CalibrationGet(line_sensor_calibration_t *calibration);
     /** Apply the completed calibration to the runtime parameter store. */
-    uint8_t LineFollowing_ApplyCalibration(void);
-    /** Cancel any in-progress calibration and release resources. */
-    void    LineFollowing_CalibrationCancel(void);
+    line_calibration_apply_result_t LineFollowing_ApplyCalibration(void);
+    /** Stop pending collection while preserving collected diagnostics and completed surfaces. */
+    void LineFollowing_CalibrationAbort(void);
+    /** Cancel calibration and clear all collected data. */
+    void LineFollowing_CalibrationCancel(void);
 
 #ifdef __cplusplus
 }

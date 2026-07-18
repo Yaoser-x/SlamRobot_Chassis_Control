@@ -1,6 +1,8 @@
 #include "app_tasks.h"
 
+#include "imu_calibration_orchestrator.h"
 #include "robot_config.h"
+#include "system_publish_snapshot_collector.h"
 #include "system_publish_snapshot_service.h"
 #include "command_management_service.h"
 #include "platform_time.h"
@@ -11,17 +13,23 @@
 #include "safety_management_service.h"
 #include "system_monitoring_service.h"
 #include "state_estimation_service.h"
-#include "state_estimation_composition.h"
 
 void Task_Safety(void *argument)
 {
-    uint32_t next_wake = PlatformTime_TaskNowMs();
+    uint32_t                                   next_wake      = PlatformTime_TaskNowMs();
+    const robot_config_t                      *config         = RobotConfig_GetDefault();
+    const communication_publish_model_config_t publish_config = {
+        .host_timeout_ms   = config->display.rpi_timeout_ms,
+        .esp12f_timeout_ms = config->command.esp12f_timeout_ms,
+        .line_timeout_ms   = config->display.line_timeout_ms,
+    };
     (void)argument;
     for (;;)
     {
-        uint32_t      now_ms = PlatformTime_TaskNowMs();
-        uint32_t      motor_hb;
-        param_model_t params;
+        uint32_t                      now_ms = PlatformTime_TaskNowMs();
+        uint32_t                      motor_hb;
+        param_model_t                 params;
+        communication_publish_model_t publish_snapshot;
 
         (void)ParameterManagement_GetSnapshot(&params);
         SafetyManagement_SetCurrentThresholds(params.current_observe_a,
@@ -29,7 +37,8 @@ void Task_Safety(void *argument)
                                               params.current_fault_debounce_ms);
         SafetyManagement_Update();
         PostService_UpdateRuntime(now_ms);
-        SystemPublishSnapshot_Update(now_ms);
+        AppSystemPublishSnapshot_Collect(now_ms, &publish_config, &publish_snapshot);
+        SystemPublishSnapshot_Publish(&publish_snapshot);
         PlatformResetTrace_UpdateControl((uint8_t)CommandManagement_GetActiveSource(now_ms),
                                          SafetyManagement_IsEmergencyStop(),
                                          SafetyManagement_IsFaultStop());
@@ -39,7 +48,7 @@ void Task_Safety(void *argument)
         {
             PlatformWatchdog_Feed();
         }
-        StateEstimation_ServiceCalibrationPersistence(now_ms);
+        ImuCalibrationOrchestrator_ProcessPersistence(now_ms);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_SAFETY,
                                     &next_wake,
                                     RobotConfig_GetDefault()->tasks[APP_TASK_SAFETY].period_ms);

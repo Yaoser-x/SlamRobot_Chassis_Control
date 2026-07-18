@@ -1,8 +1,7 @@
 #include "debug_cmd_line.h"
 
-#include "motion_control_service.h"
-#include "motion_control_maintenance.h"
 #include "debug_console_writer.h"
+#include "line_calibration_orchestrator.h"
 #include "line_following_service.h"
 #include "line_following_maintenance.h"
 #include "line_sensor_driver.h"
@@ -77,13 +76,14 @@ static void DebugCmdLine_PrintCalibration(void)
 
     LineFollowing_CalibrationGet(&calibration);
     LINE_LOG("INFO",
-             "linecal ready=0x%02X collecting=%u surface=%u n=%u/%u fail=0x%02X",
+             "linecal ready=0x%02X collecting=%u surface=%u n=%u/%u fail=0x%02X result=%u",
              calibration.ready_mask,
              calibration.collecting,
              calibration.surface,
              calibration.count[calibration.surface],
              calibration.target_samples,
-             calibration.fail_mask);
+             calibration.fail_mask,
+             (unsigned)LineCalibrationOrchestrator_GetLastResult());
     for (uint8_t channel = 0U; channel < LINE_CALIBRATION_CHANNELS; ++channel)
     {
         uint16_t floor_mean =
@@ -108,20 +108,30 @@ static void DebugCmdLine_PrintCalibration(void)
 
 static void DebugCmdLine_ApplyCalibration(void)
 {
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    app_line_calibration_result_t result = LineCalibrationOrchestrator_ApplyManual();
+
+    switch (result)
     {
-        LINE_LOG("WARN", "linecal apply rejected: chassis not stationary");
-        return;
+        case APP_LINE_CALIBRATION_RESULT_OK:
+            LINE_LOG("INFO", "linecal applied to RAM; run set save to persist");
+            break;
+        case APP_LINE_CALIBRATION_RESULT_MAINTENANCE_DENIED:
+            LINE_LOG("WARN", "linecal apply rejected: chassis not stationary");
+            break;
+        case APP_LINE_CALIBRATION_RESULT_INCOMPLETE:
+            LINE_LOG("WARN", "linecal apply rejected: calibration incomplete");
+            break;
+        case APP_LINE_CALIBRATION_RESULT_LOW_SEPARATION:
+            LINE_LOG("WARN", "linecal apply rejected: low sensor separation");
+            break;
+        case APP_LINE_CALIBRATION_RESULT_PARAMETER_REJECTED:
+            LINE_LOG("WARN", "linecal apply rejected: parameter validation failed");
+            break;
+        case APP_LINE_CALIBRATION_RESULT_BUSY:
+        default:
+            LINE_LOG("WARN", "linecal apply rejected: another calibration session owns the lease");
+            break;
     }
-    if (LineFollowing_ApplyCalibration() != 0U)
-    {
-        LINE_LOG("INFO", "linecal applied to RAM; run set save to persist");
-    }
-    else
-    {
-        LINE_LOG("WARN", "linecal apply rejected: incomplete or low separation");
-    }
-    MotionControl_EndMaintenance();
 }
 
 static void DebugCmdLine_HandleCalibration(const char *line)
@@ -137,9 +147,19 @@ static void DebugCmdLine_HandleCalibration(const char *line)
     {
         line_sensor_calibration_surface_t surface =
             (strcmp(action, "floor") == 0) ? LINE_CALIBRATION_SURFACE_FLOOR : LINE_CALIBRATION_SURFACE_LINE;
-        if (LineFollowing_RequestCalibration(surface, (uint16_t)samples) != 0U)
+        app_line_calibration_result_t result =
+            LineCalibrationOrchestrator_Request(APP_LINE_CALIBRATION_MODE_MANUAL, surface, (uint16_t)samples);
+        if (result == APP_LINE_CALIBRATION_RESULT_OK)
         {
             LINE_LOG("INFO", "linecal %s collecting %u samples", action, samples);
+        }
+        else if (result == APP_LINE_CALIBRATION_RESULT_MAINTENANCE_DENIED)
+        {
+            LINE_LOG("WARN", "linecal rejected: chassis not stationary");
+        }
+        else
+        {
+            LINE_LOG("WARN", "linecal rejected: calibration session busy");
         }
     }
     else if (strcmp(action, "show") == 0)
@@ -152,7 +172,7 @@ static void DebugCmdLine_HandleCalibration(const char *line)
     }
     else if (strcmp(action, "cancel") == 0)
     {
-        LineFollowing_CalibrationCancel();
+        LineCalibrationOrchestrator_Cancel();
         LINE_LOG("INFO", "linecal cancelled");
     }
     else

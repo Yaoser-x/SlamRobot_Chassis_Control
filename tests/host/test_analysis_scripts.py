@@ -74,6 +74,33 @@ class AnalysisTests(unittest.TestCase):
             errors = architecture.analyze(root)
             self.assertTrue(any("public Service header leaks hardware type" in error for error in errors), errors)
 
+    def test_architecture_rejects_public_service_callback_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "Service/example/example_service.h",
+                "typedef void (*example_provider_t)(unsigned value);\n",
+            )
+            errors = architecture.analyze(root)
+            self.assertTrue(any("public Service callback port is forbidden" in error for error in errors), errors)
+
+    def test_architecture_rejects_imported_service_callback_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "Service/example/example_service.h",
+                '#include "external_callbacks.h"\n'
+                "void Example_Configure(external_provider_t provider);\n",
+            )
+            errors = architecture.analyze(root)
+            self.assertTrue(any("public Service callback alias is forbidden" in error for error in errors), errors)
+
+    def test_hil_imu_success_requires_terminal_state(self):
+        self.assertTrue(hil_imu.calibration_succeeded("IMU acal=4,1,1"))
+        self.assertFalse(hil_imu.calibration_succeeded("IMU acal=3,500,1"))
+
     def test_architecture_rejects_forbidden_top_level_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

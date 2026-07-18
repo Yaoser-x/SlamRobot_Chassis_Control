@@ -15,9 +15,10 @@ void Task_Ps2(void *argument)
     for (;;)
     {
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_PS2, PlatformTime_TaskNowMs());
-        teleoperation_action_t action = {0};
-        action.line_tracking_enabled = LineFollowing_IsEnabled();
-        Teleoperation_Update(&action);
+        teleoperation_action_t action                = {0};
+        uint8_t                line_tracking_enabled = LineFollowing_IsEnabled();
+
+        Teleoperation_Update(line_tracking_enabled, &action);
         OperatorActionRouter_Handle(&action);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_PS2,
                                     &next_wake,

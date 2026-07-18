@@ -21,6 +21,7 @@ RTOS_LINE = re.compile(
     r"^RTOS\s+(?P<task>\w+)\s+.*?timeout=(?P<timeout>\d+)",
     re.MULTILINE,
 )
+IMU_CALIBRATION_SUCCESS = re.compile(r"acal=4,\d+,1")
 
 
 def timeout_snapshot(text: str) -> dict[str, int]:
@@ -32,6 +33,10 @@ def timeout_snapshot(text: str) -> dict[str, int]:
     if missing:
         raise AssertionError(f"missing RTOS task lines: {', '.join(missing)}")
     return {task: values[task] for task in MONITORED_TASKS}
+
+
+def calibration_succeeded(text: str) -> bool:
+    return IMU_CALIBRATION_SUCCESS.search(text) is not None
 
 
 def main() -> int:
@@ -62,7 +67,7 @@ def main() -> int:
         after = timeout_snapshot(after_text)
 
         status_text = send_command(port, "status", args.timeout)
-        if not re.search(r"acal=3,\d+,1", status_text):
+        if not calibration_succeeded(status_text):
             raise AssertionError("IMU calibration did not finish before timeout")
 
     regressions = {

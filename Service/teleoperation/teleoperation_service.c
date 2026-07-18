@@ -273,7 +273,7 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     return 1U;
 }
 
-void Teleoperation_Update(teleoperation_action_t *action)
+void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t *action)
 {
     ps2_controller_driver_sample_t sample;
     ps2_control_service_state_t    next_state;
@@ -290,12 +290,13 @@ void Teleoperation_Update(teleoperation_action_t *action)
 
     if (action != 0)
     {
-        *action = (teleoperation_action_t){TELEOPERATION_ACTION_NONE, now_ms, input_generation, 0U};
+        *action = (teleoperation_action_t){TELEOPERATION_ACTION_NONE, now_ms, input_generation, line_tracking_enabled};
     }
 
     if (Ps2ControllerDriver_ReadSample(&sample) == 0U)
     {
         Ps2ControlService_CopyState(&next_state, &ps2_state);
+        next_state.line_tracking_enabled = line_tracking_enabled;
         next_state.rx_fail_count++;
         if (consecutive_read_failures < teleoperation_config.offline_fail_limit)
         {
@@ -464,7 +465,7 @@ void Teleoperation_Update(teleoperation_action_t *action)
     next_state.heading_accumulated_deg = heading_control.accumulated_delta_deg;
     next_state.linear_x                = linear_x;
     next_state.angular_z               = angular_z;
-    next_state.line_tracking_enabled   = (action != 0) ? action->line_tracking_enabled : 0U;
+    next_state.line_tracking_enabled   = line_tracking_enabled;
     next_state.generation++;
     Ps2ControlService_CopyState(&ps2_state, &next_state);
 

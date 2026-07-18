@@ -1,5 +1,5 @@
 #include "system_publish_snapshot_service.h"
-#include "system_publish_snapshot_provider.h"
+#include "system_publish_snapshot_collector.h"
 #include "power_on_self_test_service.h"
 
 #include "command_management_service.h"
@@ -190,10 +190,11 @@ int main(void)
     };
 
     SeedInputs();
-    assert(SystemPublishSnapshot_Init(&config, AppSystemPublishSnapshot_Collect) != 0U);
+    SystemPublishSnapshot_Init();
     assert(SystemPublishSnapshot_Get(0) == 0U);
     assert(SystemPublishSnapshot_Get(&snapshot) == 0U);
-    SystemPublishSnapshot_Update(1000U);
+    AppSystemPublishSnapshot_Collect(1000U, &config, &snapshot);
+    SystemPublishSnapshot_Publish(&snapshot);
     assert(SystemPublishSnapshot_Get(&snapshot) == 1U);
     assert(snapshot.generation == 1U);
     assert(snapshot.chassis.motor_target_mps[0] == 0.5f);
@@ -216,7 +217,8 @@ int main(void)
     fake_upper_last_rx_timestamp_ms = 1U;
     fake_esp.boot_mode_download     = 1U;
     fake_line.sensor_timestamp_ms   = 1U;
-    SystemPublishSnapshot_Update(2000U);
+    AppSystemPublishSnapshot_Collect(2000U, &config, &snapshot);
+    SystemPublishSnapshot_Publish(&snapshot);
     assert(SystemPublishSnapshot_Get(&snapshot) == 2U);
     assert(snapshot.modules.upper_online == 0U);
     assert(snapshot.modules.esp12f_online == 0U);

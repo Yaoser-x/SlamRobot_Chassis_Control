@@ -1,8 +1,8 @@
 #include "app_tasks.h"
 
+#include "imu_calibration_orchestrator.h"
 #include "robot_config.h"
 #include "state_estimation_service.h"
-#include "state_estimation_composition.h"
 #include "platform_task_event.h"
 #include "platform_time.h"
 #include "system_monitoring_service.h"
@@ -19,6 +19,6 @@ void Task_Imu(void *argument)
         (void)StateEstimation_RunImuCycle();
         now_ms = PlatformTime_TaskNowMs();
         SystemMonitoring_Heartbeat(SYSTEM_MONITORING_TASK_IMU, now_ms);
-        StateEstimation_ServiceCalibrationCoordinator(now_ms);
+        ImuCalibrationOrchestrator_ProcessSample(now_ms);
     }
 }

@@ -160,7 +160,7 @@ add_test(NAME line_sensor_driver COMMAND test_line_sensor_driver)
 
 add_executable(test_line_control_service
     test_line_control_service.c
-    ../../Service/line_following/internal/line_calibration_coordinator.c
+    ../../App/composition/line_calibration_orchestrator.c
     ../../Service/line_following/internal/line_parameter_sync.c
     ../../Service/line_following/line_following_service.c
     ../../Algorithm/calibration/line_sensor_calibration.c
@@ -170,6 +170,7 @@ target_include_directories(test_line_control_service PRIVATE
     .
     ../../App
     ../../App/config
+    ../../App/composition
     ../../BSP
     ../../BSP/flash
     ../../BSP/imu
@@ -632,6 +633,7 @@ add_test(NAME app_config COMMAND test_app_config)
 add_executable(test_foundation_services
     test_foundation_services.c
     ../../App/config/robot_config.c
+    ../../App/composition/imu_calibration_orchestrator.c
     ../../Service/state_estimation/internal/imu_calibration_coordinator.c
     ../../Service/state_estimation/internal/imu_quality_monitor.c
     ../../Service/parameter_management/parameter_management_service.c
@@ -649,6 +651,7 @@ target_include_directories(test_foundation_services PRIVATE
     .
     fakes/service
     ../../App
+    ../../App/composition
     ../../BSP
     ../../BSP/adc
     ../../BSP/encoder
@@ -797,7 +800,7 @@ add_test(
 
 add_executable(test_communication_publish_model
     test_communication_publish_model.c
-    ../../App/composition/system_publish_snapshot_provider.c
+    ../../App/composition/system_publish_snapshot_collector.c
     ../../Service/system_monitoring/internal/system_publish_snapshot.c
 )
 target_include_directories(test_communication_publish_model PRIVATE

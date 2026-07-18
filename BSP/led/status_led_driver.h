@@ -17,7 +17,8 @@ extern "C"
         STATUS_LED_DRIVER_ESTOP       = 4,
         STATUS_LED_DRIVER_CAL_RUNNING = 5,
         STATUS_LED_DRIVER_CAL_OK      = 6,
-        STATUS_LED_DRIVER_CAL_APPLIED = 7
+        STATUS_LED_DRIVER_CAL_APPLIED = 7,
+        STATUS_LED_DRIVER_CAL_FAILED  = 8
     } status_led_driver_mode_t;
 
     void StatusLedDriver_Init(void);

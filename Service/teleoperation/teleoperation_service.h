@@ -12,11 +12,10 @@ extern "C"
 {
 #endif
 
-    uint8_t  Teleoperation_ValidateConfig(const teleoperation_config_t *config);
-    uint8_t  Teleoperation_Init(const teleoperation_config_t *config);
-    /** @brief Execute one Teleoperation cycle. Writes at most one action to *action. Speed commands are submitted
-     * internally. */
-    void     Teleoperation_Update(teleoperation_action_t *action);
+    uint8_t Teleoperation_ValidateConfig(const teleoperation_config_t *config);
+    uint8_t Teleoperation_Init(const teleoperation_config_t *config);
+    /** @brief Execute one Teleoperation cycle from App-provided facts and emit at most one action. */
+    void     Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t *action);
     uint32_t Teleoperation_GetStatus(teleoperation_status_t *status);
 
 #ifdef __cplusplus

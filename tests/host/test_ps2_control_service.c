@@ -181,9 +181,9 @@ void LineFollowing_CalibrationCancel(void)
 {
     fake_cal = (line_sensor_calibration_t){0};
 }
-uint8_t LineFollowing_ApplyCalibration(void)
+line_calibration_apply_result_t LineFollowing_ApplyCalibration(void)
 {
-    return fake_cal_build_result;
+    return (fake_cal_build_result != 0U) ? LINE_CALIBRATION_APPLY_OK : LINE_CALIBRATION_APPLY_INCOMPLETE;
 }
 void StatusLedDriver_SetMode(status_led_driver_mode_t mode)
 {
@@ -261,8 +261,7 @@ static void test_center_submits_zero_or_yields_to_line(void)
     fake_sample.right_x = 0U;
     fake_tick_ms += 20U;
     Ps2ControlService_Update();
-    require_int(set_command_count >= 2UL,
-                "PS2 idle continues normally");
+    require_int(set_command_count >= 2UL, "PS2 idle continues normally");
 }
 
 static void test_heading_button_mapping(void)
@@ -439,12 +438,37 @@ static void test_status_generation_is_monotonic_on_whole_publish(void)
 
     reset_fake();
     (void)Teleoperation_GetStatus(&before);
-    { teleoperation_action_t a = {0};
-    Teleoperation_Update(&a); }
+    {
+        teleoperation_action_t a = {0};
+        Teleoperation_Update(fake_line_enabled, &a);
+    }
     (void)Teleoperation_GetStatus(&after);
     require_int(after.generation > before.generation, "teleoperation status generation advances on update");
     require_int(after.online != 0U && after.left_x == fake_sample.left_x && after.right_x == fake_sample.right_x,
                 "teleoperation status publishes one complete PS2 frame");
+}
+
+static void test_line_state_is_an_input_fact_on_every_path(void)
+{
+    ps2_control_service_state_t state;
+
+    reset_fake();
+    fake_line_enabled = 1U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.line_tracking_enabled != 0U, "successful PS2 cycle publishes App-provided line state");
+
+    reset_fake();
+    fake_line_enabled = 1U;
+    fake_read_ok      = 0U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.line_tracking_enabled != 0U, "short read failure publishes App-provided line state");
+    Ps2ControlService_Update();
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.online == 0U && state.line_tracking_enabled != 0U,
+                "offline transition preserves App-provided line state");
 }
 
 int main(void)
@@ -460,6 +484,7 @@ int main(void)
     test_maintenance_rejects_new_heading_macro();
     test_heading_uses_generation_from_input_sample();
     test_status_generation_is_monotonic_on_whole_publish();
+    test_line_state_is_an_input_fact_on_every_path();
     (void)printf("PASS: PS2 control host tests\n");
     return 0;
 }

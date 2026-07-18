@@ -68,6 +68,11 @@ PUBLIC_SERVICE_HARDWARE_TYPE = re.compile(
     r"\b(?:HAL_[A-Za-z0-9_]*TypeDef|os[A-Za-z0-9_]*_t|"
     r"[A-Za-z0-9_]*(?:driver|device|handle)[A-Za-z0-9_]*_t)\b"
 )
+PUBLIC_SERVICE_CALLBACK = re.compile(r"\(\s*\*\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*\(")
+PUBLIC_SERVICE_CALLBACK_ALIAS = re.compile(
+    r"\b(?:[A-Za-z_][A-Za-z0-9_]*_)?(?:callback|provider|ports?|fn)_t\b",
+    re.IGNORECASE,
+)
 
 OLD_SYMBOLS = re.compile(
     r"\b(?:ChassisTasks_|ControlManager_|SystemMonitor_|ParamStore_)|"
@@ -290,6 +295,21 @@ def service_header_keyword_errors(root: Path) -> list[str]:
     return errors
 
 
+def service_public_callback_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    for header in sorted((root / "Service").glob("*/*.h")):
+        code = strip_non_code(header.read_text(encoding="utf-8", errors="replace"))
+        for match in PUBLIC_SERVICE_CALLBACK.finditer(code):
+            line = code.count("\n", 0, match.start()) + 1
+            relative = header.relative_to(root).as_posix()
+            errors.append(f"{relative}:{line}: public Service callback port is forbidden; App must orchestrate")
+        for match in PUBLIC_SERVICE_CALLBACK_ALIAS.finditer(code):
+            line = code.count("\n", 0, match.start()) + 1
+            relative = header.relative_to(root).as_posix()
+            errors.append(f"{relative}:{line}: public Service callback alias is forbidden; App must orchestrate")
+    return errors
+
+
 def analyze(root: Path, final: bool = True) -> list[str]:
     root = Path(root).resolve()
     errors: list[str] = []
@@ -367,6 +387,7 @@ def analyze(root: Path, final: bool = True) -> list[str]:
 
     errors.extend(final_service_graph_errors(root))
     errors.extend(cmake_dependency_errors(root))
+    errors.extend(service_public_callback_errors(root))
     errors.extend(maintenance_header_errors(root, header_index, internal_header_index))
     errors.extend(composition_header_errors(root, header_index, internal_header_index))
     errors.extend(service_header_keyword_errors(root))

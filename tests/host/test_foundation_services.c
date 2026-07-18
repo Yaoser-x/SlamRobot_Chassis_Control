@@ -1,5 +1,5 @@
 #include "robot_config.h"
-#include "imu_calibration_coordinator.h"
+#include "imu_calibration_orchestrator.h"
 #include "power_adc_driver.h"
 #include "motor_hardware_layout.h"
 #include "wheel_encoder_driver.h"
@@ -37,6 +37,7 @@ static uint8_t                         fake_zero_stationary;
 static uint32_t                        external_call_in_critical_count;
 static uint32_t                        persistence_save_count;
 static flash_param_bundle_t            last_saved_bundle;
+static flash_param_status_t            fake_persistence_save_status;
 
 static void require_int(int condition, const char *message)
 {
@@ -181,6 +182,26 @@ void ImuEstimationPipeline_ResetRuntime(uint32_t now_ms)
     fake_imu.last_update_ms     = 0UL;
     fake_imu.sensor_time        = 0UL;
     fake_imu.filter_initialized = 0U;
+}
+
+void ImuEstimationPipeline_ArmAutomaticCalibration(uint32_t now_ms, state_estimation_imu_status_t *status)
+{
+    record_external_call();
+    ImuEstimationPipeline_ResetRuntime(now_ms);
+    fake_imu.gyro_calibrated      = 0U;
+    status->gyro_auto_cal_enabled = 1U;
+    status->gyro_calibrated       = 0U;
+    status->gyro_auto_cal_state =
+        (status->enabled != 0U) ? STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE : STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED;
+    status->gyro_auto_cal_attempts    = 0U;
+    status->gyro_auto_cal_last_result = 0U;
+    status->gyro_cal_fail_reason      = 0U;
+    status->gyro_cal_fail_axis        = 0U;
+    status->gyro_cal_sample_count     = 0U;
+    status->quaternion[0]             = 1.0f;
+    status->roll_deg                  = 0.0f;
+    status->pitch_deg                 = 0.0f;
+    status->yaw_deg                   = 0.0f;
 }
 
 void ImuEstimationPipeline_Init(void)
@@ -342,7 +363,7 @@ flash_param_status_t ParamPersistence_Save(const flash_param_bundle_t *bundle)
     record_external_call();
     last_saved_bundle = *bundle;
     persistence_save_count++;
-    return FLASH_PARAM_STATUS_OK;
+    return fake_persistence_save_status;
 }
 
 flash_param_status_t ParamPersistence_Load(flash_param_bundle_t *bundle)
@@ -350,39 +371,6 @@ flash_param_status_t ParamPersistence_Load(flash_param_bundle_t *bundle)
     (void)bundle;
     return FLASH_PARAM_STATUS_EMPTY;
 }
-
-static uint8_t fake_get_calibration_motion(int16_t output_permille[4], uint8_t *enabled_mask)
-{
-    motion_control_status_t status;
-
-    (void)MotionControl_GetStatus(&status);
-    for (uint8_t index = 0U; index < 4U; ++index)
-    {
-        output_permille[index] = status.motor_effective_output_permille[index];
-    }
-    *enabled_mask = status.motor_enabled_mask;
-    return 1U;
-}
-
-static uint8_t fake_begin_calibration_maintenance(void)
-{
-    return (MotionControl_BeginMaintenance() == MOTION_CONTROL_MAINTENANCE_OK) ? 1U : 0U;
-}
-
-static uint8_t fake_persist_calibration(const imu_calibration_t *calibration, uint8_t persist_current_zero)
-{
-    ParameterManagement_SetCurrentZeroPersistence(persist_current_zero);
-    ParameterManagement_SetImuCalibration(calibration);
-    return ParameterManagement_Save();
-}
-
-static const state_estimation_calibration_ports_t fake_calibration_ports = {
-    .get_motion_facts             = fake_get_calibration_motion,
-    .begin_maintenance            = fake_begin_calibration_maintenance,
-    .end_maintenance              = MotionControl_EndMaintenance,
-    .persist                      = fake_persist_calibration,
-    .set_current_zero_persistence = ParameterManagement_SetCurrentZeroPersistence,
-};
 
 static void test_parameter_owner_uses_injected_factory_and_monotonic_generation(void)
 {
@@ -449,8 +437,10 @@ static void test_state_generations_and_freshness_are_independent(void)
 
 static void test_state_estimation_owns_imu_lifecycle(void)
 {
+    imu_calibration_t                 calibration;
     state_estimation_imu_status_t     status;
     state_estimation_imu_diagnostic_t diagnostic;
+    uint32_t                          generation;
 
     require_int(StateEstimation_SetImuEnabled(0U) != 0U, "service disables IMU");
     (void)StateEstimation_GetImu(&status);
@@ -477,6 +467,22 @@ static void test_state_estimation_owns_imu_lifecycle(void)
     require_int(fake_imu_reentrant_probe_result == 0U,
                 "concurrent lifecycle operation is rejected while update owns IMU");
     fake_imu_reentrant_probe = 0U;
+
+    ParameterImuCalibration_Default(&calibration);
+    calibration.gyro_bias_dps[0] = 9.0f;
+    calibration.crc              = ParameterImuCalibration_Crc(&calibration);
+    require_int(StateEstimation_ApplyImuCalibration(&calibration) != 0U,
+                "service accepts the historical boot calibration");
+    generation = StateEstimation_GetImu(&status);
+    require_int(status.gyro_calibrated != 0U, "historical boot calibration is initially applied");
+    require_int(StateEstimation_ArmAutomaticImuCalibration() == (uint8_t)STATE_ESTIMATION_RESULT_OK,
+                "service rearms automatic calibration for every boot");
+    require_int(StateEstimation_GetImu(&status) > generation && status.gyro_calibrated == 0U
+                    && status.gyro_auto_cal_state == STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE,
+                "rearm publishes an uncalibrated wait state and advances generation");
+    require_int(StateEstimation_GetImuCalibration(&calibration) == (uint8_t)STATE_ESTIMATION_RESULT_OK
+                    && calibration.gyro_bias_dps[0] == 9.0f,
+                "service rearm preserves the historical calibration model");
 }
 
 static void test_power_owner_publishes_and_gates_zero_calibration(void)
@@ -536,7 +542,7 @@ static void run_stationary_auto_calibration(uint32_t start_ms)
     for (uint32_t sample = 0U; sample < 110U; ++sample)
     {
         (void)StateEstimation_RunImuCycle();
-        ImuCalibrationCoordinator_ProcessSample(start_ms + sample * 10U);
+        ImuCalibrationOrchestrator_ProcessSample(start_ms + sample * 10U);
     }
 }
 
@@ -545,18 +551,19 @@ static void test_persistence_policy_is_not_a_dead_config_field(void)
     param_model_t runtime_params;
 
     persistence_save_count = 0UL;
-    ImuCalibrationCoordinator_Init(&fake_calibration_ports, 1U, 0U, 1U);
+    ImuCalibrationOrchestrator_Init(0U, 1U);
     run_stationary_auto_calibration(1000U);
-    ImuCalibrationCoordinator_ProcessPersistence(3000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(3000U);
     require_int(persistence_save_count == 0UL, "disabled IMU persistence does not write Flash");
 
     (void)ParameterManagement_GetSnapshot(&runtime_params);
     runtime_params.current_zero_raw[MOTOR_ID_M2] = 321U;
     runtime_params.current_zero_valid            = 1U;
     require_int(ParameterManagement_Set(&runtime_params) != 0U, "existing RAM current zero accepted");
-    ImuCalibrationCoordinator_Init(&fake_calibration_ports, 1U, 1U, 0U);
+    ImuCalibrationOrchestrator_Init(1U, 0U);
     run_stationary_auto_calibration(4000U);
-    ImuCalibrationCoordinator_ProcessPersistence(6000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(6000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(7000U);
     require_int(persistence_save_count == 1UL, "enabled IMU persistence writes exactly once");
     require_int(last_saved_bundle.params.current_zero_valid == 0U,
                 "disabled current-zero persistence omits current calibration");
@@ -565,6 +572,17 @@ static void test_persistence_policy_is_not_a_dead_config_field(void)
     (void)ParameterManagement_GetSnapshot(&runtime_params);
     require_int(runtime_params.current_zero_valid != 0U && runtime_params.current_zero_raw[MOTOR_ID_M2] == 321U,
                 "omitting current-zero persistence does not erase the RAM override");
+
+    persistence_save_count       = 0UL;
+    fake_persistence_save_status = FLASH_PARAM_STATUS_WRITE_ERROR;
+    ImuCalibrationOrchestrator_Init(1U, 0U);
+    run_stationary_auto_calibration(7000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(9000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(10000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(11000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(12000U);
+    require_int(persistence_save_count == 3UL, "failed IMU persistence stops after three bounded attempts");
+    fake_persistence_save_status = FLASH_PARAM_STATUS_OK;
 }
 
 static void test_factory_reset_persists_before_publishing_defaults(void)

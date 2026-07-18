@@ -1,4 +1,4 @@
-#include "system_publish_snapshot_provider.h"
+#include "system_publish_snapshot_collector.h"
 
 #include "command_management_service.h"
 #include "host_communication_service.h"

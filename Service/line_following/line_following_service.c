@@ -1,8 +1,6 @@
 #include "line_following_service.h"
 #include "line_following_maintenance.h"
-#include "line_following_composition.h"
 #include "line_following_internal.h"
-#include "line_calibration_coordinator.h"
 #include "line_parameter_sync.h"
 #include "line_sensor_calibration.h"
 #include "platform_critical.h"
@@ -118,7 +116,14 @@ void LineFollowing_Update(void)
     (void)LineParameterSync_Update(&g_line_parameter_sync);
     LineSensorDriver_Update();
     LineSensorDriver_RequestAnalog();
-    LineCalibrationCoordinator_ProcessRequest();
+    {
+        line_following_calibration_request_t request;
+
+        if (LineFollowingInternal_TakeCalibrationRequest(&request) != 0U)
+        {
+            (void)LineFollowingInternal_ResolveCalibrationRequest();
+        }
+    }
     line_sensor_data_t        sensor;
     uint32_t                  now_ms;
     uint8_t                   i;
@@ -360,7 +365,7 @@ uint8_t LineFollowingInternal_TakeCalibrationRequest(line_following_calibration_
     return available;
 }
 
-uint8_t LineFollowingInternal_ResolveCalibrationRequest(uint8_t authorized)
+uint8_t LineFollowingInternal_ResolveCalibrationRequest(void)
 {
     line_following_calibration_request_t request;
     platform_critical_state_t            critical;
@@ -370,13 +375,9 @@ uint8_t LineFollowingInternal_ResolveCalibrationRequest(uint8_t authorized)
     pending  = (g_line_sensor_calibration_request_state == 2U) ? 1U : 0U;
     request  = g_line_sensor_calibration_request;
     PlatformCritical_Exit(critical);
-    if (pending != 0U && authorized != 0U)
+    if (pending != 0U)
     {
-        authorized = LineFollowingInternal_CalibrationStart(request.surface, request.samples);
-    }
-    else
-    {
-        authorized = 0U;
+        pending = LineFollowingInternal_CalibrationStart(request.surface, request.samples);
     }
     critical = PlatformCritical_Enter();
     if (g_line_sensor_calibration_request_state == 2U)
@@ -384,7 +385,7 @@ uint8_t LineFollowingInternal_ResolveCalibrationRequest(uint8_t authorized)
         g_line_sensor_calibration_request_state = 0U;
     }
     PlatformCritical_Exit(critical);
-    return authorized;
+    return pending;
 }
 
 uint8_t LineFollowingInternal_CalibrationBuild(uint16_t thresholds[LINE_CALIBRATION_CHANNELS], uint8_t *active_low)
@@ -397,7 +398,7 @@ uint8_t LineFollowingInternal_CalibrationBuild(uint16_t thresholds[LINE_CALIBRAT
     return LineSensorCalibration_Apply(&snapshot, thresholds, active_low);
 }
 
-uint8_t LineFollowing_ApplyCalibration(void)
+line_calibration_apply_result_t LineFollowing_ApplyCalibration(void)
 {
     uint16_t                  thresholds[LINE_CALIBRATION_CHANNELS];
     uint8_t                   active_low;
@@ -408,9 +409,17 @@ uint8_t LineFollowing_ApplyCalibration(void)
     snapshot = g_line_sensor_calibration;
     PlatformCritical_Exit(critical);
 
+    if (snapshot.ready_mask != 0x03U)
+    {
+        return LINE_CALIBRATION_APPLY_INCOMPLETE;
+    }
     if (LineSensorCalibration_Apply(&snapshot, thresholds, &active_low) == 0U)
     {
-        return 0U;
+        critical                            = PlatformCritical_Enter();
+        g_line_sensor_calibration.fail_mask = snapshot.fail_mask;
+        g_line_sensor_calibration_generation++;
+        PlatformCritical_Exit(critical);
+        return LINE_CALIBRATION_APPLY_LOW_SEPARATION;
     }
     (void)ParameterManagement_GetSnapshot(&params);
     for (uint8_t i = 0U; i < LINE_CALIBRATION_CHANNELS; ++i)
@@ -420,10 +429,14 @@ uint8_t LineFollowing_ApplyCalibration(void)
     params.line_active_low = active_low;
     if (ParameterManagement_Set(&params) == 0U)
     {
-        return 0U;
+        return LINE_CALIBRATION_APPLY_PARAMETER_REJECTED;
     }
     (void)LineParameterSync_Update(&g_line_parameter_sync);
-    return 1U;
+    critical                            = PlatformCritical_Enter();
+    g_line_sensor_calibration.fail_mask = 0U;
+    g_line_sensor_calibration_generation++;
+    PlatformCritical_Exit(critical);
+    return LINE_CALIBRATION_APPLY_OK;
 }
 
 void LineFollowing_CalibrationGet(line_sensor_calibration_t *calibration)
@@ -451,6 +464,16 @@ void LineFollowing_CalibrationGet(line_sensor_calibration_t *calibration)
     }
 }
 
+void LineFollowing_CalibrationAbort(void)
+{
+    platform_critical_state_t critical = PlatformCritical_Enter();
+
+    g_line_sensor_calibration.collecting    = 0U;
+    g_line_sensor_calibration_request_state = 0U;
+    g_line_sensor_calibration_generation++;
+    PlatformCritical_Exit(critical);
+}
+
 void LineFollowing_CalibrationCancel(void)
 {
     line_calibration_model_t  next;
@@ -463,21 +486,6 @@ void LineFollowing_CalibrationCancel(void)
     g_line_sensor_calibration_generation++;
     g_line_sensor_calibration_request_state = 0U;
     PlatformCritical_Exit(critical);
-}
-
-uint8_t LineFollowingInternal_CalibrationBeginCoordinated(line_sensor_calibration_surface_t surface, uint16_t samples)
-{
-    return LineCalibrationCoordinator_Begin(surface, samples);
-}
-
-uint8_t LineFollowingInternal_CalibrationCommit(void)
-{
-    return LineCalibrationCoordinator_CommitToFlash();
-}
-
-void LineFollowing_ConfigureCalibrationPorts(const line_following_calibration_ports_t *ports)
-{
-    LineCalibrationCoordinator_SetPorts(ports);
 }
 
 void LineFollowing_Enable(uint8_t enable)

@@ -367,6 +367,27 @@ void StateEstimation_ServiceImuCalibration(uint32_t now_ms, uint8_t stationary)
     StateEstimation_EndImuOperation();
 }
 
+uint8_t StateEstimation_ArmAutomaticImuCalibration(void)
+{
+    platform_critical_state_t     critical;
+    state_estimation_imu_status_t next;
+
+    if (StateEstimation_TryBeginImuOperation() == 0U)
+    {
+        return (uint8_t)STATE_ESTIMATION_RESULT_BUSY;
+    }
+    critical = PlatformCritical_Enter();
+    next     = imu_status;
+    PlatformCritical_Exit(critical);
+    ImuEstimationPipeline_ArmAutomaticCalibration(PlatformTime_NowMs(), &next);
+    critical   = PlatformCritical_Enter();
+    imu_status = next;
+    imu_status_generation++;
+    PlatformCritical_Exit(critical);
+    StateEstimation_EndImuOperation();
+    return (uint8_t)STATE_ESTIMATION_RESULT_OK;
+}
+
 uint8_t StateEstimation_ApplyImuCalibration(const imu_calibration_t *calibration)
 {
     platform_critical_state_t critical;
@@ -455,22 +476,15 @@ uint8_t StateEstimation_GetImuCalibration(imu_calibration_t *calibration)
     return (uint8_t)STATE_ESTIMATION_RESULT_OK;
 }
 
-void StateEstimation_InitCalibrationCoordinator(const state_estimation_calibration_ports_t *ports,
-                                                uint8_t                                     first_save_needed,
-                                                uint8_t                                     persist_imu_calibration,
-                                                uint8_t                                     persist_current_zero)
+void StateEstimation_InitCalibrationCoordinator(void)
 {
-    ImuCalibrationCoordinator_Init(ports, first_save_needed, persist_imu_calibration, persist_current_zero);
+    ImuCalibrationCoordinator_Init();
 }
 
-void StateEstimation_ServiceCalibrationCoordinator(uint32_t now_ms)
+uint8_t StateEstimation_ServiceCalibrationCoordinator(uint32_t                                           now_ms,
+                                                      const state_estimation_calibration_motion_facts_t *motion_facts)
 {
-    ImuCalibrationCoordinator_ProcessSample(now_ms);
-}
-
-void StateEstimation_ServiceCalibrationPersistence(uint32_t now_ms)
-{
-    ImuCalibrationCoordinator_ProcessPersistence(now_ms);
+    return ImuCalibrationCoordinator_ProcessSample(now_ms, motion_facts);
 }
 
 uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status)

@@ -9,7 +9,8 @@ _Static_assert((int)STATUS_LED_ADAPTER_NORMAL == (int)STATUS_LED_DRIVER_NORMAL
                    && (int)STATUS_LED_ADAPTER_ESTOP == (int)STATUS_LED_DRIVER_ESTOP
                    && (int)STATUS_LED_ADAPTER_CAL_RUNNING == (int)STATUS_LED_DRIVER_CAL_RUNNING
                    && (int)STATUS_LED_ADAPTER_CAL_OK == (int)STATUS_LED_DRIVER_CAL_OK
-                   && (int)STATUS_LED_ADAPTER_CAL_APPLIED == (int)STATUS_LED_DRIVER_CAL_APPLIED,
+                   && (int)STATUS_LED_ADAPTER_CAL_APPLIED == (int)STATUS_LED_DRIVER_CAL_APPLIED
+                   && (int)STATUS_LED_ADAPTER_CAL_FAILED == (int)STATUS_LED_DRIVER_CAL_FAILED,
                "status_led_adapter_mode_t values must match status_led_driver_mode_t");
 
 void StatusLedAdapter_SetMode(status_led_adapter_mode_t mode)

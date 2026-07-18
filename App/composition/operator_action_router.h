@@ -8,7 +8,7 @@ extern "C"
 {
 #endif
 
-    /** @brief Handle one Teleoperation action by dispatching to the appropriate Service or Adapter. */
+    /** @brief Handle one Teleoperation action through App-owned Service orchestration. */
     void OperatorActionRouter_Handle(const teleoperation_action_t *action);
 
 #ifdef __cplusplus

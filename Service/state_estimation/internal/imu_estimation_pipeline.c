@@ -26,6 +26,33 @@ static uint8_t                           calibration_automatic;
 static uint32_t                          last_calibration_sample_count;
 static uint32_t                          auto_cal_next_ms;
 
+static void ImuEstimationPipeline_ResetAttitudeState(state_estimation_imu_status_t *status)
+{
+    ImuBmi270Mahony_Init(&attitude);
+    status->filter_initialized      = 0U;
+    status->sensor_time             = 0U;
+    status->sensor_time_valid       = 0U;
+    status->quaternion[0]           = 1.0f;
+    status->quaternion[1]           = 0.0f;
+    status->quaternion[2]           = 0.0f;
+    status->quaternion[3]           = 0.0f;
+    status->roll_deg                = 0.0f;
+    status->pitch_deg               = 0.0f;
+    status->yaw_deg                 = 0.0f;
+    status->accel_correction_weight = 0.0f;
+    for (uint8_t axis = 0U; axis < 3U; ++axis)
+    {
+        status->accel_g[axis]            = 0.0f;
+        status->body_accel_g[axis]       = 0.0f;
+        status->ros_accel_g[axis]        = 0.0f;
+        status->gyro_filtered_dps[axis]  = 0.0f;
+        status->gyro_corrected_dps[axis] = 0.0f;
+        status->gyro_dps[axis]           = 0.0f;
+        status->body_gyro_dps[axis]      = 0.0f;
+        status->ros_gyro_dps[axis]       = 0.0f;
+    }
+}
+
 void ImuEstimationPipeline_Init(void)
 {
     ImuBmi270Calibration_Default(&calibration);
@@ -41,6 +68,32 @@ void ImuEstimationPipeline_ResetRuntime(uint32_t now_ms)
     calibration_automatic         = 0U;
     last_calibration_sample_count = 0UL;
     auto_cal_next_ms              = now_ms + IMU_AUTO_CAL_START_DELAY_MS;
+}
+
+void ImuEstimationPipeline_ArmAutomaticCalibration(uint32_t now_ms, state_estimation_imu_status_t *status)
+{
+    if (status == 0)
+    {
+        return;
+    }
+    ImuEstimationPipeline_ResetRuntime(now_ms);
+    ImuEstimationPipeline_ResetAttitudeState(status);
+    status->gyro_auto_cal_enabled = 1U;
+    status->gyro_calibrated       = 0U;
+    status->gyro_auto_cal_state =
+        (status->enabled != 0U) ? STATE_ESTIMATION_IMU_AUTO_CAL_WAIT_ONLINE : STATE_ESTIMATION_IMU_AUTO_CAL_DISABLED;
+    status->gyro_auto_cal_attempts    = 0U;
+    status->gyro_auto_cal_last_result = 0U;
+    status->gyro_cal_fail_reason      = 0U;
+    status->gyro_cal_fail_axis        = 0U;
+    status->gyro_cal_sample_count     = 0U;
+    for (uint8_t axis = 0U; axis < 3U; ++axis)
+    {
+        status->gyro_cal_mean_dps[axis] = 0.0f;
+        status->gyro_cal_min_dps[axis]  = 0.0f;
+        status->gyro_cal_max_dps[axis]  = 0.0f;
+        status->gyro_cal_span_dps[axis] = 0.0f;
+    }
 }
 
 void ImuEstimationPipeline_Process(const bmi270_sample_t         *sample,
@@ -321,6 +374,7 @@ void ImuEstimationPipeline_ServiceCalibration(uint32_t                       now
         status->gyro_auto_cal_last_result = 1U;
         calibration_active                = 0U;
         ImuBmi270GyroCalAccumulator_Init(&calibration_accumulator);
+        ImuEstimationPipeline_ResetAttitudeState(status);
     }
     else if (result == IMU_BMI270_GYRO_CAL_ACC_FAIL_ABS || result == IMU_BMI270_GYRO_CAL_ACC_FAIL_SPAN)
     {

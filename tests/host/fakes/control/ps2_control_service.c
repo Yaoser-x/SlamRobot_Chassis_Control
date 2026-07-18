@@ -33,9 +33,8 @@ void Ps2ControlService_Init(void)
 
 void Ps2ControlService_Update(void)
 {
-    teleoperation_action_t a   = {0};
-    a.line_tracking_enabled    = LineFollowing_IsEnabled();
-    Teleoperation_Update(&a);
+    teleoperation_action_t a = {0};
+    Teleoperation_Update(LineFollowing_IsEnabled(), &a);
 }
 
 void Ps2ControlService_GetState(ps2_control_service_state_t *state)

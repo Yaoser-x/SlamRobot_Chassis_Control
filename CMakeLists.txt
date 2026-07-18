@@ -70,8 +70,10 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 set(F407_APP_SOURCES
     App/app_init.c
     App/config/robot_config.c
-    App/composition/system_publish_snapshot_provider.c
+    App/composition/system_publish_snapshot_collector.c
     App/composition/operator_action_router.c
+    App/composition/line_calibration_orchestrator.c
+    App/composition/imu_calibration_orchestrator.c
     App/tasks/task_debug.c
     App/tasks/task_esp12f.c
     App/tasks/task_imu.c
@@ -145,7 +147,6 @@ set(F407_SERVICE_SOURCES
     Service/motion_control/internal/motor_current_limiter.c
     Service/command_management/command_management_service.c
     Service/line_following/line_following_service.c
-    Service/line_following/internal/line_calibration_coordinator.c
     Service/line_following/internal/line_parameter_sync.c
     Service/teleoperation/teleoperation_service.c
     Service/safety_management/internal/battery_voltage_monitor.c
