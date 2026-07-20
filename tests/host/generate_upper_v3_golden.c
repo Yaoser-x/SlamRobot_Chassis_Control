@@ -62,9 +62,38 @@ static void emit_status(void)
     status.motor_speed_valid_mask   = 0x05U;
     status.encoder_anomaly_mask     = 0x0AU;
     status.comm_health_flags        = 0x15U;
+    status.status_sequence          = 0x01020304UL;
+    status.timestamp_ms             = 0x11121314UL;
+    status.session_id               = 0x2122232425262728ULL;
+    status.received_sequence        = 0x31323334UL;
+    status.applied_sequence         = 0x41424344UL;
+    status.reject_reason            = 6U;
+    status.side_consistency_flags   = 2U;
+    status.ack_flags                = 0x13U;
 
     (void)UpperProtocol_BuildStatusPayload(&status, payload, sizeof(payload));
-    print_frame("status_v2", UPPER_CMD_STATUS, payload, sizeof(payload), 0U);
+    print_frame("status_v3", UPPER_CMD_STATUS, payload, sizeof(payload), 0U);
+}
+
+static void emit_hello(void)
+{
+    upper_hello_payload_t hello = {
+        .schema_version = 1U,
+        .identity =
+            {
+                .hardware_revision = 0x00020000UL,
+                .capabilities      = COMMUNICATION_REQUIRED_CAPABILITIES,
+            },
+        .parameter_crc32 = 0xA1B2C3D4UL,
+    };
+    uint8_t payload[ROBOT_LINK_PROTOCOL_HELLO_PAYLOAD_LEN] = {0U};
+
+    for (uint8_t i = 0U; i < COMMUNICATION_GIT_COMMIT_LENGTH; ++i)
+    {
+        hello.identity.git_commit[i] = i;
+    }
+    (void)UpperProtocol_BuildHelloPayload(&hello, payload, sizeof(payload));
+    print_frame("hello_v3", UPPER_CMD_HELLO, payload, sizeof(payload), 0U);
 }
 
 static void emit_imu(const char *name, int8_t temperature_c, uint8_t is_last)
@@ -119,7 +148,8 @@ static void emit_diagnostic(void)
 
 int main(void)
 {
-    (void)printf("{\n  \"schema\":1,\n  \"protocol_version\":2,\n  \"frames\":[\n");
+    (void)printf("{\n  \"schema\":1,\n  \"protocol_version\":3,\n  \"frames\":[\n");
+    emit_hello();
     emit_status();
     emit_diagnostic();
     emit_imu("imu_temp_23c", 23, 0U);

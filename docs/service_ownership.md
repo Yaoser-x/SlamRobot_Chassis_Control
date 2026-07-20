@@ -1,32 +1,43 @@
-# Beta5 Service 能力所有权
+# Service 唯一职权与 Upper Protocol v3 边界
 
-所有权表示“唯一保存状态并作出决定”，不等于“唯一读取事实”。BSP 发布硬件事实，Algorithm 计算纯结果，App 只编排和组装读模型。
+所有权表示“唯一保存可写状态并作出决定”，不等于“唯一读取事实”。任何同一状态的第二个可写副本均视为架构缺陷。
 
-| 能力 | 唯一所有权 | 允许的 Service 依赖 |
+| 能力 | 唯一状态/决策所有者 | 明确禁止 |
 | --- | --- | --- |
-| Motion Control | 轮速闭环、目标规划、直行补偿、电流限幅、反馈丢失、调试测试、运行时电机输出 | Command、Safety、State、Power、Parameter |
-| State Estimation | 编码器计数/轮速、IMU 采样映射/滤波/姿态、质量与新鲜度 | Parameter |
-| Power Management | 电压、电流、ADC 有效性、电流零点和原始阈值事实 | State、Parameter |
-| Safety Management | ESTOP、fault-stop、maintenance lock、故障锁存/恢复和运动许可 | Power、State、System、Command |
-| Command Management | 五来源命令、优先级、超时、活动来源、撤销 generation 和受控 gate | Parameter |
-| Teleoperation | PS2 映射、航向宏和人工命令 | State、Line、Command、Parameter |
-| Line Following | 巡线解释/控制/丢线和标定流程 | Safety、Command、Parameter |
-| Communication | Host/ESP 帧、协议、链路事实和命令路由 | Command、Safety、Line、Parameter |
-| Parameter Management | 出厂默认值、Flash/RAM 合并、校验和 generation | 无其他 Service 依赖 |
-| System Monitoring | 任务健康、复位、POST 和模块健康事实 | 无其他 Service 读取依赖；事实由 App 注入 |
+| Wire 编解码 | Communication 纯 codec | Service getter、session 更新、控制调用 |
+| USART3 Host | HostCommunication | 调用 Wireless、决定运动许可、读取 Parameter |
+| USART2 ESP | WirelessCommunication | 调用 Host、共享 Host session、读取 Parameter |
+| Session/sequence/ACK | Communication internal tracker，每链路独立 slot | 租约、优先级、安全和电机调用 |
+| 命令租约与仲裁 | CommandManagement | wire/session/ACK 语义 |
+| ESTOP/fault/运动许可 | SafetyManagement | 协议解析和 TX |
+| 参数与 identity CRC | ParameterManagement | Communication 依赖和 HELLO 生成 |
+| 构建身份 | App identity provider | 运行时业务状态和直接 TX |
+| 全车快照收集 | App collector | Set/Clear/Enable 等决策操作 |
+| 快照发布 | SystemPublishSnapshot | 主动读取 Service 或重新聚合业务 |
+| 遥测编码 | TelemetryEncoder | 编码过程中调用 getter |
+| 电机输出 | MotionControl | Communication、Command 或 App 直接操作电机 |
 
-Algorithm 和 BSP 依赖不计入 Service DAG，但仍受层级边界约束。
+## 固定依赖
 
-## 决策边界
+```text
+BSP transport
+    ↑
+Communication ──→ CommandManagement ──→ ParameterManagement
+      │                    ↑
+      ├──→ SafetyManagement┘
+      ├──→ LineFollowing
+      └──→ SystemMonitoring
 
-- Safety 决定运动许可，再调用 Command 的 gate 接口；Command 只执行拒绝、清空和 generation 更新。
-- 普通控制源抢占可恢复未超时命令；ESTOP、fault-stop、maintenance lock 清空全部命令且解除后不恢复旧命令。
-- Motion 是唯一运行时电机输出调用者。硬件 Break 和 FatalStop 在输出链之外直接关断；Motion 初始化只执行安全停车。
-- 调试电机测试属于 Motion 内部模式；`maintenance_lock` 只用于标定/保存等维护事务。
-- System 只拥有系统健康，不能重新聚合全车业务快照。
-- Communication 定义自己的发布 DTO，不能依赖 App 类型；App 组装同一 generation 的 DTO 后注入。
+App composition ──读取 Service 快照──→ immutable publish model
+                                         ↓
+                              Host / Wireless encoder
+```
 
-## 固定控制源契约
+Communication 不得包含 ParameterManagement 头；参数 CRC 只能由 App collector 写入发布 DTO。Command、Safety、Parameter 不得反向依赖 Communication。Host 与 Wireless 只复用纯 codec/session tracker，互不调用。
+
+session tracker 只判断 wire 合法性；只有 CommandManagement 的执行结果可将序列标记为 APPLIED。SafetyManagement 保持运动许可唯一所有者。App 只编排和复制事实，不复制 session、命令或安全状态成为第二个 owner。
+
+## 控制源契约
 
 | 来源 | 优先级 | 超时 |
 | --- | ---: | ---: |
@@ -36,4 +47,8 @@ Algorithm 和 BSP 依赖不计入 Service DAG，但仍受层级边界约束。
 | Line | 4 | 50 ms |
 | Debug | 5 | 2000 ms |
 
-数字越小优先级越高。任何调整都属于行为变更，不能混入 Beta5 架构迁移。
+duplicate 只能刷新未过期租约，不改变目标和 generation，也不能复活超时命令。关闭 Safety gate 会清空所有来源，重新开放后不恢复旧命令。
+
+## TX 与中断边界
+
+RX parser/ISR 只能产生 frame/action 事件，不得启动 TX。GET_INFO action 由接收链路设置自己的 pending HELLO。Host 优先级为 STATUS > HELLO > DIAGNOSTIC > IMU，队列满只淘汰最旧 IMU且最多一个待发 IMU；Wireless 为 STATUS > HELLO > DIAGNOSTIC。

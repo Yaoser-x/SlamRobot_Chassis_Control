@@ -10,7 +10,7 @@ def main() -> int:
     generated = json.loads(subprocess.check_output([generator], text=True))
     expected = json.loads(fixture.read_text(encoding="utf-8"))
     if generated != expected:
-        raise AssertionError("upper_v2 golden frames are stale; regenerate from firmware encoder")
+        raise AssertionError("upper_v3 golden frames are stale; regenerate from firmware encoder")
     return 0
 
 

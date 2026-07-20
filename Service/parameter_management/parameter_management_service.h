@@ -22,6 +22,8 @@ extern "C"
     void ParameterManagement_ResetToDefaults(void);
     /** Read one complete RAM parameter snapshot and generation. */
     uint32_t ParameterManagement_GetSnapshot(param_model_t *params);
+    /** Return the canonical CRC32 identity of the current effective parameter model. */
+    uint32_t ParameterManagement_GetIdentityCrc32(void);
     /** Read owner status in one consistent snapshot. */
     uint32_t ParameterManagement_GetStatus(parameter_management_status_t *status);
     /** Validate and publish one complete RAM override. */

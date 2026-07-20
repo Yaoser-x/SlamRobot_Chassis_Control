@@ -73,6 +73,14 @@ def main() -> int:
         "Serial.hasRxError()",
         "g_link_policy",
         "EspFrameParser_OnUartError",
+        "PROTO_VERSION       3",
+        "REQUIRED_CAPABILITIES 0x1F",
+        "controlHandshakeReady",
+        "COMMAND_ACK_TIMEOUT_MS 150UL",
+        "COMMAND_KEEPALIVE_MS   50UL",
+        "g_session_id",
+        "g_release_acked",
+        "buildGetInfoFrame",
     )
     forbidden = (
         "#define AP_PASS",
@@ -111,8 +119,8 @@ def main() -> int:
     if "sendNeutralControl();" not in release_body:
         errors.append("owner release does not revoke velocity and line modes")
     setup_body = section(sketch, "void setup()", "void loop()")
-    if "sendNeutralControl();" not in setup_body:
-        errors.append("ESP startup does not actively revoke stale STM32 motion modes")
+    if "attempt < 3U" not in setup_body or "sendVelocityCommand(0.0f, 0.0f, 0U, false)" not in setup_body:
+        errors.append("ESP startup does not send three identical v3 release commands")
     bridge_enable = section(bridge, "uint8_t Esp12fFlashBridge_Enable", "void Esp12fFlashBridge_Disable")
     bridge_disable = section(bridge, "void Esp12fFlashBridge_Disable", "uint8_t Esp12fFlashBridge_IsActive")
     bridge_update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_GetState")
@@ -133,7 +141,8 @@ def main() -> int:
             disable_active_index < 0 or disable_end_index < disable_active_index or
             idle_condition_index < 0 or idle_disable_index < idle_condition_index):
         errors.append("ESP bridge does not hold the unified maintenance lock")
-    if "UpperProtocol_RemoteEstopSetRequested" not in command_router:
+    if ("UpperProtocol_ParseVersionedFlag" not in command_router
+            or "requested != 0U" not in command_router):
         errors.append("shared remote ESTOP routing is not set-only")
     for marker in ("rx_timeout_resets", "uart_errors", "WirelessCommunication_ResetParser();"):
         if marker not in esp_comm:

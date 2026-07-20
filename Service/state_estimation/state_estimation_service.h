@@ -19,7 +19,7 @@ extern "C"
     /** Run one DRDY-triggered or 10 ms timeout IMU chain iteration. */
     uint8_t StateEstimation_RunImuCycle(void);
     /** Forward the IMU data-ready event from ISR context. */
-    void StateEstimation_OnImuDataReadyFromIsr(void);
+    void     StateEstimation_OnImuDataReadyFromIsr(void);
     uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status);
     uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *status);
     uint32_t StateEstimation_GetStatus(uint32_t now_ms, state_estimation_status_t *status);

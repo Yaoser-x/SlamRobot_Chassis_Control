@@ -18,11 +18,18 @@ ExpectedStatus(const communication_publish_model_t *snapshot, uint8_t comm_healt
     status.latched_error_flags = snapshot->safety.latched_error_flags;
     status.status_flags        = UPPER_STATUS_FLAG_ESTOP | UPPER_STATUS_FLAG_FAULT_STOP | UPPER_STATUS_FLAG_LINE_ENABLED
                           | UPPER_STATUS_FLAG_SPEED_VALID_ALL;
-    status.control_source         = snapshot->safety.control_mode;
+    status.control_source         = snapshot->control.active_source;
     status.motor_enabled_mask     = snapshot->chassis.motor_enabled_mask;
     status.motor_speed_valid_mask = 0x05U;
     status.encoder_anomaly_mask   = snapshot->encoder.anomaly_mask;
     status.comm_health_flags      = comm_health_flags;
+    status.status_sequence        = snapshot->generation;
+    status.timestamp_ms           = snapshot->timestamp_ms;
+    status.session_id             = snapshot->communication.upper_session.session_id;
+    status.received_sequence      = snapshot->communication.upper_session.received_sequence;
+    status.applied_sequence       = snapshot->communication.upper_session.applied_sequence;
+    status.reject_reason          = snapshot->communication.upper_session.reject_reason;
+    status.ack_flags              = snapshot->communication.upper_session.ack_flags;
     for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
     {
         status.motor_speed_mps[index]       = snapshot->chassis.motor_actual_mps[index];
@@ -37,34 +44,43 @@ ExpectedStatus(const communication_publish_model_t *snapshot, uint8_t comm_healt
 
 static void SeedSnapshot(communication_publish_model_t *snapshot)
 {
-    *snapshot                              = (communication_publish_model_t){0};
-    snapshot->safety.battery_voltage       = 12.6f;
-    snapshot->safety.error_flags           = 0x12345678UL;
-    snapshot->safety.latched_error_flags   = 0x87654321UL;
-    snapshot->safety.control_mode          = 3U;
-    snapshot->safety.task_timeout_mask     = 0x55AAU;
-    snapshot->control.emergency_stop       = 1U;
-    snapshot->control.fault_stop           = 1U;
-    snapshot->control.line_enabled         = 1U;
-    snapshot->control.reset_reason_flags   = 0xCAFEBABEU;
-    snapshot->chassis.motor_enabled_mask   = 0x0FU;
-    snapshot->encoder.speed_valid_all      = 1U;
-    snapshot->encoder.speed_valid[0]       = 1U;
-    snapshot->encoder.speed_valid[2]       = 1U;
-    snapshot->encoder.anomaly_mask         = 0x02U;
-    snapshot->post.done                    = 1U;
-    snapshot->post.error_flags             = 0x10203040UL;
-    snapshot->current.invalid_reason_flags = 0x11223344UL;
-    snapshot->imu.online                   = 1U;
-    snapshot->imu.calibrated               = 1U;
-    snapshot->imu.sensor_time_valid        = 1U;
-    snapshot->imu.quality_flags            = 0x01020304UL;
-    snapshot->imu.sensor_time              = 123456U;
-    snapshot->imu.sample_count             = 77U;
-    snapshot->imu.temperature_c            = -3.6f;
-    snapshot->imu.roll_deg                 = 1.0f;
-    snapshot->imu.pitch_deg                = 2.0f;
-    snapshot->imu.yaw_deg                  = 3.0f;
+    *snapshot                                               = (communication_publish_model_t){0};
+    snapshot->safety.battery_voltage                        = 12.6f;
+    snapshot->safety.error_flags                            = 0x12345678UL;
+    snapshot->safety.latched_error_flags                    = 0x87654321UL;
+    snapshot->safety.control_mode                           = 3U;
+    snapshot->control.active_source                         = 3U;
+    snapshot->generation                                    = 42U;
+    snapshot->timestamp_ms                                  = 9000U;
+    snapshot->communication.upper_session.session_id        = 0x1122334455667788ULL;
+    snapshot->communication.upper_session.received_sequence = 8U;
+    snapshot->communication.upper_session.applied_sequence  = 7U;
+    snapshot->communication.upper_session.ack_flags = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
+    snapshot->communication.esp12f_session          = snapshot->communication.upper_session;
+    snapshot->safety.task_timeout_mask              = 0x55AAU;
+    snapshot->control.emergency_stop                = 1U;
+    snapshot->control.fault_stop                    = 1U;
+    snapshot->control.line_enabled                  = 1U;
+    snapshot->control.reset_reason_flags            = 0xCAFEBABEU;
+    snapshot->chassis.motor_enabled_mask            = 0x0FU;
+    snapshot->encoder.speed_valid_all               = 1U;
+    snapshot->encoder.speed_valid[0]                = 1U;
+    snapshot->encoder.speed_valid[2]                = 1U;
+    snapshot->encoder.anomaly_mask                  = 0x02U;
+    snapshot->post.done                             = 1U;
+    snapshot->post.error_flags                      = 0x10203040UL;
+    snapshot->current.invalid_reason_flags          = 0x11223344UL;
+    snapshot->imu.online                            = 1U;
+    snapshot->imu.calibrated                        = 1U;
+    snapshot->imu.sensor_time_valid                 = 1U;
+    snapshot->imu.quality_flags                     = 0x01020304UL;
+    snapshot->imu.sensor_time                       = 123456U;
+    snapshot->imu.timestamp_ms                      = 9000U;
+    snapshot->imu.sample_count                      = 77U;
+    snapshot->imu.temperature_c                     = -3.6f;
+    snapshot->imu.roll_deg                          = 1.0f;
+    snapshot->imu.pitch_deg                         = 2.0f;
+    snapshot->imu.yaw_deg                           = 3.0f;
     for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
     {
         snapshot->chassis.motor_actual_mps[index]      = (float)index + 0.1f;
@@ -119,21 +135,21 @@ int main(void)
                        sizeof(expected));
     assert(actual_len == expected_len && memcmp(actual, expected, actual_len) == 0);
 
-    actual_len           = TelemetryEncoder_BuildDiagnostic(&snapshot, 9000U, actual, sizeof(actual));
+    actual_len           = TelemetryEncoder_BuildDiagnostic(&snapshot, actual, sizeof(actual));
     diagnostic.post_done = snapshot.post.done;
     diagnostic.imu_status_flags =
         UPPER_IMU_FLAG_ONLINE | UPPER_IMU_FLAG_CALIBRATED | UPPER_IMU_FLAG_ERROR | UPPER_IMU_FLAG_SENSOR_TIME;
     diagnostic.post_error_flags         = snapshot.post.error_flags;
     diagnostic.adc_invalid_reason_flags = snapshot.current.invalid_reason_flags;
     diagnostic.task_timeout_mask        = snapshot.safety.task_timeout_mask;
-    diagnostic.imu_quality_flags        = snapshot.imu.quality_flags;
+    diagnostic.imu_quality_flags        = 0x147UL;
     diagnostic.reset_reason_flags       = snapshot.control.reset_reason_flags;
     diagnostic.uptime_ms                = 9000U;
     payload_len                         = UpperProtocol_BuildDiagnosticPayload(&diagnostic, payload, sizeof(payload));
     expected_len = UpperProtocol_BuildFrame(UPPER_CMD_DIAGNOSTIC, payload, payload_len, expected, sizeof(expected));
     assert(actual_len == expected_len && memcmp(actual, expected, actual_len) == 0);
 
-    actual_len = TelemetryEncoder_BuildImu(&snapshot, 9000U, actual, sizeof(actual));
+    actual_len = TelemetryEncoder_BuildImu(&snapshot, actual, sizeof(actual));
     for (uint8_t axis = 0U; axis < 3U; ++axis)
     {
         imu.accel_g[axis]            = snapshot.imu.accel_g[axis];
@@ -149,7 +165,7 @@ int main(void)
     imu.timestamp_ms  = 9000U;
     imu.sensor_time   = snapshot.imu.sensor_time;
     imu.sample_count  = snapshot.imu.sample_count;
-    imu.quality_flags = snapshot.imu.quality_flags;
+    imu.quality_flags = 0x147UL;
     for (uint8_t index = 0U; index < 7U; ++index)
     {
         imu.quality_counters[index] = snapshot.imu.quality_counters[index];
@@ -160,7 +176,7 @@ int main(void)
     expected_len = UpperProtocol_BuildFrame(UPPER_CMD_IMU_STATUS, payload, payload_len, expected, sizeof(expected));
     assert(actual_len == expected_len && memcmp(actual, expected, actual_len) == 0);
     snapshot.imu.online = 0U;
-    assert(TelemetryEncoder_BuildImu(&snapshot, 9000U, actual, sizeof(actual)) == 0U);
+    assert(TelemetryEncoder_BuildImu(&snapshot, actual, sizeof(actual)) == 0U);
 
     puts("PASS: telemetry frame builder");
     return 0;

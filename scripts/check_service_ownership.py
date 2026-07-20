@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate final motor-output and BMI270-lifecycle ownership."""
+"""Validate final runtime ownership and Upper Protocol v3 dependency boundaries."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ MOTOR_OUTPUT_API = re.compile(
 IMU_LIFECYCLE_API = re.compile(
     r"\bBmi270Driver_(?:SetEnabled|SetProfile|ProbeNow|ConfigNow|Diagnose)\s*\("
 )
+SERVICE_GETTER = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Management|Control|Estimation|Monitoring)_Get[A-Za-z0-9_]*\s*\(")
+APP_DECISION_API = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:_Set|_Clear|_Enable|_Disable)[A-Za-z0-9_]*\s*\(")
 
 
 def strip_comments(text: str) -> str:
@@ -48,6 +50,57 @@ def analyze(root: Path, final: bool = True) -> list[str]:
                     errors.append(
                         f"{relative}:{line}: BMI270 lifecycle API is owned only by State Estimation"
                     )
+
+    communication = root / "Service" / "communication"
+    for path in communication.rglob("*"):
+        if path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        relative = path.relative_to(root).as_posix()
+        code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+        if "parameter_management" in code.lower():
+            errors.append(f"{relative}: Communication must receive parameter identity through the publish DTO")
+
+    command_root = root / "Service" / "command_management"
+    for path in command_root.rglob("*"):
+        if path.suffix.lower() in SOURCE_SUFFIXES:
+            code = strip_comments(path.read_text(encoding="utf-8", errors="replace")).lower()
+            if "robot_link_protocol" in code or "communication_session" in code:
+                errors.append(f"{path.relative_to(root).as_posix()}: Command Management must not understand wire sessions")
+
+    safety_root = root / "Service" / "safety_management"
+    for path in safety_root.rglob("*"):
+        if path.suffix.lower() in SOURCE_SUFFIXES:
+            code = strip_comments(path.read_text(encoding="utf-8", errors="replace")).lower()
+            if "robot_link_protocol" in code or "_transport.h" in code:
+                errors.append(f"{path.relative_to(root).as_posix()}: Safety Management must not depend on protocol transport")
+
+    for relative in (
+        "Service/communication/internal/robot_link_protocol.c",
+        "Service/communication/internal/telemetry_encoder.c",
+    ):
+        path = root / relative
+        if not path.is_file():
+            continue
+        code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+        if SERVICE_GETTER.search(code):
+            errors.append(f"{relative}: codec and telemetry encoder must consume only passed value objects")
+
+    host_path = communication / "host_communication_service.c"
+    wireless_path = communication / "wireless_communication_service.c"
+    if host_path.is_file():
+        host_code = strip_comments(host_path.read_text(encoding="utf-8"))
+        if re.search(r"\bWirelessCommunication_", host_code):
+            errors.append("Service/communication/host_communication_service.c: Host must not call Wireless Communication")
+    if wireless_path.is_file():
+        wireless_code = strip_comments(wireless_path.read_text(encoding="utf-8"))
+        if re.search(r"\bHostCommunication_", wireless_code):
+            errors.append("Service/communication/wireless_communication_service.c: Wireless must not call Host Communication")
+
+    collector_path = root / "App" / "composition" / "system_publish_snapshot_collector.c"
+    if collector_path.is_file():
+        collector = strip_comments(collector_path.read_text(encoding="utf-8", errors="replace"))
+        if APP_DECISION_API.search(collector):
+            errors.append("App/composition/system_publish_snapshot_collector.c: collector must be read-only")
     return sorted(set(errors))
 
 
@@ -66,7 +119,7 @@ def main(final: bool | None = None) -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
-    print("Service ownership check passed (motor output and BMI270 lifecycle owners).")
+    print("Service ownership check passed (runtime owners and Upper Protocol v3 boundaries).")
     return 0
 
 

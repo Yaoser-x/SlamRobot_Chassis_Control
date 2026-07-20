@@ -70,6 +70,22 @@ struct ChassisStatus {
   uint8_t  motor_speed_valid_mask;
   uint8_t  encoder_anomaly_mask;
   uint8_t  comm_health_flags;
+  uint32_t status_sequence;
+  uint32_t sample_timestamp_ms;
+  uint64_t session_id;
+  uint32_t received_sequence;
+  uint32_t applied_sequence;
+  uint8_t  reject_reason;
+  uint8_t  side_consistency_flags;
+  uint8_t  command_ack_flags;
+};
+
+struct FirmwareHello {
+  uint8_t schema;
+  uint32_t capabilities;
+  uint8_t commit[20];
+  uint32_t hardware_revision;
+  uint32_t parameter_crc32;
 };
 
 struct DiagnosticStatus {
@@ -204,17 +220,25 @@ static bool saveConfig(const String &password) {
 
 #define PROTO_HEAD_0        0xA5
 #define PROTO_HEAD_1        0x5A
-#define PROTO_VERSION       2
+#define PROTO_VERSION       3
 #define PROTO_MAX_PAYLOAD   99
 #define CMD_SET_VELOCITY    0x01
 #define CMD_ESTOP           0x02
 #define CMD_LINE_CTRL       0x03
 #define CMD_CLEAR_FAULT     0x04
+#define CMD_GET_INFO        0x05
+#define CMD_HELLO           0x80
 #define CMD_STATUS          0x81
 #define CMD_DIAGNOSTIC      0x82
-#define VELOCITY_PAYLOAD_LEN 10
-#define STATUS_PAYLOAD_LEN  65
+#define VELOCITY_PAYLOAD_LEN 23
+#define HELLO_PAYLOAD_LEN   34
+#define STATUS_PAYLOAD_LEN  92
 #define DIAGNOSTIC_PAYLOAD_LEN 28
+#define REQUIRED_CAPABILITIES 0x1FUL
+#define ACK_APPLIED            (1U << 2)
+#define ACK_REJECTED           (1U << 4)
+#define COMMAND_KEEPALIVE_MS   50UL
+#define COMMAND_ACK_TIMEOUT_MS 150UL
 
 #define STATUS_FLAG_ESTOP           (1U << 0)
 #define STATUS_FLAG_FAULT_STOP      (1U << 1)
@@ -239,28 +263,52 @@ static uint16_t buildFrame(uint8_t cmd, const uint8_t *payload,
 }
 
 // 构造速度指令帧
-static uint16_t buildVelocityFrame(float linear_x, float angular_z,
-                                   uint8_t enable, uint8_t *out, uint16_t out_len) {
+static void writeU32LE(uint8_t *out, uint32_t value) {
+  out[0] = (uint8_t)value;
+  out[1] = (uint8_t)(value >> 8);
+  out[2] = (uint8_t)(value >> 16);
+  out[3] = (uint8_t)(value >> 24);
+}
+
+static void writeU64LE(uint8_t *out, uint64_t value) {
+  writeU32LE(out, (uint32_t)value);
+  writeU32LE(&out[4], (uint32_t)(value >> 32));
+}
+
+static uint16_t buildVelocityFrame(float linear_x, float angular_z, uint8_t enable,
+                                   uint64_t session_id, uint32_t sequence,
+                                   uint8_t *out, uint16_t out_len) {
   uint8_t payload[VELOCITY_PAYLOAD_LEN];
-  memcpy(&payload[0], &linear_x, 4);
-  memcpy(&payload[4], &angular_z, 4);
-  payload[8] = enable;
-  payload[9] = 0;  // mode: unused
+  payload[0] = PROTO_VERSION;
+  memcpy(&payload[1], &linear_x, 4);
+  memcpy(&payload[5], &angular_z, 4);
+  payload[9] = enable;
+  payload[10] = 2;  // ESP12F session producer
+  writeU64LE(&payload[11], session_id);
+  writeU32LE(&payload[19], sequence);
   return buildFrame(CMD_SET_VELOCITY, payload, VELOCITY_PAYLOAD_LEN, out, out_len);
 }
 
 // 构造 ESTOP 帧
 static uint16_t buildEstopFrame(uint8_t stop, uint8_t *out, uint16_t out_len) {
-  return buildFrame(CMD_ESTOP, &stop, 1, out, out_len);
+  uint8_t payload[2] = {PROTO_VERSION, stop};
+  return buildFrame(CMD_ESTOP, payload, sizeof(payload), out, out_len);
 }
 
 // 构造巡线控制帧
 static uint16_t buildLineCtrlFrame(uint8_t enable, uint8_t *out, uint16_t out_len) {
-  return buildFrame(CMD_LINE_CTRL, &enable, 1, out, out_len);
+  uint8_t payload[2] = {PROTO_VERSION, enable};
+  return buildFrame(CMD_LINE_CTRL, payload, sizeof(payload), out, out_len);
 }
 
 static uint16_t buildClearFaultFrame(uint8_t *out, uint16_t out_len) {
-  return buildFrame(CMD_CLEAR_FAULT, nullptr, 0, out, out_len);
+  const uint8_t version = PROTO_VERSION;
+  return buildFrame(CMD_CLEAR_FAULT, &version, 1, out, out_len);
+}
+
+static uint16_t buildGetInfoFrame(uint8_t *out, uint16_t out_len) {
+  const uint8_t version = PROTO_VERSION;
+  return buildFrame(CMD_GET_INFO, &version, 1, out, out_len);
 }
 
 // 解析 STM32 状态帧
@@ -297,12 +345,32 @@ static bool parseStatusFrame(const uint8_t *payload, uint8_t len, ChassisStatus 
   s.motor_speed_valid_mask = readU8();
   s.encoder_anomaly_mask = readU8();
   s.comm_health_flags = readU8();
+  s.status_sequence = readU32();
+  s.sample_timestamp_ms = readU32();
+  uint32_t session_low = readU32();
+  uint32_t session_high = readU32();
+  s.session_id = (uint64_t)session_low | ((uint64_t)session_high << 32);
+  s.received_sequence = readU32();
+  s.applied_sequence = readU32();
+  s.reject_reason = readU8();
+  s.side_consistency_flags = readU8();
+  s.command_ack_flags = readU8();
   return true;
 }
 
 static uint32_t readU32LE(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
          ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static bool parseHelloFrame(const uint8_t *payload, uint8_t len, FirmwareHello &hello) {
+  if (len != HELLO_PAYLOAD_LEN || payload[0] != PROTO_VERSION) return false;
+  hello.schema = payload[1];
+  hello.capabilities = readU32LE(&payload[2]);
+  memcpy(hello.commit, &payload[6], sizeof(hello.commit));
+  hello.hardware_revision = readU32LE(&payload[26]);
+  hello.parameter_crc32 = readU32LE(&payload[30]);
+  return hello.schema == 1U && hello.capabilities == REQUIRED_CAPABILITIES;
 }
 
 static bool parseDiagnosticFrame(const uint8_t *payload, uint8_t len, DiagnosticStatus &d) {
@@ -364,6 +432,7 @@ static float jsonFloatValue(const String &cmd, const char *key, float fallback) 
 static ESP8266WebServer    http(HTTP_PORT);
 static WebSocketsServer    ws(WEB_SOCKET_PORT);
 static ChassisStatus       g_status = {};
+static FirmwareHello       g_hello = {};
 static DiagnosticStatus    g_diagnostic = {};
 static esp_link_policy_t   g_link_policy = {};
 #define NO_OWNER 0xFFU
@@ -376,6 +445,21 @@ static unsigned long       g_last_telem_ms = 0;
 static unsigned long       g_last_vel_ms = 0;
 static bool                g_vel_active = false;
 static float               g_lx = 0, g_az = 0;
+static uint64_t            g_session_id = 0;
+static uint32_t            g_command_sequence = 1U;
+static uint32_t            g_last_sent_sequence = 0U;
+static unsigned long       g_last_command_tx_ms = 0;
+static unsigned long       g_command_pending_since_ms = 0;
+static unsigned long       g_last_get_info_ms = 0;
+static bool                g_hello_valid = false;
+static bool                g_status_valid = false;
+static bool                g_release_acked = false;
+static bool                g_command_ack_pending = false;
+static uint8_t             g_last_sent_enable = 0U;
+
+static bool controlHandshakeReady() {
+  return g_hello_valid && g_status_valid && g_release_acked;
+}
 
 static unsigned long statusAgeMs(unsigned long now) {
   return EspLinkPolicy_StatusAge(&g_link_policy, now);
@@ -397,10 +481,29 @@ static void sendControlRole(uint8_t num, const char *role) {
   ws.sendTXT(num, response);
 }
 
-static void stopChassis() {
+static void sendVelocityCommand(float linear_x, float angular_z, uint8_t enable,
+                                bool advance_sequence) {
+  if (advance_sequence) {
+    g_command_sequence++;
+  }
   uint8_t buf[PROTO_MAX_PAYLOAD + 5];
-  uint16_t len = buildVelocityFrame(0, 0, 0, buf, sizeof(buf));
-  if (len) sendToSTM32(buf, len);
+  uint16_t len = buildVelocityFrame(linear_x, angular_z, enable, g_session_id,
+                                    g_command_sequence, buf, sizeof(buf));
+  if (len) {
+    sendToSTM32(buf, len);
+    g_last_sent_sequence = g_command_sequence;
+    g_last_command_tx_ms = millis();
+    g_last_sent_enable = enable;
+    if (enable == 0U && advance_sequence) g_release_acked = false;
+    if (advance_sequence) {
+      g_command_ack_pending = true;
+      g_command_pending_since_ms = g_last_command_tx_ms;
+    }
+  }
+}
+
+static void stopChassis() {
+  sendVelocityCommand(0.0f, 0.0f, 0U, true);
   g_vel_active = false;
   g_lx = 0.0f;
   g_az = 0.0f;
@@ -420,12 +523,25 @@ static void releaseOwnerAndStop() {
   ws.broadcastTXT("{\"type\":\"control\",\"role\":\"available\"}");
 }
 
+static void failClosedAndRequireHandshake() {
+  sendVelocityCommand(0.0f, 0.0f, 0U, true);
+  g_release_acked = false;
+  g_vel_active = false;
+  g_lx = 0.0f;
+  g_az = 0.0f;
+  if (g_owner_client != NO_OWNER) {
+    g_owner_client = NO_OWNER;
+    g_owner_last_heartbeat_ms = 0;
+    ws.broadcastTXT("{\"type\":\"control\",\"role\":\"readonly\"}");
+  }
+}
+
 // WebSocket 事件处理
 static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
   switch (type) {
   case WStype_CONNECTED:
     if (g_ws_client_count < 0xFFU) g_ws_client_count++;
-    sendControlRole(num, g_owner_client == NO_OWNER ? "available" : "readonly");
+    sendControlRole(num, controlHandshakeReady() && g_owner_client == NO_OWNER ? "available" : "readonly");
     break;
 
   case WStype_DISCONNECTED:
@@ -444,7 +560,7 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
     }
 
     if (cmd.startsWith("{\"cmd\":\"claim\"")) {
-      if (!g_link_policy.online) {
+      if (!g_link_policy.online || !controlHandshakeReady()) {
         sendControlRole(num, "offline");
         break;
       }
@@ -497,19 +613,20 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
       int lxIdx = cmd.indexOf("\"lx\":");
       int azIdx = cmd.indexOf("\"az\":");
       if (lxIdx > 0 && azIdx > 0) {
-        g_lx = jsonFloatValue(cmd, "\"lx\":", g_lx);
-        g_az = jsonFloatValue(cmd, "\"az\":", g_az);
+        float next_lx = jsonFloatValue(cmd, "\"lx\":", g_lx);
+        float next_az = jsonFloatValue(cmd, "\"az\":", g_az);
         // 钳位
-        if (g_lx >  MAX_LINEAR_MPS)  g_lx =  MAX_LINEAR_MPS;
-        if (g_lx < -MAX_LINEAR_MPS)  g_lx = -MAX_LINEAR_MPS;
-        if (g_az >  MAX_ANGULAR_RPS) g_az =  MAX_ANGULAR_RPS;
-        if (g_az < -MAX_ANGULAR_RPS) g_az = -MAX_ANGULAR_RPS;
+        if (next_lx >  MAX_LINEAR_MPS)  next_lx =  MAX_LINEAR_MPS;
+        if (next_lx < -MAX_LINEAR_MPS)  next_lx = -MAX_LINEAR_MPS;
+        if (next_az >  MAX_ANGULAR_RPS) next_az =  MAX_ANGULAR_RPS;
+        if (next_az < -MAX_ANGULAR_RPS) next_az = -MAX_ANGULAR_RPS;
+        bool changed = !g_vel_active || next_lx != g_lx || next_az != g_az;
+        g_lx = next_lx;
+        g_az = next_az;
         g_vel_active = true;
         g_last_vel_ms = millis();
 
-        uint8_t buf[PROTO_MAX_PAYLOAD + 5];
-        uint16_t len = buildVelocityFrame(g_lx, g_az, 1, buf, sizeof(buf));
-        if (len) sendToSTM32(buf, len);
+        sendVelocityCommand(g_lx, g_az, 1U, changed);
       }
     }
     else if (cmd.startsWith("{\"cmd\":\"stop\"")) {
@@ -717,13 +834,16 @@ static void handleConfigure() {
 static void handleStatus() {
   unsigned long now = millis();
   unsigned long status_age_ms = statusAgeMs(now);
-  char json[512];
+  char json[768];
   snprintf(json, sizeof(json),
     "{\"pv\":%u,\"bat\":%.2f,\"err\":%lu,\"lat\":%lu,\"src\":%u,"
     "\"wifi\":\"%s\",\"ws\":%d,\"online\":%s,\"status_age_ms\":%lu,"
     "\"diag_schema\":%u,\"post_done\":%u,\"imu_status\":%u,\"post_errors\":%lu,"
     "\"adc_invalid\":%lu,\"task_timeout\":%u,\"imu_quality\":%lu,\"reset_reason\":%lu,\"uptime_ms\":%lu,"
-    "\"rx_timeout\":%lu,\"rx_crc\":%lu,\"rx_length\":%lu,\"rx_uart\":%lu}",
+    "\"rx_timeout\":%lu,\"rx_crc\":%lu,\"rx_length\":%lu,\"rx_uart\":%lu,"
+    "\"hello_valid\":%s,\"capabilities\":%lu,\"hardware_revision\":%lu,\"parameter_crc32\":%lu,"
+    "\"handshake_ready\":%s,\"session_low\":%lu,\"session_high\":%lu,\"sequence\":%lu,"
+    "\"received_sequence\":%lu,\"applied_sequence\":%lu,\"ack_flags\":%u,\"reject_reason\":%u}",
     g_status.protocol_version,
     (float)g_status.battery_mv / 1000.0f,
     (unsigned long)g_status.error_flags,
@@ -736,7 +856,13 @@ static void handleStatus() {
     (unsigned long)g_diagnostic.imu_quality_flags, (unsigned long)g_diagnostic.reset_reason_flags,
     (unsigned long)g_diagnostic.uptime_ms,
     (unsigned long)g_rx_parser.timeout_count, (unsigned long)g_rx_parser.crc_error_count,
-    (unsigned long)g_rx_parser.length_error_count, (unsigned long)g_rx_parser.uart_error_count);
+    (unsigned long)g_rx_parser.length_error_count, (unsigned long)g_rx_parser.uart_error_count,
+    g_hello_valid ? "true" : "false", (unsigned long)g_hello.capabilities,
+    (unsigned long)g_hello.hardware_revision, (unsigned long)g_hello.parameter_crc32,
+    controlHandshakeReady() ? "true" : "false",
+    (unsigned long)(uint32_t)g_session_id, (unsigned long)(uint32_t)(g_session_id >> 32),
+    (unsigned long)g_command_sequence, (unsigned long)g_status.received_sequence,
+    (unsigned long)g_status.applied_sequence, g_status.command_ack_flags, g_status.reject_reason);
   http.send(200, "application/json", json);
 }
 
@@ -747,7 +873,17 @@ static void handleStatus() {
 void setup() {
   EspFrameParser_Init(&g_rx_parser);
   Serial.begin(UART_BAUD);
-  sendNeutralControl();
+  g_session_id = ((uint64_t)ESP.getChipId() << 32) | (uint64_t)(micros() ^ ESP.getCycleCount());
+  if (g_session_id == 0ULL) g_session_id = 1ULL;
+  uint8_t startup_frame[PROTO_MAX_PAYLOAD + 5];
+  uint16_t startup_len = buildGetInfoFrame(startup_frame, sizeof(startup_frame));
+  if (startup_len) sendToSTM32(startup_frame, startup_len);
+  g_last_get_info_ms = millis();
+  for (uint8_t attempt = 0U; attempt < 3U; ++attempt) {
+    sendVelocityCommand(0.0f, 0.0f, 0U, false);
+  }
+  g_command_ack_pending = true;
+  g_command_pending_since_ms = millis();
   // ESP12F 的 UART0 TX/RX 默认在 GPIO1/GPIO3，与 STM32 USART2 交叉连接
   // 如需调试输出，可通过 Serial1 (GPIO2) 或禁用调试
 
@@ -789,6 +925,7 @@ void loop() {
   if (Serial.hasOverrun() || Serial.hasRxError()) {
     while (Serial.available()) (void)Serial.read();
     EspFrameParser_OnUartError(&g_rx_parser);
+    failClosedAndRequireHandshake();
   }
   while (Serial.available()) {
     uint8_t b = Serial.read();
@@ -800,7 +937,20 @@ void loop() {
       uint8_t payload_len = cmd_len - 1;
 
       if (cmd == CMD_STATUS && parseStatusFrame(payload, payload_len, g_status)) {
+        g_status_valid = true;
         EspLinkPolicy_OnStatus(&g_link_policy, now);
+        if (g_status.session_id == g_session_id &&
+            g_status.applied_sequence == g_last_sent_sequence &&
+            (g_status.command_ack_flags & ACK_APPLIED) != 0U) {
+          g_command_ack_pending = false;
+          if (g_last_sent_enable == 0U) g_release_acked = true;
+        } else if (g_status.session_id == g_session_id &&
+                   g_status.received_sequence == g_last_sent_sequence &&
+                   (g_status.command_ack_flags & ACK_REJECTED) != 0U) {
+          failClosedAndRequireHandshake();
+        }
+      } else if (cmd == CMD_HELLO) {
+        g_hello_valid = parseHelloFrame(payload, payload_len, g_hello);
       } else if (cmd == CMD_DIAGNOSTIC) {
         (void)parseDiagnosticFrame(payload, payload_len, g_diagnostic);
       }
@@ -808,9 +958,20 @@ void loop() {
   }
 
   EspFrameParser_CheckTimeout(&g_rx_parser, now);
+  if (!g_hello_valid && (unsigned long)(now - g_last_get_info_ms) >= 500UL) {
+    uint8_t info_frame[PROTO_MAX_PAYLOAD + 5];
+    uint16_t info_len = buildGetInfoFrame(info_frame, sizeof(info_frame));
+    if (info_len) sendToSTM32(info_frame, info_len);
+    g_last_get_info_ms = now;
+  }
   if (EspLinkPolicy_Update(&g_link_policy, now)) {
-    if (g_owner_client != NO_OWNER) releaseOwnerAndStop();
-    else sendNeutralControl();
+    g_status_valid = false;
+    failClosedAndRequireHandshake();
+  }
+
+  if (g_command_ack_pending &&
+      (unsigned long)(now - g_command_pending_since_ms) > COMMAND_ACK_TIMEOUT_MS) {
+    failClosedAndRequireHandshake();
   }
 
   // --- 推送遥测 ---
@@ -819,16 +980,16 @@ void loop() {
   // owner 必须每 200ms heartbeat；500ms 租约到期立即停车并释放。
   if (g_owner_client != NO_OWNER &&
       (unsigned long)(now - g_owner_last_heartbeat_ms) > OWNER_LEASE_MS) {
-    releaseOwnerAndStop();
+    failClosedAndRequireHandshake();
   }
 
   // --- 速度指令超时保护 ---
   // 如果 500ms 没有收到 WebSocket 速度指令，自动清零（防失控）
   if (g_vel_active && (now - g_last_vel_ms > 500)) {
-    g_vel_active = false;
-    uint8_t buf[PROTO_MAX_PAYLOAD + 5];
-    uint16_t len = buildVelocityFrame(0, 0, 0, buf, sizeof(buf));
-    if (len) sendToSTM32(buf, len);
+    failClosedAndRequireHandshake();
+  } else if (g_vel_active &&
+             (unsigned long)(now - g_last_command_tx_ms) >= COMMAND_KEEPALIVE_MS) {
+    sendVelocityCommand(g_lx, g_az, 1U, false);
   }
 
   // --- HTTP / WebSocket 事件 ---

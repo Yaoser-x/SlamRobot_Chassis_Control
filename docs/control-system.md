@@ -1,11 +1,13 @@
 
 # 控制体系
 
+> Beta6 远程命令由 Upper Protocol v3 dispatcher 协调。Communication 只负责 wire/session/ACK；CommandManagement 唯一负责五来源租约与仲裁；SafetyManagement 唯一决定运动许可；MotionControl 唯一写电机输出。
+
 ## 1. 控制链数据流
 
 ```
-控制源 → ControlService          优先级仲裁 + 超时 + reject-and-stop
-       → ChassisService_Step     每 10ms，motorTask 驱动
+控制源 → CommandManagement       优先级仲裁 + 超时 + motion gate
+       → MotionControl_Update    每 10ms，motorTask 驱动
          → MotorHardwareLayout         电机启用/侧别/方向查表
          → 差速模型              linear_x / angular_z → left_mps / right_mps
          → 速度斜坡              按 CHASSIS_SPEED_RAMP_MPS2 平滑过渡
@@ -33,7 +35,7 @@
 
 ### 2.1 仲裁逻辑
 
-`ControlService_GetCommand()` 按优先级数组 `{UPPER, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
+`CommandManagement_GetActive()` 按优先级数组 `{HOST, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
 
 1. 检查源命令的 `enable` 标志
 2. 按控制源验证命令年龄：UPPER 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
@@ -60,7 +62,7 @@
 
 ### 3.2 命令拒绝规则
 
-`ControlService_SetCommand()` 在以下任一条件时拒绝命令（`CONTROL_COMMAND_REJECTED`）：
+`CommandManagement_Set()` 在以下任一条件时拒绝命令：
 
 - 当前处于 ESTOP 或 fault-stop 状态
 - 源 ID 非法（`NONE` 或超出 `CONTROL_SOURCE_LINE`）

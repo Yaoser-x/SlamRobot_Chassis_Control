@@ -1,5 +1,6 @@
 #include "parameter_management_service.h"
 #include "parameter_management_internal.h"
+#include "parameter_identity_crc.h"
 #include "platform_critical.h"
 
 #include <stddef.h>
@@ -10,6 +11,7 @@ static param_model_t     factory_params;
 static uint8_t           current_params_initialized;
 static uint8_t           factory_params_initialized;
 static uint32_t          current_params_generation;
+static uint32_t          current_params_identity_crc;
 static imu_calibration_t current_imu_calibration;
 static uint8_t           current_flash_loaded;
 static uint8_t           persist_current_zero;
@@ -29,6 +31,7 @@ static uint8_t ParameterManagement_Finite(float value)
 
 uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
 {
+    uint32_t identity_crc;
     uint32_t primask;
 
     if (config == 0 || config->load_flash_on_boot > 1U || config->persist_imu_calibration > 1U
@@ -37,6 +40,7 @@ uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
         return 0U;
     }
 
+    identity_crc               = ParameterIdentityCrc_Calculate(&config->factory_defaults);
     primask                    = PlatformCritical_Enter();
     factory_params             = config->factory_defaults;
     current_params             = config->factory_defaults;
@@ -46,6 +50,7 @@ uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
     factory_params_initialized = 1U;
     current_params_initialized = 1U;
     current_params_generation++;
+    current_params_identity_crc = identity_crc;
     PlatformCritical_Exit(primask);
     return 1U;
 }
@@ -66,6 +71,7 @@ void ParameterManagement_Defaults(param_model_t *params)
 void ParameterManagement_ResetToDefaults(void)
 {
     param_model_t defaults;
+    uint32_t      identity_crc;
     uint32_t      primask;
 
     ParameterManagement_Defaults(&defaults);
@@ -73,11 +79,22 @@ void ParameterManagement_ResetToDefaults(void)
     {
         return;
     }
+    identity_crc               = ParameterIdentityCrc_Calculate(&defaults);
     primask                    = PlatformCritical_Enter();
     current_params             = defaults;
     current_params_initialized = 1U;
     current_params_generation++;
+    current_params_identity_crc = identity_crc;
     PlatformCritical_Exit(primask);
+}
+
+uint32_t ParameterManagement_GetIdentityCrc32(void)
+{
+    uint32_t primask = PlatformCritical_Enter();
+    uint32_t crc     = (current_params_initialized != 0U) ? current_params_identity_crc : 0UL;
+
+    PlatformCritical_Exit(primask);
+    return crc;
 }
 
 uint32_t ParameterManagement_GetSnapshot(param_model_t *params)
@@ -151,17 +168,20 @@ void ParameterManagement_SetCurrentZeroPersistence(uint8_t enabled)
 
 void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle)
 {
+    uint32_t identity_crc;
     uint32_t primask;
 
     if (bundle == 0 || ParameterManagement_Validate(&bundle->params) == 0U)
     {
         return;
     }
+    identity_crc            = ParameterIdentityCrc_Calculate(&bundle->params);
     primask                 = PlatformCritical_Enter();
     current_params          = bundle->params;
     current_imu_calibration = bundle->imu_calibration;
     current_flash_loaded    = 1U;
     current_params_generation++;
+    current_params_identity_crc = identity_crc;
     PlatformCritical_Exit(primask);
 }
 
@@ -283,6 +303,7 @@ uint8_t ParameterManagement_Validate(const param_model_t *params)
 
 uint8_t ParameterManagement_Set(const param_model_t *params)
 {
+    uint32_t identity_crc;
     uint32_t primask;
 
     if (ParameterManagement_Validate(params) == 0U)
@@ -290,10 +311,12 @@ uint8_t ParameterManagement_Set(const param_model_t *params)
         return 0U;
     }
 
+    identity_crc               = ParameterIdentityCrc_Calculate(params);
     primask                    = PlatformCritical_Enter();
     current_params             = *params;
     current_params_initialized = 1U;
     current_params_generation++;
+    current_params_identity_crc = identity_crc;
     PlatformCritical_Exit(primask);
     return 1U;
 }

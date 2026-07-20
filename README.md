@@ -2,7 +2,7 @@
 
 基于 STM32F407VET6 的四轮左右差速底盘控制固件。构建系统采用 STM32CubeMX + FreeRTOS + CMake + Ninja + GNU Arm Embedded Toolchain。
 
-> **当前状态**：V1.0 Beta2 代码收口。默认两驱启用 M2（左侧）和 M3（右侧），可通过布局配置切换为四驱或自定义组合。电机驱动为 DRV8874 H-bridge，IMU 为 Bosch BMI270，无线模块为板载 ESP12F，巡线使用 HiWonder 八路传感器；正式发布仍需完成板级安全、参数定型和上位机联调验收。
+> **当前状态**：`1.0.0-beta6` / Upper Protocol v3 候选。默认两驱启用 M2（左侧）和 M3（右侧）；与 Ros2_Slam v0.4.0 配对，正式发布仍需完成双链路 HIL。
 
 ## 快速开始
 
@@ -29,7 +29,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
-| **构建验证** | CI 双 preset + 34 项 Host 行为测试 + 全树 format/static analysis + CubeMX 安全检查 + ESP8266 Core 3.1.2 固定版本编译 |
+| **构建验证** | CI 双 preset + 55 项 Host 行为测试 + 架构/所有权门禁 + CubeMX 安全检查 + ESP8266 Core 3.1.2 固定版本编译 |
 
 > V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 
@@ -74,7 +74,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | [Beta5 命名规范](docs/naming_conventions.md) | 最终能力目录、公开契约、internal 和兼容包装命名 |
 | [外设资源](docs/peripherals.md) | 电机 PWM/编码器/ADC/通信接口/BMI270/ESP12F GPIO/PS2/巡线传感器 — 完整硬件规格 |
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
-| [Upper Protocol v2](docs/upper-protocol-v2.md) | USART3/ESP12F 帧格式、兼容旧帧的 28B DIAGNOSTIC、温度编码与黄金测试向量 |
+| [Upper Protocol v3](docs/upper-protocol-v3.md) | 双链路 session/sequence/ACK、HELLO 构建身份、coherent STATUS/IMU 与黄金向量 |
 | [调试命令台](docs/debug-console.md) | USART1 全命令参考、CSV 日志字段过滤、line 命令输出格式 |
 | [STM32 主控烧录](docs/stm32-flashing.md) | STM32CubeProgrammer / OpenOCD / st-flash 烧录流程 |
 | [ESP12F 烧录](docs/esp12f-flashing.md) | esptool.py / Arduino IDE 烧录流程、透明桥行为、常见故障排查 |

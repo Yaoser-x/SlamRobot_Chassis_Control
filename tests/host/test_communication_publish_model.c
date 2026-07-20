@@ -88,15 +88,23 @@ void WirelessCommunication_GetState(wireless_communication_state_t *state)
 {
     *state = fake_esp;
 }
+
+uint32_t ParameterManagement_GetIdentityCrc32(void)
+{
+    return 0x12345678UL;
+}
 uint32_t Teleoperation_GetStatus(teleoperation_status_t *state)
 {
     *state = fake_teleoperation;
     return state->generation;
 }
-command_source_t CommandManagement_GetActiveSource(uint32_t now_ms)
+uint32_t CommandManagement_GetStatus(uint32_t now_ms, command_management_status_t *status)
 {
     (void)now_ms;
-    return COMMAND_SOURCE_HOST;
+    *status               = (command_management_status_t){0};
+    status->active_source = COMMAND_SOURCE_HOST;
+    status->generation    = 1UL;
+    return status->generation;
 }
 
 static void SeedInputs(void)

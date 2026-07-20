@@ -130,6 +130,28 @@ void CommandManagement_ClearSource(command_source_t source)
     PlatformCritical_Exit(critical);
 }
 
+uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
+{
+    platform_critical_state_t critical;
+    command_velocity_t       *command;
+
+    if (CommandManagement_SourceValid(source) == 0U)
+    {
+        return 0U;
+    }
+    critical = PlatformCritical_Enter();
+    command  = &source_commands[source];
+    if (motion_allowed == 0U || command->enable == 0U
+        || (uint32_t)(now_ms - command->timestamp_ms) > CommandManagement_Timeout(source))
+    {
+        PlatformCritical_Exit(critical);
+        return 0U;
+    }
+    command->timestamp_ms = now_ms;
+    PlatformCritical_Exit(critical);
+    return 1U;
+}
+
 static command_result_t CommandManagement_SetInternal(const command_velocity_t *command,
                                                       uint8_t                   enforce_generation,
                                                       uint32_t                  expected_generation)

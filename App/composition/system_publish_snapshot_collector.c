@@ -4,6 +4,7 @@
 #include "host_communication_service.h"
 #include "line_following_service.h"
 #include "motion_control_service.h"
+#include "parameter_management_service.h"
 #include "power_management_service.h"
 #include "power_on_self_test_service.h"
 #include "safety_management_service.h"
@@ -46,6 +47,7 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
     state_estimation_status_t      state;
     power_management_status_t      power;
     safety_management_status_t     safety;
+    command_management_status_t    command;
     system_monitoring_status_t     system;
     line_following_status_t        line;
     teleoperation_status_t         teleoperation;
@@ -62,6 +64,7 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
     (void)StateEstimation_GetStatus(now_ms, &state);
     (void)PowerManagement_GetStatus(&power);
     (void)SafetyManagement_GetStatus(&safety);
+    (void)CommandManagement_GetStatus(now_ms, &command);
     (void)SystemMonitoring_GetStatus(&system);
     (void)LineFollowing_GetStatus(&line);
     (void)Teleoperation_GetStatus(&teleoperation);
@@ -87,6 +90,7 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
     snapshot->post.encoder_status          = (uint8_t)post.encoder_status;
     snapshot->post.error_flags             = post.error_flags;
     snapshot->timestamp_ms                 = now_ms;
+    snapshot->parameter_identity_crc32     = ParameterManagement_GetIdentityCrc32();
 
     for (uint8_t index = 0U; index < COMMUNICATION_PUBLISH_MOTOR_COUNT; ++index)
     {
@@ -149,25 +153,39 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
         snapshot->imu.quaternion[index] = state.imu.quaternion[index];
     }
 
-    snapshot->control.emergency_stop                   = safety.emergency_stop;
-    snapshot->control.fault_stop                       = safety.fault_stop;
-    snapshot->control.line_enabled                     = line.globally_enabled;
-    snapshot->control.active_source                    = (uint8_t)CommandManagement_GetActiveSource(now_ms);
-    snapshot->control.reset_reason_flags               = system.reset_reason_flags;
-    snapshot->communication.upper.checksum_errors      = upper.rx_checksum_errors;
-    snapshot->communication.upper.timeout_resets       = upper.rx_timeout_resets;
-    snapshot->communication.upper.rx_overflows         = upper.rx_overwrite_count;
-    snapshot->communication.upper.tx_drops             = upper.tx_busy_drops;
-    snapshot->communication.upper.last_valid_frame_ms  = upper.last_valid_frame_ms;
-    snapshot->communication.upper_last_rx_timestamp_ms = HostCommunication_GetLastRxTimestamp();
-    snapshot->communication.esp12f.rx_frames           = esp.rx_frames;
-    snapshot->communication.esp12f.checksum_errors     = esp.rx_checksum_errors;
-    snapshot->communication.esp12f.length_errors       = esp.rx_length_errors;
-    snapshot->communication.esp12f.timeout_resets      = esp.rx_timeout_resets;
-    snapshot->communication.esp12f.rx_overflows        = esp.rx_overflow_errors;
-    snapshot->communication.esp12f.tx_drops            = esp.tx_busy_drops;
-    snapshot->communication.esp12f.last_valid_frame_ms = esp.last_rx_timestamp_ms;
-    snapshot->communication.esp12f.download_mode       = esp.boot_mode_download;
+    snapshot->control.emergency_stop                             = safety.emergency_stop;
+    snapshot->control.fault_stop                                 = safety.fault_stop;
+    snapshot->control.line_enabled                               = line.globally_enabled;
+    snapshot->control.active_source                              = (uint8_t)command.active_source;
+    snapshot->control.reset_reason_flags                         = system.reset_reason_flags;
+    snapshot->communication.upper.checksum_errors                = upper.rx_checksum_errors;
+    snapshot->communication.upper.timeout_resets                 = upper.rx_timeout_resets;
+    snapshot->communication.upper.rx_overflows                   = upper.rx_overwrite_count;
+    snapshot->communication.upper.tx_drops                       = upper.tx_busy_drops;
+    snapshot->communication.upper.last_valid_frame_ms            = upper.last_valid_frame_ms;
+    snapshot->communication.upper_last_rx_timestamp_ms           = HostCommunication_GetLastRxTimestamp();
+    snapshot->communication.upper_session.session_id             = upper.session.session_id;
+    snapshot->communication.upper_session.received_sequence      = upper.session.received_sequence;
+    snapshot->communication.upper_session.applied_sequence       = upper.session.applied_sequence;
+    snapshot->communication.upper_session.generation             = upper.session.generation;
+    snapshot->communication.upper_session.last_valid_receive_ms  = upper.session.last_valid_receive_ms;
+    snapshot->communication.upper_session.reject_reason          = upper.session.reject_reason;
+    snapshot->communication.upper_session.ack_flags              = upper.session.ack_flags;
+    snapshot->communication.esp12f.rx_frames                     = esp.rx_frames;
+    snapshot->communication.esp12f.checksum_errors               = esp.rx_checksum_errors;
+    snapshot->communication.esp12f.length_errors                 = esp.rx_length_errors;
+    snapshot->communication.esp12f.timeout_resets                = esp.rx_timeout_resets;
+    snapshot->communication.esp12f.rx_overflows                  = esp.rx_overflow_errors;
+    snapshot->communication.esp12f.tx_drops                      = esp.tx_busy_drops;
+    snapshot->communication.esp12f.last_valid_frame_ms           = esp.last_rx_timestamp_ms;
+    snapshot->communication.esp12f.download_mode                 = esp.boot_mode_download;
+    snapshot->communication.esp12f_session.session_id            = esp.session.session_id;
+    snapshot->communication.esp12f_session.received_sequence     = esp.session.received_sequence;
+    snapshot->communication.esp12f_session.applied_sequence      = esp.session.applied_sequence;
+    snapshot->communication.esp12f_session.generation            = esp.session.generation;
+    snapshot->communication.esp12f_session.last_valid_receive_ms = esp.session.last_valid_receive_ms;
+    snapshot->communication.esp12f_session.reject_reason         = esp.session.reject_reason;
+    snapshot->communication.esp12f_session.ack_flags             = esp.session.ack_flags;
 
     snapshot->modules.imu_online     = state.imu.online;
     snapshot->modules.encoder_online = state.wheel.speed_valid_all;

@@ -19,6 +19,8 @@ extern "C"
                                                         uint32_t                  expected_generation);
     void             CommandManagement_ClearAll(void);
     void             CommandManagement_ClearSource(command_source_t source);
+    /** Refresh one still-valid source lease without changing its target or generation. */
+    uint8_t          CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms);
     uint8_t          CommandManagement_GetActive(command_velocity_t *command, uint32_t now_ms);
     command_source_t CommandManagement_GetActiveSource(uint32_t now_ms);
     uint32_t         CommandManagement_GetMotionRevokeGeneration(void);

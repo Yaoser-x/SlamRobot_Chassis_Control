@@ -127,8 +127,21 @@ extern "C"
 
     typedef struct
     {
+        uint64_t session_id;
+        uint32_t received_sequence;
+        uint32_t applied_sequence;
+        uint32_t generation;
+        uint32_t last_valid_receive_ms;
+        uint8_t  reject_reason;
+        uint8_t  ack_flags;
+    } communication_publish_session_t;
+
+    typedef struct
+    {
         communication_publish_link_health_t upper;
         communication_publish_link_health_t esp12f;
+        communication_publish_session_t     upper_session;
+        communication_publish_session_t     esp12f_session;
         uint32_t                            upper_last_rx_timestamp_ms;
     } communication_publish_health_t;
 
@@ -158,6 +171,7 @@ extern "C"
     {
         uint32_t                              generation;
         uint32_t                              timestamp_ms;
+        uint32_t                              parameter_identity_crc32;
         communication_publish_chassis_t       chassis;
         communication_publish_safety_t        safety;
         communication_publish_encoder_t       encoder;

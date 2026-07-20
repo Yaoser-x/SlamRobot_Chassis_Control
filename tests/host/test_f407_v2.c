@@ -195,44 +195,52 @@ static void test_protocol_frame_and_velocity(void)
     uint8_t                  payload[ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN] = {0};
     upper_velocity_payload_t velocity                                          = {0};
     uint16_t                 frame_len;
-    uint8_t                  one_byte_payload = 1U;
+    uint8_t                  flag_payload[2] = {ROBOT_LINK_PROTOCOL_VERSION, 1U};
 
-    write_float_le(&payload[0], 0.25f);
-    write_float_le(&payload[4], -1.5f);
-    payload[8] = 1U;
-    payload[9] = 2U;
+    payload[0] = ROBOT_LINK_PROTOCOL_VERSION;
+    write_float_le(&payload[1], 0.25f);
+    write_float_le(&payload[5], -1.5f);
+    payload[9]  = 1U;
+    payload[10] = 2U;
+    payload[11] = 0x88U;
+    payload[18] = 0x11U;
+    payload[19] = 7U;
 
     frame_len = UpperProtocol_BuildFrame(UPPER_CMD_SET_VELOCITY,
                                          payload,
                                          ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN,
                                          frame,
                                          (uint16_t)sizeof(frame));
-    require_int(frame_len == 15U, "velocity frame length");
+    require_int(frame_len == 28U, "velocity frame length");
     require_int(frame[0] == ROBOT_LINK_PROTOCOL_HEAD_0 && frame[1] == ROBOT_LINK_PROTOCOL_HEAD_1, "frame header");
     require_int(frame[2] == ROBOT_LINK_PROTOCOL_CMD_LEN(ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN),
                 "frame command length");
-    require_int(frame[frame_len - 1U] == UpperProtocol_Checksum8(&frame[2], 12U), "frame checksum");
+    require_int(frame[frame_len - 1U] == UpperProtocol_Checksum8(&frame[2], 25U), "frame checksum");
     require_int(UpperProtocol_ParseVelocityPayload(payload, (uint8_t)sizeof(payload), &velocity) != 0U,
                 "velocity payload parse");
     require_close(velocity.linear_x, 0.25f, 0.0001f, "velocity linear");
     require_close(velocity.angular_z, -1.5f, 0.0001f, "velocity angular");
     require_int(velocity.enable == 1U && velocity.mode == 2U, "velocity flags");
+    require_int(velocity.session_id == 0x1100000000000088ULL && velocity.sequence == 7U,
+                "velocity session and sequence");
 
     frame_len = UpperProtocol_BuildFrame(UPPER_CMD_ESTOP,
-                                         &one_byte_payload,
+                                         flag_payload,
                                          ROBOT_LINK_PROTOCOL_ESTOP_PAYLOAD_LEN,
                                          frame,
                                          (uint16_t)sizeof(frame));
-    require_int(frame_len == 6U, "estop frame length");
-    require_int(frame[3] == UPPER_CMD_ESTOP && frame[4] == 1U, "estop frame payload");
+    require_int(frame_len == 7U, "estop frame length");
+    require_int(frame[3] == UPPER_CMD_ESTOP && frame[4] == ROBOT_LINK_PROTOCOL_VERSION && frame[5] == 1U,
+                "estop frame payload");
 
     frame_len = UpperProtocol_BuildFrame(UPPER_CMD_LINE_CTRL,
-                                         &one_byte_payload,
+                                         flag_payload,
                                          ROBOT_LINK_PROTOCOL_LINE_CTRL_PAYLOAD_LEN,
                                          frame,
                                          (uint16_t)sizeof(frame));
-    require_int(frame_len == 6U, "line frame length");
-    require_int(frame[3] == UPPER_CMD_LINE_CTRL && frame[4] == 1U, "line frame payload");
+    require_int(frame_len == 7U, "line frame length");
+    require_int(frame[3] == UPPER_CMD_LINE_CTRL && frame[4] == ROBOT_LINK_PROTOCOL_VERSION && frame[5] == 1U,
+                "line frame payload");
 }
 
 static void test_status_v2_payload_layout_and_saturation(void)
@@ -241,7 +249,7 @@ static void test_status_v2_payload_layout_and_saturation(void)
     uint8_t                payload[ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN] = {0};
     uint8_t                payload_len;
 
-    require_int(ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN == 65U, "status v2 payload length");
+    require_int(ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN == 92U, "status v3 payload length");
     require_int(ROBOT_LINK_PROTOCOL_MAX_PAYLOAD >= ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN,
                 "status v2 fits max payload");
 

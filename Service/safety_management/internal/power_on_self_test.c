@@ -1,9 +1,5 @@
 #include "power_on_self_test_service.h"
 #include "platform_time.h"
-#include "debug_uart_transport.h"
-
-#include <stdio.h>
-#include <string.h>
 
 #ifndef POWER_ON_SELF_TEST_HOST_TEST
 #include "status_led_driver.h"
@@ -98,26 +94,6 @@ void PostService_UpdateRuntime(uint32_t now_ms)
     (void)now_ms;
 }
 #else
-static void PowerOnSelfTest_WriteLine(const power_on_self_test_result_t *result)
-{
-    char tx[192];
-    int  len = snprintf(tx,
-                       sizeof(tx),
-                       "POST: done=%u drv=%s(mask=0x%02X) adc=%s imu=%s(chip=0x%02X) enc=%s errors=0x%08lX\r\n",
-                       result->done,
-                       PowerOnSelfTest_ItemStatusString(result->drv_status),
-                       result->drv_fault_mask,
-                       PowerOnSelfTest_ItemStatusString(result->adc_status),
-                       PowerOnSelfTest_ItemStatusString(result->imu_status),
-                       result->imu_chip_id,
-                       PowerOnSelfTest_ItemStatusString(result->encoder_status),
-                       (unsigned long)result->error_flags);
-    if (len > 0)
-    {
-        DebugUartTransport_Write((const uint8_t *)tx, (uint16_t)strlen(tx), 100U);
-    }
-}
-
 void PostService_Run(void)
 {
     post_inputs_t        inputs;
@@ -143,7 +119,6 @@ void PostService_Run(void)
     {
         StatusLedDriver_SetMode(STATUS_LED_DRIVER_FAULT);
     }
-    PowerOnSelfTest_WriteLine(&last_post_result);
 }
 
 void PostService_UpdateRuntime(uint32_t now_ms)
@@ -177,6 +152,5 @@ void PostService_UpdateRuntime(uint32_t now_ms)
     {
         StatusLedDriver_SetMode(STATUS_LED_DRIVER_FAULT);
     }
-    PowerOnSelfTest_WriteLine(&last_post_result);
 }
 #endif

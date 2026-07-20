@@ -10,6 +10,12 @@ static void UpperProtocol_WriteU32(uint8_t *out, uint32_t value)
     out[3] = (uint8_t)((value >> 24) & 0xFFU);
 }
 
+static void UpperProtocol_WriteU64(uint8_t *out, uint64_t value)
+{
+    UpperProtocol_WriteU32(out, (uint32_t)value);
+    UpperProtocol_WriteU32(&out[4], (uint32_t)(value >> 32));
+}
+
 static void UpperProtocol_WriteU16(uint8_t *out, uint16_t value)
 {
     out[0] = (uint8_t)(value & 0xFFU);
@@ -79,6 +85,11 @@ static uint32_t UpperProtocol_ReadU32(const uint8_t *in)
     return ((uint32_t)in[0]) | ((uint32_t)in[1] << 8) | ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24);
 }
 
+static uint64_t UpperProtocol_ReadU64(const uint8_t *in)
+{
+    return (uint64_t)UpperProtocol_ReadU32(in) | ((uint64_t)UpperProtocol_ReadU32(&in[4]) << 32);
+}
+
 static float UpperProtocol_ReadFloat(const uint8_t *in)
 {
     uint32_t raw   = UpperProtocol_ReadU32(in);
@@ -124,7 +135,10 @@ uint8_t UpperProtocol_Checksum8(const uint8_t *data, uint16_t length)
 
 uint8_t UpperProtocol_RemoteEstopSetRequested(const uint8_t *payload, uint8_t payload_len)
 {
-    return (payload != 0 && payload_len == ROBOT_LINK_PROTOCOL_ESTOP_PAYLOAD_LEN && payload[0] != 0U) ? 1U : 0U;
+    return (payload != 0 && payload_len == ROBOT_LINK_PROTOCOL_ESTOP_PAYLOAD_LEN
+            && payload[0] == ROBOT_LINK_PROTOCOL_VERSION && payload[1] != 0U)
+               ? 1U
+               : 0U;
 }
 
 uint16_t
@@ -162,11 +176,54 @@ UpperProtocol_ParseVelocityPayload(const uint8_t *payload, uint8_t payload_len, 
         return 0U;
     }
 
-    velocity->linear_x  = UpperProtocol_ReadFloat(&payload[0]);
-    velocity->angular_z = UpperProtocol_ReadFloat(&payload[4]);
-    velocity->enable    = payload[8];
-    velocity->mode      = payload[9];
+    if (payload[0] != ROBOT_LINK_PROTOCOL_VERSION)
+    {
+        return 0U;
+    }
+    velocity->linear_x   = UpperProtocol_ReadFloat(&payload[1]);
+    velocity->angular_z  = UpperProtocol_ReadFloat(&payload[5]);
+    velocity->enable     = payload[9];
+    velocity->mode       = payload[10];
+    velocity->session_id = UpperProtocol_ReadU64(&payload[11]);
+    velocity->sequence   = UpperProtocol_ReadU32(&payload[19]);
     return 1U;
+}
+
+uint8_t UpperProtocol_ParseVersionedFlag(const uint8_t *payload,
+                                         uint8_t        payload_len,
+                                         uint8_t        expected_payload_len,
+                                         uint8_t       *value)
+{
+    if (payload == 0 || value == 0 || payload_len != expected_payload_len || expected_payload_len != 2U
+        || payload[0] != ROBOT_LINK_PROTOCOL_VERSION)
+    {
+        return 0U;
+    }
+    *value = payload[1];
+    return 1U;
+}
+
+uint8_t UpperProtocol_ParseVersionOnly(const uint8_t *payload, uint8_t payload_len, uint8_t expected_payload_len)
+{
+    return (payload != 0 && payload_len == expected_payload_len && expected_payload_len == 1U
+            && payload[0] == ROBOT_LINK_PROTOCOL_VERSION)
+               ? 1U
+               : 0U;
+}
+
+uint8_t UpperProtocol_BuildHelloPayload(const upper_hello_payload_t *hello, uint8_t *out, uint8_t out_len)
+{
+    if (hello == 0 || out == 0 || out_len < ROBOT_LINK_PROTOCOL_HELLO_PAYLOAD_LEN)
+    {
+        return 0U;
+    }
+    out[0] = ROBOT_LINK_PROTOCOL_VERSION;
+    out[1] = hello->schema_version;
+    UpperProtocol_WriteU32(&out[2], hello->identity.capabilities);
+    (void)memcpy(&out[6], hello->identity.git_commit, COMMUNICATION_GIT_COMMIT_LENGTH);
+    UpperProtocol_WriteU32(&out[26], hello->identity.hardware_revision);
+    UpperProtocol_WriteU32(&out[30], hello->parameter_crc32);
+    return ROBOT_LINK_PROTOCOL_HELLO_PAYLOAD_LEN;
 }
 
 uint8_t UpperProtocol_BuildStatusPayload(const upper_status_payload_t *status, uint8_t *out, uint8_t out_len)
@@ -217,7 +274,20 @@ uint8_t UpperProtocol_BuildStatusPayload(const upper_status_payload_t *status, u
     }
     out[offset++] = status->motor_speed_valid_mask;
     out[offset++] = status->encoder_anomaly_mask;
-    out[offset]   = status->comm_health_flags;
+    out[offset++] = status->comm_health_flags;
+    UpperProtocol_WriteU32(&out[offset], status->status_sequence);
+    offset = (uint8_t)(offset + 4U);
+    UpperProtocol_WriteU32(&out[offset], status->timestamp_ms);
+    offset = (uint8_t)(offset + 4U);
+    UpperProtocol_WriteU64(&out[offset], status->session_id);
+    offset = (uint8_t)(offset + 8U);
+    UpperProtocol_WriteU32(&out[offset], status->received_sequence);
+    offset = (uint8_t)(offset + 4U);
+    UpperProtocol_WriteU32(&out[offset], status->applied_sequence);
+    offset        = (uint8_t)(offset + 4U);
+    out[offset++] = status->reject_reason;
+    out[offset++] = status->side_consistency_flags;
+    out[offset]   = status->ack_flags;
 
     return ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN;
 }

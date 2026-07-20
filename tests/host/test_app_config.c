@@ -108,18 +108,18 @@ static void test_validation_accepts_legal_config_and_rejects_illegal(void)
     require_int(RobotConfig_Validate(&copy) == 1U, "legal command timeout within range is accepted");
 
     /* Illegal: zero max linear speed is rejected. */
-    copy                                 = *RobotConfig_GetDefault();
-    copy.motion.max_linear_mps           = 0.0f;
+    copy                       = *RobotConfig_GetDefault();
+    copy.motion.max_linear_mps = 0.0f;
     require_int(RobotConfig_Validate(&copy) == 0U, "zero max linear speed is rejected");
 
     /* Illegal: battery critical above low warn is rejected. */
-    copy                              = *RobotConfig_GetDefault();
-    copy.safety.battery_critical_v    = 12.0f;
-    copy.safety.battery_low_warn_v    = 10.0f;
+    copy                           = *RobotConfig_GetDefault();
+    copy.safety.battery_critical_v = 12.0f;
+    copy.safety.battery_low_warn_v = 10.0f;
     require_int(RobotConfig_Validate(&copy) == 0U, "battery critical above low warn is rejected");
 
     /* Illegal: zero task period is rejected. */
-    copy                       = *RobotConfig_GetDefault();
+    copy                                 = *RobotConfig_GetDefault();
     copy.tasks[APP_TASK_MOTOR].period_ms = 0UL;
     require_int(RobotConfig_Validate(&copy) == 0U, "zero task period is rejected");
 
@@ -131,33 +131,33 @@ static void test_validation_accepts_legal_config_and_rejects_illegal(void)
     require_int(RobotConfig_Validate(0) == 0U, "null config is rejected");
 
     /* Beta5.3.2 boundary alignment: App & Service must agree on rejections. */
-    copy                                  = *RobotConfig_GetDefault();
-    copy.motion.pid_correction_limit      = 0.0f;
+    copy                             = *RobotConfig_GetDefault();
+    copy.motion.pid_correction_limit = 0.0f;
     require_int(RobotConfig_Validate(&copy) == 0U, "pid correction limit == 0 is rejected by Service");
 
-    copy                                   = *RobotConfig_GetDefault();
-    copy.teleoperation.axis_deadzone       = 127;
+    copy                             = *RobotConfig_GetDefault();
+    copy.teleoperation.axis_deadzone = 127;
     require_int(RobotConfig_Validate(&copy) == 0U, "axis deadzone == 127 is rejected by Service");
 
-    copy                                = *RobotConfig_GetDefault();
-    copy.safety.battery_low_clear_v     = copy.safety.battery_low_warn_v;
+    copy                            = *RobotConfig_GetDefault();
+    copy.safety.battery_low_clear_v = copy.safety.battery_low_warn_v;
     require_int(RobotConfig_Validate(&copy) == 0U, "battery clear == warn is rejected by Service");
 
-    copy                                   = *RobotConfig_GetDefault();
+    copy                                     = *RobotConfig_GetDefault();
     copy.safety.overcurrent_startup_blank_ms = 0UL;
     require_int(RobotConfig_Validate(&copy) == 0U, "overcurrent startup blank == 0 is rejected by Service");
 
     /* Beta5.3.2 task freeze: any deviation from frozen defaults is rejected. */
-    copy                                  = *RobotConfig_GetDefault();
-    copy.tasks[APP_TASK_MOTOR].period_ms  = 20UL;
+    copy                                 = *RobotConfig_GetDefault();
+    copy.tasks[APP_TASK_MOTOR].period_ms = 20UL;
     require_int(RobotConfig_Validate(&copy) == 0U, "task period deviation is rejected");
 
-    copy                                       = *RobotConfig_GetDefault();
+    copy                                         = *RobotConfig_GetDefault();
     copy.tasks[APP_TASK_SAFETY].stack_size_bytes = 8192UL;
     require_int(RobotConfig_Validate(&copy) == 0U, "task stack deviation is rejected");
 
-    copy                                   = *RobotConfig_GetDefault();
-    copy.tasks[APP_TASK_DEBUG].priority    = APP_TASK_PRIORITY_HIGH;
+    copy                                = *RobotConfig_GetDefault();
+    copy.tasks[APP_TASK_DEBUG].priority = APP_TASK_PRIORITY_HIGH;
     require_int(RobotConfig_Validate(&copy) == 0U, "task priority deviation is rejected");
 }
 

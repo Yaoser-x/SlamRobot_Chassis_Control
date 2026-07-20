@@ -46,9 +46,13 @@ static const communication_config_t  fake_communication_config = {
      .host_diagnostic_period_ms = 200U,
      .esp12f_status_period_ms   = 100U,
 };
+static const communication_firmware_identity_t fake_firmware_identity = {
+    .hardware_revision = 0x00020000UL,
+    .capabilities      = COMMUNICATION_REQUIRED_CAPABILITIES,
+};
 
 static void RefreshFakePublishModel(void);
-#define HostCommunication_Init()   HostCommunication_Init(&fake_communication_config)
+#define HostCommunication_Init()   HostCommunication_Init(&fake_communication_config, &fake_firmware_identity)
 #define HostCommunication_Update() (RefreshFakePublishModel(), HostCommunication_Update(&fake_publish_model))
 
 uint32_t __get_PRIMASK(void)
@@ -152,6 +156,23 @@ command_result_t CommandManagement_Set(const command_velocity_t *command)
         .timestamp_ms = command->timestamp_ms,
     };
     return (command_result_t)ControlService_SetCommand(&legacy);
+}
+
+void CommandManagement_ClearSource(command_source_t source)
+{
+    (void)source;
+}
+
+uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
+{
+    (void)source;
+    (void)now_ms;
+    return 1U;
+}
+
+uint8_t SafetyManagement_IsMotionAllowed(void)
+{
+    return 1U;
 }
 
 void ControlService_SetEmergencyStop(uint8_t enable)
@@ -295,10 +316,10 @@ static void require_int(int condition, const char *message)
 
 static void feed_valid_estop_frame(uint8_t value)
 {
-    uint8_t  payload                              = value;
-    uint8_t  frame[ROBOT_LINK_PROTOCOL_MAX_FRAME] = {0};
-    uint16_t len                                  = UpperProtocol_BuildFrame(UPPER_CMD_ESTOP,
-                                            &payload,
+    uint8_t  payload[ROBOT_LINK_PROTOCOL_ESTOP_PAYLOAD_LEN] = {ROBOT_LINK_PROTOCOL_VERSION, value};
+    uint8_t  frame[ROBOT_LINK_PROTOCOL_MAX_FRAME]           = {0};
+    uint16_t len                                            = UpperProtocol_BuildFrame(UPPER_CMD_ESTOP,
+                                            payload,
                                             ROBOT_LINK_PROTOCOL_ESTOP_PAYLOAD_LEN,
                                             frame,
                                             (uint16_t)sizeof(frame));
@@ -482,7 +503,7 @@ static void test_full_queue_drops_imu_for_status_priority(void)
     fake_tick = 1050U;
     HostCommunication_Update();
     HostCommunication_GetState(&state);
-    require_int(state.tx_busy_drops == 3U, "full queue drops due IMU frames while admitting status priority");
+    require_int(state.tx_busy_drops == 0U, "duplicate pending IMU is coalesced without starving status");
 
     huart3.gState = HAL_UART_STATE_READY;
     HostCommunication_OnTxComplete();

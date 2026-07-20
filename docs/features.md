@@ -1233,7 +1233,9 @@ typedef struct {
 
 ## 五、通信协议
 
-### 5.1 Upper Protocol V2
+### 5.1 Upper Protocol v3
+
+> 当前 wire 真源见 [upper-protocol-v3.md](upper-protocol-v3.md)。本节后续的 V2 字段说明仅保留为 beta5.3 历史回滚参考，不得用于 beta6 编解码。
 
 **模块：** `Service/communication/internal/robot_link_protocol.c`
 **头文件：** `Service/communication/internal/robot_link_protocol.h`
@@ -1856,7 +1858,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | 31 | `oled_selfcheck` | OLED 自检逻辑（纯函数） |
 | 32 | `oled_calibration_view` | IMU 校准 OLED 显示模型 |
 | 33 | `analysis_scripts` | Python 分析脚本单元测试 |
-| 34 | `upper_v2_golden` | Upper Protocol V2 黄金帧跨仓一致性 |
+| 34 | `upper_v3_golden` | Upper Protocol v3 HELLO/STATUS/DIAGNOSTIC/IMU 黄金帧一致性 |
 
 **Mock 框架：** tests/host/ 下提供 cmsis_os2.h、adc.h、usart.h、i2c.h、tim.h、main.h 等主机端替代头文件。
 

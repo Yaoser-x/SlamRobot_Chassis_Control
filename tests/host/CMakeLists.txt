@@ -46,7 +46,10 @@ include_directories(
     ../../Service/motion_control/internal
 )
 
-add_library(host_platform STATIC host_platform.c)
+add_library(host_platform STATIC
+    host_platform.c
+    ../../Service/parameter_management/internal/parameter_identity_crc.c
+)
 target_include_directories(host_platform PUBLIC ../../Platform)
 link_libraries(host_platform)
 
@@ -194,6 +197,7 @@ add_executable(test_host_communication_service
     test_host_communication_service.c
     ../../Service/communication/host_communication_service.c
     ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/communication_session_tracker.c
     ../../Service/communication/internal/telemetry_encoder.c
     ../../Service/communication/internal/frame_stream_parser.c
     ../../Service/communication/internal/robot_link_protocol.c
@@ -256,9 +260,21 @@ add_test(NAME framed_stream_parser COMMAND test_framed_stream_parser)
 add_executable(test_remote_command_dispatcher
     test_remote_command_dispatcher.c
     ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/communication_session_tracker.c
     ../../Service/communication/internal/robot_link_protocol.c
 )
 add_test(NAME remote_command_dispatcher COMMAND test_remote_command_dispatcher)
+
+add_executable(test_communication_session_tracker
+    test_communication_session_tracker.c
+    ../../Service/communication/internal/communication_session_tracker.c
+)
+add_test(NAME communication_session_tracker COMMAND test_communication_session_tracker)
+
+add_executable(test_parameter_identity_crc
+    test_parameter_identity_crc.c
+)
+add_test(NAME parameter_identity_crc COMMAND test_parameter_identity_crc)
 
 add_executable(test_telemetry_encoder
     test_telemetry_encoder.c
@@ -781,21 +797,21 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME analysis_scripts
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_analysis_scripts.py)
 
-add_executable(generate_upper_v2_golden
-    generate_upper_v2_golden.c
+add_executable(generate_upper_v3_golden
+    generate_upper_v3_golden.c
     ../../Service/communication/internal/robot_link_protocol.c
 )
 
-target_include_directories(generate_upper_v2_golden PRIVATE
+target_include_directories(generate_upper_v3_golden PRIVATE
     ../../App/adapters
 )
 
 add_test(
-    NAME upper_v2_golden
+    NAME upper_v3_golden
     COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/check_upper_v2_golden.py
-        $<TARGET_FILE:generate_upper_v2_golden>
-        ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/upper_v2_golden.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_upper_v3_golden.py
+        $<TARGET_FILE:generate_upper_v3_golden>
+        ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/upper_v3_golden.json
 )
 
 add_executable(test_communication_publish_model

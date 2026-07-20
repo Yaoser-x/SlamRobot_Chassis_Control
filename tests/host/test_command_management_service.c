@@ -109,10 +109,27 @@ static void test_stale_safety_decision_cannot_reopen_gate(void)
     require_int(CommandManagement_Set(&host) == COMMAND_RESULT_ACCEPTED, "newer safety decision reopens gate");
 }
 
+static void test_duplicate_refresh_preserves_generation_and_cannot_revive_timeout(void)
+{
+    command_management_status_t before;
+    command_management_status_t after;
+    command_velocity_t          host = command(COMMAND_SOURCE_HOST, 100U);
+
+    reset_owner();
+    require_int(CommandManagement_Set(&host) == COMMAND_RESULT_ACCEPTED, "host accepted before refresh");
+    (void)CommandManagement_GetStatus(150U, &before);
+    require_int(CommandManagement_RefreshSource(COMMAND_SOURCE_HOST, 150U) != 0U, "live lease refresh succeeds");
+    (void)CommandManagement_GetStatus(150U, &after);
+    require_int(after.generation == before.generation, "refresh does not increment command generation");
+    require_int(CommandManagement_RefreshSource(COMMAND_SOURCE_HOST, 351U) == 0U,
+                "expired duplicate cannot revive command");
+}
+
 int main(void)
 {
     test_priority_timeout_and_ordinary_fallback();
     test_safety_gate_revokes_without_old_command_recovery();
     test_stale_safety_decision_cannot_reopen_gate();
+    test_duplicate_refresh_preserves_generation_and_cannot_revive_timeout();
     return 0;
 }

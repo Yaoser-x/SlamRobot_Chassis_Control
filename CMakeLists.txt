@@ -30,7 +30,7 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 
 file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" F407_FIRMWARE_VERSION LIMIT_COUNT 1)
 execute_process(
-    COMMAND git rev-parse --short=8 HEAD
+    COMMAND git rev-parse HEAD
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     OUTPUT_VARIABLE F407_GIT_SHA
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -45,10 +45,22 @@ execute_process(
     OUTPUT_VARIABLE F407_GIT_STATUS
     ERROR_QUIET
 )
-if(F407_GIT_STATUS)
+if(F407_GIT_STATUS OR F407_GIT_SHA STREQUAL "unknown")
     set(F407_BUILD_DIRTY 1)
+    set(F407_BUILD_IDENTITY_VALID 0)
+    set(F407_GIT_COMMIT_BYTES "0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00")
 else()
     set(F407_BUILD_DIRTY 0)
+    set(F407_BUILD_IDENTITY_VALID 1)
+    set(F407_GIT_COMMIT_BYTES "")
+    foreach(F407_GIT_BYTE_INDEX RANGE 0 19)
+        math(EXPR F407_GIT_HEX_OFFSET "${F407_GIT_BYTE_INDEX} * 2")
+        string(SUBSTRING "${F407_GIT_SHA}" ${F407_GIT_HEX_OFFSET} 2 F407_GIT_HEX_BYTE)
+        if(F407_GIT_COMMIT_BYTES)
+            string(APPEND F407_GIT_COMMIT_BYTES ", ")
+        endif()
+        string(APPEND F407_GIT_COMMIT_BYTES "0x${F407_GIT_HEX_BYTE}")
+    endforeach()
 endif()
 configure_file(cmake/build_identity.h.in generated/build_identity.h @ONLY)
 
@@ -69,6 +81,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Five-layer user-maintained sources
 set(F407_APP_SOURCES
     App/app_init.c
+    App/composition/firmware_identity_provider.c
     App/config/robot_config.c
     App/composition/system_publish_snapshot_collector.c
     App/composition/operator_action_router.c
@@ -155,6 +168,7 @@ set(F407_SERVICE_SOURCES
     Service/safety_management/internal/power_on_self_test.c
     Service/parameter_management/parameter_management_service.c
     Service/parameter_management/internal/parameter_management_persistence.c
+    Service/parameter_management/internal/parameter_identity_crc.c
     Service/parameter_management/internal/parameter_persistence_backend.c
     Service/parameter_management/internal/flash_parameter_image.c
     Service/parameter_management/internal/flash_parameter_codec.c
@@ -171,6 +185,7 @@ set(F407_SERVICE_SOURCES
     Service/communication/wireless_communication_service.c
     Service/communication/host_communication_service.c
     Service/communication/internal/remote_command_dispatcher.c
+    Service/communication/internal/communication_session_tracker.c
     Service/communication/internal/telemetry_encoder.c
     Service/system_monitoring/internal/system_publish_snapshot.c
     Service/communication/internal/frame_stream_parser.c

@@ -2,6 +2,18 @@
 
 本检查表只记录可追溯的验证结果。未附固件 SHA、日志或测量记录的项目不得勾选。
 
+## Beta6 / Upper Protocol v3
+
+- [x] `VERSION` 为 `1.0.0-beta6`
+- [x] Host/ESP v3-only，协议长度与 v3 golden vector 固定
+- [x] Service DAG、唯一所有权和 codec/encoder 纯度门禁通过
+- [x] Debug 与 Release clean build 通过
+- [x] Host tests 全部通过
+- [ ] ESP8266 Core 3.1.2 / WebSockets 2.7.2 编译通过
+- [ ] 与 Ros2_Slam v0.4.0 固定 commit 的逐字节交叉金样通过
+- [ ] 双链路 HIL、故障注入和连续 30 min 运行通过
+- [ ] clean commit 对应 ELF/HEX/BIN、ESP bin 与 HIL 报告归档
+
 ## Beta5.3 静态门禁
 
 - [x] `VERSION` 为 `1.0.0-beta5.3`

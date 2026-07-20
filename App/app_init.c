@@ -20,13 +20,15 @@
 #include "system_monitoring_service.h"
 #include "teleoperation_service.h"
 #include "host_communication_service.h"
+#include "firmware_identity_provider.h"
 #include "usart1_debug_console.h"
 
 uint8_t App_InitWithConfig(const robot_config_t *config)
 {
-    param_model_t                 params;
-    parameter_management_status_t parameter_status;
-    uint8_t                       params_loaded;
+    param_model_t                     params;
+    parameter_management_status_t     parameter_status;
+    uint8_t                           params_loaded;
+    communication_firmware_identity_t firmware_identity;
     if (RobotConfig_Validate(config) == 0U)
     {
         return 0U;
@@ -86,7 +88,8 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
     {
         return 0U;
     }
-    if (HostCommunication_Init(&config->communication) == 0U)
+    firmware_identity = FirmwareIdentityProvider_Build();
+    if (HostCommunication_Init(&config->communication, &firmware_identity) == 0U)
     {
         return 0U;
     }
@@ -97,7 +100,7 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
     {
         return 0U;
     }
-    if (WirelessCommunication_Init(&config->communication) == 0U)
+    if (WirelessCommunication_Init(&config->communication, &firmware_identity) == 0U)
     {
         return 0U;
     }

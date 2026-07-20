@@ -68,7 +68,7 @@ Beta5 是架构整改版本，不是业务功能版本。任何目录、接口�
 - 有效运动学轮距默认值为 0.176 m。
 - Flash schema 固定为 4，bundle 固定为 340 字节，image 固定为 364 字节。
 - schema 1–3 迁移结果及 IMU calibration 保持兼容。
-- Upper Protocol 版本固定为 2；STATUS/DIAGNOSTIC/IMU_STATUS 固定为 65/28/99 字节，最大 payload 固定为 99 字节。
+- Beta5 历史基线为 Upper Protocol v2；Beta6 已成套升级为 v3-only，STATUS/DIAGNOSTIC/IMU_STATUS 固定为 92/28/99 字节，最大 payload 保持 99 字节。
 - 帧头、命令 ID、校验方式、字段顺序、缩放、饱和、owner/deadman 和发布周期不得改变。
 
 ## 8. 自动化证据映射
@@ -80,7 +80,7 @@ Beta5 是架构整改版本，不是业务功能版本。任何目录、接口�
 | 高速直行不截速 | `straight_controller` |
 | 巡线 RAM/Flash 分离 | `line_control_service` |
 | PS2 空闲释放和航向宏 | `ps2_control_service` |
-| 参数、schema 和字节布局 | `flash_param`、`upper_v2_golden` |
+| 参数、schema 和字节布局 | `flash_param`、`upper_v3_golden` |
 | IMU 质量和标定 | `imu_pipeline` |
 | 安全锁存和恢复 | `safety_service` |
 

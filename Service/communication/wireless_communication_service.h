@@ -5,6 +5,7 @@
 
 #include "communication_publish_model_types.h"
 #include "communication_config.h"
+#include "communication_types.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -13,20 +14,22 @@ extern "C"
 
     typedef struct
     {
-        uint32_t rx_frames;
-        uint32_t tx_frames;
-        uint32_t tx_busy_drops;
-        uint32_t rx_checksum_errors;
-        uint32_t rx_length_errors;
-        uint32_t rx_overflow_errors;
-        uint32_t rx_timeout_resets;
-        uint32_t uart_errors;
-        uint32_t last_rx_timestamp_ms;
-        uint8_t  boot_mode_download;
+        uint32_t                         rx_frames;
+        uint32_t                         tx_frames;
+        uint32_t                         tx_busy_drops;
+        uint32_t                         rx_checksum_errors;
+        uint32_t                         rx_length_errors;
+        uint32_t                         rx_overflow_errors;
+        uint32_t                         rx_timeout_resets;
+        uint32_t                         uart_errors;
+        uint32_t                         last_rx_timestamp_ms;
+        uint8_t                          boot_mode_download;
+        communication_session_snapshot_t session;
     } wireless_communication_state_t;
 
     /** Initialize wireless communication with injected publication periods. */
-    uint8_t WirelessCommunication_Init(const communication_config_t *config);
+    uint8_t WirelessCommunication_Init(const communication_config_t            *config,
+                                       const communication_firmware_identity_t *identity);
     void    WirelessCommunication_RestartRx(void);
     /** Poll wireless RX and publish frames from one App-provided coherent model. */
     void WirelessCommunication_Update(const communication_publish_model_t *publish_model);
