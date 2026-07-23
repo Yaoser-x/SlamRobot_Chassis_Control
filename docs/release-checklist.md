@@ -2,17 +2,22 @@
 
 本检查表只记录可追溯的验证结果。未附固件 SHA、日志或测量记录的项目不得勾选。
 
-## Beta6 / Upper Protocol v3
+## v1.0.0-rc1 / Upper Protocol v3
 
-- [x] `VERSION` 为 `1.0.0-beta6`
+- [x] `VERSION` 为 `1.0.0-rc1`
 - [x] Host/ESP v3-only，协议长度与 v3 golden vector 固定
+- [x] schema、C encoder、Python codec 和三组布局 golden vector 一致
+- [x] Safety 恢复要求 Host/ESP 新 disable rearm
+- [x] CLEAR_FAULT/LINE_CTRL 经 mailbox 和 App 分发，业务结果由 Service 生成
 - [x] Service DAG、唯一所有权和 codec/encoder 纯度门禁通过
-- [x] Debug 与 Release clean build 通过
-- [x] Host tests 全部通过
+- [x] 当前工作树 Debug 与 Release build 通过
+- [ ] 最终 clean commit 的 Debug 与 Release 重建、HELLO identity 校验通过
+- [x] 58 项 Host tests 全部通过
 - [ ] ESP8266 Core 3.1.2 / WebSockets 2.7.2 编译通过
 - [ ] 与 Ros2_Slam v0.4.0 固定 commit 的逐字节交叉金样通过
 - [ ] 双链路 HIL、故障注入和连续 30 min 运行通过
 - [ ] clean commit 对应 ELF/HEX/BIN、ESP bin 与 HIL 报告归档
+- [ ] 创建本地 annotated tag `v1.0.0-rc1`（仅在以上硬门槛全部通过后）
 
 ## Beta5.3 静态门禁
 

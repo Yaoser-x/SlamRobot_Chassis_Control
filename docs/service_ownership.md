@@ -8,6 +8,7 @@
 | USART3 Host | HostCommunication | 调用 Wireless、决定运动许可、读取 Parameter |
 | USART2 ESP | WirelessCommunication | 调用 Host、共享 Host session、读取 Parameter |
 | Session/sequence/ACK | Communication internal tracker，每链路独立 slot | 租约、优先级、安全和电机调用 |
+| 操作请求队列/阶段 | Communication fixed mailbox，每链路独立 | 直接生成业务成功 |
 | 命令租约与仲裁 | CommandManagement | wire/session/ACK 语义 |
 | ESTOP/fault/运动许可 | SafetyManagement | 协议解析和 TX |
 | 参数与 identity CRC | ParameterManagement | Communication 依赖和 HELLO 生成 |
@@ -23,10 +24,8 @@
 BSP transport
     ↑
 Communication ──→ CommandManagement ──→ ParameterManagement
-      │                    ↑
-      ├──→ SafetyManagement┘
-      ├──→ LineFollowing
-      └──→ SystemMonitoring
+      │
+      └── operation mailbox ──→ App composition ──→ Safety / Line
 
 App composition ──读取 Service 快照──→ immutable publish model
                                          ↓
@@ -35,7 +34,7 @@ App composition ──读取 Service 快照──→ immutable publish model
 
 Communication 不得包含 ParameterManagement 头；参数 CRC 只能由 App collector 写入发布 DTO。Command、Safety、Parameter 不得反向依赖 Communication。Host 与 Wireless 只复用纯 codec/session tracker，互不调用。
 
-session tracker 只判断 wire 合法性；只有 CommandManagement 的执行结果可将序列标记为 APPLIED。SafetyManagement 保持运动许可唯一所有者。App 只编排和复制事实，不复制 session、命令或安全状态成为第二个 owner。
+session tracker 只判断 velocity wire 合法性；只有 CommandManagement 的执行结果可将序列标记为 APPLIED。ESTOP、CLEAR_FAULT 和 LINE_CTRL 由 Communication 入队，App 在对应 5 ms 链路任务中调用业务 Service。SafetyManagement/LineFollowing 生成业务结果；App 不复制 session、命令或安全状态成为第二个 owner。
 
 ## 控制源契约
 
@@ -47,7 +46,7 @@ session tracker 只判断 wire 合法性；只有 CommandManagement 的执行结
 | Line | 4 | 50 ms |
 | Debug | 5 | 2000 ms |
 
-duplicate 只能刷新未过期租约，不改变目标和 generation，也不能复活超时命令。关闭 Safety gate 会清空所有来源，重新开放后不恢复旧命令。
+duplicate 只能刷新未过期租约，不改变目标和 generation，也不能复活超时命令。关闭 Safety gate 会清空所有来源并令 Host/ESP 必须重新 disable；故障期间或 duplicate disable 均不能跨安全事件 rearm。
 
 ## TX 与中断边界
 

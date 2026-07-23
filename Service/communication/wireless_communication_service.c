@@ -1,5 +1,6 @@
 #include "wireless_communication_service.h"
 #include "remote_command_dispatcher.h"
+#include "communication_operation_mailbox.h"
 #include "communication_session_tracker.h"
 #include "frame_stream_parser.h"
 #include "telemetry_encoder.h"
@@ -158,6 +159,7 @@ uint8_t WirelessCommunication_Init(const communication_config_t            *conf
     esp12f_state.last_rx_timestamp_ms = 0U;
     WirelessCommunication_SetDownloadMode(0U);
     CommunicationSessionTracker_Init();
+    CommunicationOperationMailbox_ResetLink(COMMUNICATION_LINK_ESP12F);
     WirelessCommunication_RestartRx();
     return 1U;
 }
@@ -242,5 +244,19 @@ void WirelessCommunication_GetState(wireless_communication_state_t *state)
     {
         *state = esp12f_state;
         CommunicationSessionTracker_GetSnapshot(COMMUNICATION_LINK_ESP12F, &state->session);
+        CommunicationOperationMailbox_GetLastResult(COMMUNICATION_LINK_ESP12F, &state->last_operation_result);
     }
+}
+
+uint8_t WirelessCommunication_TakeOperation(uint32_t now_ms, communication_operation_request_t *request)
+{
+    return CommunicationOperationMailbox_Take(COMMUNICATION_LINK_ESP12F, now_ms, request);
+}
+
+void WirelessCommunication_CompleteOperation(const communication_operation_request_t *request,
+                                             communication_operation_stage_t          stage,
+                                             uint32_t                                 detail_mask,
+                                             uint32_t                                 now_ms)
+{
+    CommunicationOperationMailbox_Complete(request, stage, detail_mask, now_ms);
 }

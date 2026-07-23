@@ -1,6 +1,7 @@
 #include "remote_command_dispatcher.h"
 
 #include "command_management_service.h"
+#include "communication_operation_mailbox.h"
 #include "communication_session_tracker.h"
 #include "robot_link_protocol.h"
 
@@ -10,11 +11,8 @@
 
 static command_velocity_t last_command;
 static uint8_t            command_count;
-static uint8_t            clear_count;
+static uint8_t            disable_count;
 static uint8_t            refresh_count;
-static uint8_t            emergency_stop;
-static uint8_t            line_enabled;
-static uint32_t           cleared_fault_mask;
 
 uint32_t PlatformCritical_Enter(void)
 {
@@ -33,10 +31,11 @@ command_result_t CommandManagement_Set(const command_velocity_t *command)
     return COMMAND_RESULT_ACCEPTED;
 }
 
-void CommandManagement_ClearSource(command_source_t source)
+command_result_t CommandManagement_DisableRemoteSource(command_source_t source)
 {
     (void)source;
-    clear_count++;
+    disable_count++;
+    return COMMAND_RESULT_ACCEPTED;
 }
 
 uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
@@ -47,29 +46,9 @@ uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms
     return 1U;
 }
 
-uint8_t SafetyManagement_IsMotionAllowed(void)
+uint8_t CommandManagement_IsMotionGateOpen(void)
 {
     return 1U;
-}
-
-void SafetyManagement_SetEmergencyStop(uint8_t enabled)
-{
-    emergency_stop = enabled;
-}
-
-uint8_t SafetyManagement_IsEmergencyStop(void)
-{
-    return emergency_stop;
-}
-
-void LineFollowing_Enable(uint8_t enabled)
-{
-    line_enabled = enabled;
-}
-
-void SafetyManagement_ClearLatchedFaults(uint32_t mask)
-{
-    cleared_fault_mask = mask;
 }
 
 static void WriteU32(uint8_t *out, uint32_t value)
@@ -106,12 +85,15 @@ VelocityFrame(float linear_x, float angular_z, uint8_t enable, uint64_t session_
 
 int main(void)
 {
-    protocol_frame_t frame;
+    protocol_frame_t                  frame;
+    communication_operation_request_t operation;
 
     CommunicationSessionTracker_Init();
+    CommunicationOperationMailbox_ResetLink(COMMUNICATION_LINK_UPPER);
+    CommunicationOperationMailbox_ResetLink(COMMUNICATION_LINK_ESP12F);
     frame = VelocityFrame(0.0f, 0.0f, 0U, 0x1122334455667788ULL, 1U);
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 100U);
-    assert(clear_count == 1U);
+    assert(disable_count == 1U);
 
     frame = VelocityFrame(0.5f, -0.25f, 1U, 0x1122334455667788ULL, 2U);
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 123U);
@@ -129,7 +111,8 @@ int main(void)
         .payload     = {ROBOT_LINK_PROTOCOL_VERSION, 1U},
     };
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 0U);
-    assert(emergency_stop == 1U);
+    assert(CommunicationOperationMailbox_Take(COMMUNICATION_LINK_UPPER, 1U, &operation) != 0U);
+    assert(operation.kind == COMMUNICATION_OPERATION_ESTOP && operation.value == 1U);
 
     frame = (protocol_frame_t){
         .cmd         = UPPER_CMD_LINE_CTRL,
@@ -137,16 +120,17 @@ int main(void)
         .payload     = {ROBOT_LINK_PROTOCOL_VERSION, 1U},
     };
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 0U);
-    assert(line_enabled == 1U);
+    assert(CommunicationOperationMailbox_Take(COMMUNICATION_LINK_UPPER, 1U, &operation) != 0U);
+    assert(operation.kind == COMMUNICATION_OPERATION_LINE_CTRL && operation.value == 1U);
 
-    emergency_stop = 0U;
-    frame          = (protocol_frame_t){
-                 .cmd         = UPPER_CMD_CLEAR_FAULT,
-                 .payload_len = ROBOT_LINK_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN,
-                 .payload     = {ROBOT_LINK_PROTOCOL_VERSION},
+    frame = (protocol_frame_t){
+        .cmd         = UPPER_CMD_CLEAR_FAULT,
+        .payload_len = ROBOT_LINK_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN,
+        .payload     = {ROBOT_LINK_PROTOCOL_VERSION},
     };
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_ESP12F, &frame, 0U);
-    assert(cleared_fault_mask == 0xFFFFFFFFUL);
+    assert(CommunicationOperationMailbox_Take(COMMUNICATION_LINK_ESP12F, 1U, &operation) != 0U);
+    assert(operation.kind == COMMUNICATION_OPERATION_CLEAR_FAULT);
 
     frame = (protocol_frame_t){
         .cmd         = UPPER_CMD_GET_INFO,

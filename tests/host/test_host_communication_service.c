@@ -163,10 +163,21 @@ void CommandManagement_ClearSource(command_source_t source)
     (void)source;
 }
 
+command_result_t CommandManagement_DisableRemoteSource(command_source_t source)
+{
+    CommandManagement_ClearSource(source);
+    return COMMAND_RESULT_ACCEPTED;
+}
+
 uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
 {
     (void)source;
     (void)now_ms;
+    return 1U;
+}
+
+uint8_t CommandManagement_IsMotionGateOpen(void)
+{
     return 1U;
 }
 
@@ -201,14 +212,16 @@ uint8_t ControlService_IsFaultStop(void)
     return 0U;
 }
 
-void LineFollowing_Enable(uint8_t enable)
+line_following_result_t LineFollowing_Enable(uint8_t enable)
 {
     (void)enable;
+    return LINE_FOLLOWING_RESULT_APPLIED;
 }
 
-void SafetyManagement_ClearLatchedFaults(uint32_t mask)
+safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
 {
     (void)mask;
+    return (safety_clear_result_t){.code = SAFETY_CLEAR_RESULT_APPLIED};
 }
 
 void ChassisService_GetState(chassis_service_snapshot_t *state)
@@ -351,6 +364,8 @@ static void test_dma_callbacks_and_valid_frame_timestamp(void)
 
 static void test_remote_estop_is_set_only(void)
 {
+    communication_operation_request_t operation;
+
     reset_host_uart_state();
     HostCommunication_Init();
     feed_valid_estop_frame(0U);
@@ -361,7 +376,11 @@ static void test_remote_estop_is_set_only(void)
     HostCommunication_Init();
     feed_valid_estop_frame(1U);
     HostCommunication_Update();
-    require_int(estop_set_count == 1UL && estop_last_value == 1U, "remote ESTOP=1 sets emergency stop");
+    require_int(estop_set_count == 0UL, "Communication does not apply ESTOP business state directly");
+    require_int(HostCommunication_TakeOperation(fake_tick, &operation) != 0U,
+                "remote ESTOP=1 queues an App-owned operation");
+    require_int(operation.kind == COMMUNICATION_OPERATION_ESTOP && operation.value == 1U,
+                "queued operation preserves ESTOP request");
 }
 
 static void test_parser_timeout_and_uart_error_restart_dma(void)

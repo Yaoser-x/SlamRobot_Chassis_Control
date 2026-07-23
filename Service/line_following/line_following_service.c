@@ -488,12 +488,13 @@ void LineFollowing_CalibrationCancel(void)
     PlatformCritical_Exit(critical);
 }
 
-void LineFollowing_Enable(uint8_t enable)
+line_following_result_t LineFollowing_Enable(uint8_t enable)
 {
     line_following_status_t   next_state;
     platform_critical_state_t critical;
     uint8_t                   clear_source     = 0U;
     uint32_t                  input_generation = 0UL;
+    line_following_result_t   result           = LINE_FOLLOWING_RESULT_APPLIED;
 
     if (enable != 0U)
     {
@@ -503,11 +504,13 @@ void LineFollowing_Enable(uint8_t enable)
         {
             enable       = 0U;
             clear_source = 1U;
+            result       = LINE_FOLLOWING_RESULT_REJECTED;
         }
         else if (generation != CommandManagement_GetMotionRevokeGeneration())
         {
             enable       = 0U;
             clear_source = 1U;
+            result       = LINE_FOLLOWING_RESULT_REJECTED;
         }
         else
         {
@@ -531,7 +534,8 @@ void LineFollowing_Enable(uint8_t enable)
     {
         next_state.tracking_active = 0U;
     }
-    next_state.globally_enabled = g_line_enabled;
+    next_state.globally_enabled   = g_line_enabled;
+    next_state.last_enable_result = result;
     next_state.generation++;
     g_line_state = next_state;
     PlatformCritical_Exit(critical);
@@ -540,6 +544,7 @@ void LineFollowing_Enable(uint8_t enable)
     {
         CommandManagement_ClearSource(COMMAND_SOURCE_LINE);
     }
+    return result;
 }
 
 uint8_t LineFollowing_IsEnabled(void)

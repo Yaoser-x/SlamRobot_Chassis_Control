@@ -382,20 +382,22 @@ static void test_abort_preserves_collected_data(void)
 static void test_safety_state_rejects_line_rearm(void)
 {
     reset_fake();
-    LineFollowing_Enable(0U);
+    require_int(LineFollowing_Enable(0U) == LINE_FOLLOWING_RESULT_APPLIED, "line disable reports applied");
 
     fake_maintenance = 1U;
-    LineFollowing_Enable(1U);
+    require_int(LineFollowing_Enable(1U) == LINE_FOLLOWING_RESULT_REJECTED,
+                "maintenance rejection is Service-generated");
     require_int(LineFollowing_IsEnabled() == 0U, "maintenance rejects line rearm");
 
     fake_maintenance = 0U;
     fake_estop       = 1U;
-    LineFollowing_Enable(1U);
+    require_int(LineFollowing_Enable(1U) == LINE_FOLLOWING_RESULT_REJECTED, "ESTOP rejection is Service-generated");
     require_int(LineFollowing_IsEnabled() == 0U, "estop rejects line rearm");
 
     fake_estop      = 0U;
     fake_fault_stop = 1U;
-    LineFollowing_Enable(1U);
+    require_int(LineFollowing_Enable(1U) == LINE_FOLLOWING_RESULT_REJECTED,
+                "fault-stop rejection is Service-generated");
     require_int(LineFollowing_IsEnabled() == 0U, "fault stop rejects line rearm");
 }
 

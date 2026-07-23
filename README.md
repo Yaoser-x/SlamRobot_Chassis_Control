@@ -2,7 +2,7 @@
 
 基于 STM32F407VET6 的四轮左右差速底盘控制固件。构建系统采用 STM32CubeMX + FreeRTOS + CMake + Ninja + GNU Arm Embedded Toolchain。
 
-> **当前状态**：`1.0.0-beta6` / Upper Protocol v3 候选。默认两驱启用 M2（左侧）和 M3（右侧）；与 Ros2_Slam v0.4.0 配对，正式发布仍需完成双链路 HIL。
+> **当前状态**：`1.0.0-rc1` 软件冻结候选 / Upper Protocol v3。默认两驱启用 M2（左侧）和 M3（右侧）；与 Ros2_Slam v0.4.0 配对，创建 rc1 标签前仍需完成双链路 HIL、故障注入和实车停车。
 
 ## 快速开始
 
@@ -29,7 +29,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
-| **构建验证** | CI 双 preset + 55 项 Host 行为测试 + 架构/所有权门禁 + CubeMX 安全检查 + ESP8266 Core 3.1.2 固定版本编译 |
+| **构建验证** | CI 双 preset + 58 项 Host 行为测试 + 架构/所有权门禁 + CubeMX 安全检查 + ESP8266 Core 3.1.2 固定版本编译 |
 
 > V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 

@@ -27,6 +27,7 @@ include_directories(
     ../../Algorithm/filtering
     ../../Algorithm/calibration
     ../../App/config
+    ../../App/composition
     fakes/chassis
     ../../Service/communication
     ../../Service/communication/internal
@@ -197,6 +198,7 @@ add_executable(test_host_communication_service
     test_host_communication_service.c
     ../../Service/communication/host_communication_service.c
     ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/communication_operation_mailbox.c
     ../../Service/communication/internal/communication_session_tracker.c
     ../../Service/communication/internal/telemetry_encoder.c
     ../../Service/communication/internal/frame_stream_parser.c
@@ -260,6 +262,7 @@ add_test(NAME framed_stream_parser COMMAND test_framed_stream_parser)
 add_executable(test_remote_command_dispatcher
     test_remote_command_dispatcher.c
     ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/communication_operation_mailbox.c
     ../../Service/communication/internal/communication_session_tracker.c
     ../../Service/communication/internal/robot_link_protocol.c
 )
@@ -270,6 +273,18 @@ add_executable(test_communication_session_tracker
     ../../Service/communication/internal/communication_session_tracker.c
 )
 add_test(NAME communication_session_tracker COMMAND test_communication_session_tracker)
+
+add_executable(test_communication_operation_mailbox
+    test_communication_operation_mailbox.c
+    ../../Service/communication/internal/communication_operation_mailbox.c
+)
+add_test(NAME communication_operation_mailbox COMMAND test_communication_operation_mailbox)
+
+add_executable(test_remote_operation_orchestrator
+    test_remote_operation_orchestrator.c
+    ../../App/composition/remote_operation_orchestrator.c
+)
+add_test(NAME remote_operation_orchestrator COMMAND test_remote_operation_orchestrator)
 
 add_executable(test_parameter_identity_crc
     test_parameter_identity_crc.c
@@ -813,6 +828,9 @@ add_test(
         $<TARGET_FILE:generate_upper_v3_golden>
         ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/upper_v3_golden.json
 )
+
+add_test(NAME upper_v3_schema
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_upper_v3_schema.py)
 
 add_executable(test_communication_publish_model
     test_communication_publish_model.c

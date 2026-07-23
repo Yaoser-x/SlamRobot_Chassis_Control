@@ -70,6 +70,17 @@ int main(void)
     CommunicationSessionTracker_GetSnapshot(COMMUNICATION_LINK_ESP12F, &esp);
     assert(host.session_id == 22ULL);
     assert(esp.session_id == 33ULL);
-    puts("PASS: independent Upper Protocol v3 sessions");
+
+    for (uint64_t session = 100ULL; session <= 108ULL; ++session)
+    {
+        target = Target(session, 1U, 0U);
+        assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, (uint32_t)session)
+               == COMMUNICATION_SESSION_DISABLE);
+        CommunicationSessionTracker_Complete(COMMUNICATION_LINK_UPPER, target.sequence, 1U, COMMUNICATION_REJECT_NONE);
+    }
+    target = Target(22ULL, 2U, 0U);
+    assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 200U)
+           == COMMUNICATION_SESSION_DISABLE);
+    puts("PASS: retired replay protection is link-local and bounded to the latest eight sessions");
     return 0;
 }

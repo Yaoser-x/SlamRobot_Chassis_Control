@@ -377,7 +377,8 @@ void SafetyManagement_Update(void)
         new_latched_flags |= SYSTEM_ERROR_TIM_BREAK;
     }
 
-    primask = PlatformCritical_Enter();
+    primask                      = PlatformCritical_Enter();
+    next_state.last_clear_result = monitor_state.last_clear_result;
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         overcurrent_count[i] = next_overcurrent_count[i];
@@ -438,7 +439,7 @@ uint32_t SafetyManagement_GetStatus(safety_management_status_t *state)
     return generation;
 }
 
-void SafetyManagement_ClearLatchedFaults(uint32_t mask)
+safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
 {
     uint32_t                        clearable = FaultStopPolicy_ManualClearMask(mask);
     safety_management_status_t      snapshot;
@@ -448,6 +449,22 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
     uint32_t                        latched_after_clear;
     safety_management_status_t      next;
     uint32_t                        primask;
+    safety_clear_result_t           result = {
+                  .code           = SAFETY_CLEAR_RESULT_REJECTED,
+                  .requested_mask = mask,
+    };
+
+    primask = PlatformCritical_Enter();
+    if (emergency_stop != 0U)
+    {
+        result.code                     = SAFETY_CLEAR_RESULT_CONDITION_NOT_CLEARED;
+        result.remaining_mask           = monitor_state.latched_error_flags & clearable;
+        monitor_state.last_clear_result = result;
+        monitor_state.generation++;
+        PlatformCritical_Exit(primask);
+        return result;
+    }
+    PlatformCritical_Exit(primask);
 
     MotorDriver_GetState(&motor_state);
     (void)StateEstimation_GetWheel(&encoder_state);
@@ -493,7 +510,16 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
     }
 
     primask = PlatformCritical_Enter();
-    next    = monitor_state;
+    if (emergency_stop != 0U)
+    {
+        result.code                     = SAFETY_CLEAR_RESULT_CONDITION_NOT_CLEARED;
+        result.remaining_mask           = monitor_state.latched_error_flags & FaultStopPolicy_ManualClearMask(mask);
+        monitor_state.last_clear_result = result;
+        monitor_state.generation++;
+        PlatformCritical_Exit(primask);
+        return result;
+    }
+    next = monitor_state;
     next.latched_error_flags &= ~clearable;
     latched_after_clear = next.latched_error_flags;
     if (FaultStopPolicy_RequiresFaultStop(latched_after_clear) == 0U)
@@ -505,6 +531,11 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
         clear_fault_stop = 1U;
     }
     next.error_flags &= ~clearable;
+    result.cleared_mask   = snapshot.latched_error_flags & clearable;
+    result.remaining_mask = latched_after_clear & FaultStopPolicy_ManualClearMask(mask);
+    result.code =
+        (result.remaining_mask == 0U) ? SAFETY_CLEAR_RESULT_APPLIED : SAFETY_CLEAR_RESULT_CONDITION_NOT_CLEARED;
+    next.last_clear_result = result;
     next.generation++;
     monitor_state = next;
     PlatformCritical_Exit(primask);
@@ -513,6 +544,7 @@ void SafetyManagement_ClearLatchedFaults(uint32_t mask)
     {
         SafetyManagement_SetFaultStop(0U);
     }
+    return result;
 }
 
 void SafetyManagement_LatchEncoderFeedbackFault(void)

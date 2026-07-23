@@ -1,5 +1,6 @@
 #include "host_communication_service.h"
 #include "remote_command_dispatcher.h"
+#include "communication_operation_mailbox.h"
 #include "communication_session_tracker.h"
 #include "frame_stream_parser.h"
 #include "telemetry_encoder.h"
@@ -329,6 +330,7 @@ uint8_t HostCommunication_Init(const communication_config_t *config, const commu
     upper_last_rx_timestamp_ms = 0U;
     HostCommunication_ResetParser();
     CommunicationSessionTracker_Init();
+    CommunicationOperationMailbox_ResetLink(COMMUNICATION_LINK_UPPER);
     HostUartTransport_StartRx(upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
     return 1U;
 }
@@ -408,7 +410,21 @@ void HostCommunication_GetState(host_communication_state_t *state)
     {
         *state = upper_state;
         CommunicationSessionTracker_GetSnapshot(COMMUNICATION_LINK_UPPER, &state->session);
+        CommunicationOperationMailbox_GetLastResult(COMMUNICATION_LINK_UPPER, &state->last_operation_result);
     }
+}
+
+uint8_t HostCommunication_TakeOperation(uint32_t now_ms, communication_operation_request_t *request)
+{
+    return CommunicationOperationMailbox_Take(COMMUNICATION_LINK_UPPER, now_ms, request);
+}
+
+void HostCommunication_CompleteOperation(const communication_operation_request_t *request,
+                                         communication_operation_stage_t          stage,
+                                         uint32_t                                 detail_mask,
+                                         uint32_t                                 now_ms)
+{
+    CommunicationOperationMailbox_Complete(request, stage, detail_mask, now_ms);
 }
 
 void HostCommunication_OnUartError(void)

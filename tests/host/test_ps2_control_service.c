@@ -157,9 +157,10 @@ uint8_t SafetyManagement_IsMotionAllowed(void)
                : 0U;
 }
 
-void LineFollowing_Enable(uint8_t enable)
+line_following_result_t LineFollowing_Enable(uint8_t enable)
 {
     fake_line_enabled = (enable != 0U) ? 1U : 0U;
+    return LINE_FOLLOWING_RESULT_APPLIED;
 }
 uint8_t LineFollowing_IsEnabled(void)
 {

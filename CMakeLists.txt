@@ -28,41 +28,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
-file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" F407_FIRMWARE_VERSION LIMIT_COUNT 1)
-execute_process(
-    COMMAND git rev-parse HEAD
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE F407_GIT_SHA
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
+add_custom_target(f407_build_identity ALL
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -DF407_REQUESTED_BUILD_TYPE=$<CONFIG>
+        -P ${CMAKE_SOURCE_DIR}/cmake/generate_build_identity.cmake
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/build_identity.h
+    VERBATIM
 )
-if(NOT F407_GIT_SHA)
-    set(F407_GIT_SHA "unknown")
-endif()
-execute_process(
-    COMMAND git status --porcelain --untracked-files=no
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE F407_GIT_STATUS
-    ERROR_QUIET
-)
-if(F407_GIT_STATUS OR F407_GIT_SHA STREQUAL "unknown")
-    set(F407_BUILD_DIRTY 1)
-    set(F407_BUILD_IDENTITY_VALID 0)
-    set(F407_GIT_COMMIT_BYTES "0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00")
-else()
-    set(F407_BUILD_DIRTY 0)
-    set(F407_BUILD_IDENTITY_VALID 1)
-    set(F407_GIT_COMMIT_BYTES "")
-    foreach(F407_GIT_BYTE_INDEX RANGE 0 19)
-        math(EXPR F407_GIT_HEX_OFFSET "${F407_GIT_BYTE_INDEX} * 2")
-        string(SUBSTRING "${F407_GIT_SHA}" ${F407_GIT_HEX_OFFSET} 2 F407_GIT_HEX_BYTE)
-        if(F407_GIT_COMMIT_BYTES)
-            string(APPEND F407_GIT_COMMIT_BYTES ", ")
-        endif()
-        string(APPEND F407_GIT_COMMIT_BYTES "0x${F407_GIT_HEX_BYTE}")
-    endforeach()
-endif()
-configure_file(cmake/build_identity.h.in generated/build_identity.h @ONLY)
 
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
@@ -87,6 +61,7 @@ set(F407_APP_SOURCES
     App/composition/operator_action_router.c
     App/composition/line_calibration_orchestrator.c
     App/composition/imu_calibration_orchestrator.c
+    App/composition/remote_operation_orchestrator.c
     App/tasks/task_debug.c
     App/tasks/task_esp12f.c
     App/tasks/task_imu.c
@@ -185,6 +160,7 @@ set(F407_SERVICE_SOURCES
     Service/communication/wireless_communication_service.c
     Service/communication/host_communication_service.c
     Service/communication/internal/remote_command_dispatcher.c
+    Service/communication/internal/communication_operation_mailbox.c
     Service/communication/internal/communication_session_tracker.c
     Service/communication/internal/telemetry_encoder.c
     Service/system_monitoring/internal/system_publish_snapshot.c
@@ -326,7 +302,9 @@ target_link_libraries(f407_service
     PRIVATE f407_algorithm f407_bsp f407_platform
 )
 target_link_libraries(f407_app PRIVATE f407_service f407_platform)
+add_dependencies(f407_app f407_build_identity)
 target_link_libraries(f407_app_adapters PRIVATE f407_service f407_bsp f407_platform stm32cubemx)
+add_dependencies(f407_app_adapters f407_build_identity)
 
 # Release maintenance authorization is consumed while compiling f407_app.
 target_compile_definitions(f407_app PRIVATE

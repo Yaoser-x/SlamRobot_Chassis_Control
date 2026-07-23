@@ -59,6 +59,16 @@ def analyze(root: Path, final: bool = True) -> list[str]:
         code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
         if "parameter_management" in code.lower():
             errors.append(f"{relative}: Communication must receive parameter identity through the publish DTO")
+        if re.search(r"\b(?:SafetyManagement|LineFollowing)_", code):
+            errors.append(f"{relative}: Communication operations must be dispatched by App, not call business Services")
+        if relative.endswith("communication_operation_mailbox.c") and re.search(r"\b(?:malloc|calloc|realloc|free)\s*\(", code):
+            errors.append(f"{relative}: operation mailbox must remain fixed-capacity and allocation-free")
+
+    dispatcher_path = communication / "internal" / "remote_command_dispatcher.c"
+    if dispatcher_path.is_file():
+        dispatcher_code = strip_comments(dispatcher_path.read_text(encoding="utf-8", errors="replace"))
+        if "CommandManagement_DisableRemoteSource" not in dispatcher_code:
+            errors.append("Service/communication/internal/remote_command_dispatcher.c: remote disable must pass rearm owner")
 
     command_root = root / "Service" / "command_management"
     for path in command_root.rglob("*"):

@@ -1,9 +1,8 @@
 #include "remote_command_dispatcher.h"
 
+#include "communication_operation_mailbox.h"
 #include "communication_session_tracker.h"
 #include "command_management_service.h"
-#include "line_following_service.h"
-#include "safety_management_service.h"
 #include "robot_link_protocol.h"
 
 static uint8_t RemoteCommandDispatcher_Finite(float value)
@@ -13,8 +12,8 @@ static uint8_t RemoteCommandDispatcher_Finite(float value)
 
 static uint8_t RemoteCommandDispatcher_CommandRejectReason(void)
 {
-    return (SafetyManagement_IsMotionAllowed() == 0U) ? COMMUNICATION_REJECT_FAULT
-                                                      : COMMUNICATION_REJECT_SOURCE_NOT_PERMITTED;
+    return (CommandManagement_IsMotionGateOpen() == 0U) ? COMMUNICATION_REJECT_FAULT
+                                                        : COMMUNICATION_REJECT_SOURCE_NOT_PERMITTED;
 }
 
 static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
@@ -64,8 +63,7 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
     decision = CommunicationSessionTracker_Evaluate(link, &target, now_ms);
     if (decision == COMMUNICATION_SESSION_DISABLE)
     {
-        CommandManagement_ClearSource(source);
-        applied = 1U;
+        applied = (CommandManagement_DisableRemoteSource(source) == COMMAND_RESULT_ACCEPTED) ? 1U : 0U;
     }
     else if (decision == COMMUNICATION_SESSION_NEW_COMMAND)
     {
@@ -125,7 +123,7 @@ RemoteCommandDispatcher_Handle(communication_link_t link, const protocol_frame_t
                 != 0U
             && requested != 0U)
         {
-            SafetyManagement_SetEmergencyStop(1U);
+            (void)CommunicationOperationMailbox_Enqueue(link, COMMUNICATION_OPERATION_ESTOP, 1U, now_ms);
         }
     }
     else if (frame->cmd == UPPER_CMD_LINE_CTRL)
@@ -137,17 +135,19 @@ RemoteCommandDispatcher_Handle(communication_link_t link, const protocol_frame_t
                                              &enabled)
             != 0U)
         {
-            LineFollowing_Enable((enabled != 0U) ? 1U : 0U);
+            (void)CommunicationOperationMailbox_Enqueue(link,
+                                                        COMMUNICATION_OPERATION_LINE_CTRL,
+                                                        (enabled != 0U) ? 1U : 0U,
+                                                        now_ms);
         }
     }
     else if (frame->cmd == UPPER_CMD_CLEAR_FAULT
              && UpperProtocol_ParseVersionOnly(frame->payload,
                                                frame->payload_len,
                                                ROBOT_LINK_PROTOCOL_CLEAR_FAULT_PAYLOAD_LEN)
-                    != 0U
-             && SafetyManagement_IsEmergencyStop() == 0U)
+                    != 0U)
     {
-        SafetyManagement_ClearLatchedFaults(0xFFFFFFFFUL);
+        (void)CommunicationOperationMailbox_Enqueue(link, COMMUNICATION_OPERATION_CLEAR_FAULT, 1U, now_ms);
     }
     else if (frame->cmd == UPPER_CMD_GET_INFO
              && UpperProtocol_ParseVersionOnly(frame->payload,

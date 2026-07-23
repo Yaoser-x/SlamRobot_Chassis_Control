@@ -166,10 +166,6 @@ uint16_t TelemetryEncoder_BuildStatus(const communication_publish_model_t *snaps
     {
         status.status_flags |= UPPER_STATUS_FLAG_LINE_ENABLED;
     }
-    if (snapshot->encoder.speed_valid_all != 0U)
-    {
-        status.status_flags |= UPPER_STATUS_FLAG_SPEED_VALID_ALL;
-    }
     for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
     {
         status.motor_speed_mps[index]       = snapshot->chassis.motor_actual_mps[index];
@@ -181,12 +177,17 @@ uint16_t TelemetryEncoder_BuildStatus(const communication_publish_model_t *snaps
         {
             status.motor_enabled_mask |= (uint8_t)(1U << index);
         }
-        if (snapshot->encoder.speed_valid[index] != 0U)
+        if ((snapshot->chassis.motor_enabled_mask & (uint8_t)(1U << index)) != 0U
+            && snapshot->encoder.speed_valid[index] != 0U)
         {
             status.motor_speed_valid_mask |= (uint8_t)(1U << index);
         }
     }
-    status.encoder_anomaly_mask   = snapshot->encoder.anomaly_mask;
+    if (status.motor_enabled_mask != 0U && status.motor_speed_valid_mask == status.motor_enabled_mask)
+    {
+        status.status_flags |= UPPER_STATUS_FLAG_SPEED_VALID_ALL;
+    }
+    status.encoder_anomaly_mask   = snapshot->encoder.anomaly_mask & status.motor_enabled_mask;
     status.status_sequence        = snapshot->generation;
     status.timestamp_ms           = snapshot->timestamp_ms;
     status.side_consistency_flags = TelemetryEncoder_SideConsistency(snapshot);

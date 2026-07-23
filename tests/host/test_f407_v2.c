@@ -422,11 +422,15 @@ static void test_control_priority_timeout_and_reject_stop(void)
                           .timestamp_ms = 100U};
     require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "debug command accepted");
     cmd.source = CONTROL_SOURCE_ESP12F;
+    require_int(CommandManagement_DisableRemoteSource(COMMAND_SOURCE_ESP12F) == COMMAND_RESULT_ACCEPTED,
+                "esp disable rearms remote source");
     require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "esp command accepted");
     cmd.source = CONTROL_SOURCE_PS2;
     require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "ps2 command accepted");
     cmd.source   = CONTROL_SOURCE_UPPER;
     cmd.linear_x = 0.2f;
+    require_int(CommandManagement_DisableRemoteSource(COMMAND_SOURCE_HOST) == COMMAND_RESULT_ACCEPTED,
+                "upper disable rearms remote source");
     require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper command accepted");
 
     require_int(ControlService_GetCommand(&snapshot, 120U) != 0U, "command available");
@@ -541,6 +545,8 @@ static void test_control_stop_recovery_requires_new_command(void)
     uint32_t      revoke_generation;
 
     ControlService_Init();
+    require_int(CommandManagement_DisableRemoteSource(COMMAND_SOURCE_HOST) == COMMAND_RESULT_ACCEPTED,
+                "initial upper disable rearms source");
     revoke_generation = ControlService_GetMotionRevokeGeneration();
     require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before estop");
     ControlService_SetEmergencyStop(1U);
@@ -552,12 +558,18 @@ static void test_control_stop_recovery_requires_new_command(void)
 
     cmd.timestamp_ms  = 120U;
     revoke_generation = ControlService_GetMotionRevokeGeneration();
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED,
+                "upper enable is rejected until a new disable after estop");
+    require_int(CommandManagement_DisableRemoteSource(COMMAND_SOURCE_HOST) == COMMAND_RESULT_ACCEPTED,
+                "new upper disable rearms after estop");
     require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_ACCEPTED, "upper before fault");
     ControlService_SetFaultStop(1U);
     require_int(ControlService_GetMotionRevokeGeneration() == revoke_generation + 1U,
                 "fault stop revokes persistent motion producers");
     ControlService_SetFaultStop(0U);
     require_int(ControlService_GetCommand(&snapshot, 121U) == 0U, "fault recovery does not revive command");
+    require_int(ControlService_SetCommand(&cmd) == CONTROL_COMMAND_REJECTED,
+                "upper enable is rejected until a new disable after fault");
 }
 
 static void test_side_target_distribution(void)

@@ -1,7 +1,7 @@
 
 # 控制体系
 
-> Beta6 远程命令由 Upper Protocol v3 dispatcher 协调。Communication 只负责 wire/session/ACK；CommandManagement 唯一负责五来源租约与仲裁；SafetyManagement 唯一决定运动许可；MotionControl 唯一写电机输出。
+> rc1 远程速度由 Upper Protocol v3 dispatcher 协调，业务操作经固定 mailbox 交给 App 编排。Communication 负责 wire/session/ACK/请求阶段；CommandManagement 唯一负责五来源租约、rearm 与仲裁；SafetyManagement 唯一决定运动许可；MotionControl 唯一写电机输出。
 
 ## 1. 控制链数据流
 

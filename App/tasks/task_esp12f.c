@@ -1,5 +1,6 @@
 #include "app_tasks.h"
 
+#include "remote_operation_orchestrator.h"
 #include "robot_config.h"
 #include "system_publish_snapshot_service.h"
 #include "esp12f_flash_bridge.h"
@@ -21,6 +22,20 @@ void Task_Esp12f(void *argument)
         Esp12fFlashBridge_Update(now_ms);
         (void)SystemPublishSnapshot_Get(&publish_model);
         WirelessCommunication_Update(&publish_model);
+        for (;;)
+        {
+            communication_operation_request_t request;
+            uint32_t                          detail_mask;
+            communication_operation_stage_t   result;
+
+            now_ms = PlatformTime_TaskNowMs();
+            if (WirelessCommunication_TakeOperation(now_ms, &request) == 0U)
+            {
+                break;
+            }
+            result = RemoteOperationOrchestrator_Dispatch(&request, &detail_mask);
+            WirelessCommunication_CompleteOperation(&request, result, detail_mask, PlatformTime_TaskNowMs());
+        }
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_ESP,
                                     &next_wake,
                                     RobotConfig_GetDefault()->tasks[APP_TASK_ESP12F].period_ms);

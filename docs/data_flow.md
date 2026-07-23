@@ -1,14 +1,14 @@
-# Beta6 数据流与并发契约
+# rc1 数据流与并发契约
 
 Upper Protocol v3 的命令流固定为：
 
 ```text
 link RX → pure codec → per-link session tracker
-                       → CommandManagement Set/Clear/Refresh
-                       → tracker ACK completion
+                       → velocity: CommandManagement Set/Disable/Refresh → tracker ACK
+                       → operation: fixed mailbox → App → Safety/Line business result
 ```
 
-tracker 临界区内不得调用 Command、Safety 或 TX。Host/ESP session 分别进入各自 state DTO，App collector 只复制到同一代 publish model，TelemetryEncoder 按发送链路选择 ACK 尾部。
+tracker 和 mailbox 临界区内不得调用 Command、Safety、Line 或 TX。Host/ESP session 与 operation result 分别进入各自公开状态；App collector 只复制事实到同一代 publish model，TelemetryEncoder 按发送链路选择 ACK 尾部。
 
 ## 控制流
 
@@ -25,7 +25,7 @@ Host / PS2 / ESP12F / Line / Debug
              Motor BSP
 ```
 
-Safety 消费 Power、State、System 和外部安全命令，发布运动许可。安全转换先关闭 gate 并清空所有命令，再发布新的 safety generation。Motion 只消费已经通过 gate 的活动命令。
+Safety 消费 Power、State、System 和 App 分发的安全操作，发布运动许可。安全转换先关闭 gate、清空所有命令并闩锁 Host/ESP rearm，再发布新的 safety generation。Motion 只消费已经通过 gate 的活动命令。
 
 ## 状态流
 

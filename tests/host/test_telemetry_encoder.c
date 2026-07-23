@@ -16,20 +16,29 @@ ExpectedStatus(const communication_publish_model_t *snapshot, uint8_t comm_healt
     status.battery_voltage     = snapshot->safety.battery_voltage;
     status.error_flags         = snapshot->safety.error_flags;
     status.latched_error_flags = snapshot->safety.latched_error_flags;
-    status.status_flags        = UPPER_STATUS_FLAG_ESTOP | UPPER_STATUS_FLAG_FAULT_STOP | UPPER_STATUS_FLAG_LINE_ENABLED
-                          | UPPER_STATUS_FLAG_SPEED_VALID_ALL;
-    status.control_source         = snapshot->control.active_source;
-    status.motor_enabled_mask     = snapshot->chassis.motor_enabled_mask;
-    status.motor_speed_valid_mask = 0x05U;
-    status.encoder_anomaly_mask   = snapshot->encoder.anomaly_mask;
-    status.comm_health_flags      = comm_health_flags;
-    status.status_sequence        = snapshot->generation;
-    status.timestamp_ms           = snapshot->timestamp_ms;
-    status.session_id             = snapshot->communication.upper_session.session_id;
-    status.received_sequence      = snapshot->communication.upper_session.received_sequence;
-    status.applied_sequence       = snapshot->communication.upper_session.applied_sequence;
-    status.reject_reason          = snapshot->communication.upper_session.reject_reason;
-    status.ack_flags              = snapshot->communication.upper_session.ack_flags;
+    status.status_flags       = UPPER_STATUS_FLAG_ESTOP | UPPER_STATUS_FLAG_FAULT_STOP | UPPER_STATUS_FLAG_LINE_ENABLED;
+    status.control_source     = snapshot->control.active_source;
+    status.motor_enabled_mask = snapshot->chassis.motor_enabled_mask;
+    for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
+    {
+        if ((status.motor_enabled_mask & (uint8_t)(1U << index)) != 0U && snapshot->encoder.speed_valid[index] != 0U)
+        {
+            status.motor_speed_valid_mask |= (uint8_t)(1U << index);
+        }
+    }
+    if (status.motor_enabled_mask != 0U && status.motor_speed_valid_mask == status.motor_enabled_mask)
+    {
+        status.status_flags |= UPPER_STATUS_FLAG_SPEED_VALID_ALL;
+    }
+    status.encoder_anomaly_mask = snapshot->encoder.anomaly_mask & status.motor_enabled_mask;
+    status.comm_health_flags    = comm_health_flags;
+    status.status_sequence      = snapshot->generation;
+    status.timestamp_ms         = snapshot->timestamp_ms;
+    status.session_id           = snapshot->communication.upper_session.session_id;
+    status.received_sequence    = snapshot->communication.upper_session.received_sequence;
+    status.applied_sequence     = snapshot->communication.upper_session.applied_sequence;
+    status.reject_reason        = snapshot->communication.upper_session.reject_reason;
+    status.ack_flags            = snapshot->communication.upper_session.ack_flags;
     for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
     {
         status.motor_speed_mps[index]       = snapshot->chassis.motor_actual_mps[index];
@@ -123,6 +132,23 @@ int main(void)
                                   expected,
                                   sizeof(expected));
     assert(actual_len == expected_len && memcmp(actual, expected, actual_len) == 0);
+
+    snapshot.chassis.motor_enabled_mask = 0x06U;
+    snapshot.encoder.speed_valid[0]     = 1U;
+    snapshot.encoder.speed_valid[1]     = 1U;
+    snapshot.encoder.speed_valid[2]     = 1U;
+    snapshot.encoder.speed_valid[3]     = 1U;
+    snapshot.encoder.anomaly_mask       = 0x09U;
+    actual_len = TelemetryEncoder_BuildStatus(&snapshot, COMMUNICATION_LINK_UPPER, actual, sizeof(actual));
+    assert(actual_len == ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN + 5U);
+    assert(actual[4U + 3U] == 0x06U);
+    assert(actual[4U + 62U] == 0x06U);
+    assert(actual[4U + 63U] == 0x00U);
+    assert((actual[4U + 1U] & UPPER_STATUS_FLAG_SPEED_VALID_ALL) != 0U);
+
+    (void)memcpy(expected, actual, actual_len);
+    expected_len = TelemetryEncoder_BuildStatus(&snapshot, COMMUNICATION_LINK_UPPER, actual, sizeof(actual));
+    assert(expected_len == actual_len && memcmp(actual, expected, actual_len) == 0);
 
     snapshot.communication.esp12f.checksum_errors = 1U;
     snapshot.communication.esp12f.rx_overflows    = 1U;

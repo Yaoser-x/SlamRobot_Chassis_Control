@@ -10,6 +10,11 @@ static uint8_t                     command_initialized;
 static uint32_t                    motion_revoke_generation;
 static uint32_t                    motion_gate_generation;
 static uint32_t                    command_generation;
+static uint8_t                     remote_rearm_required_mask;
+
+#define COMMAND_REMOTE_HOST_MASK (1U << COMMAND_SOURCE_HOST)
+#define COMMAND_REMOTE_ESP_MASK  (1U << COMMAND_SOURCE_ESP12F)
+#define COMMAND_REMOTE_MASK      (COMMAND_REMOTE_HOST_MASK | COMMAND_REMOTE_ESP_MASK)
 
 static const command_source_t source_priority[] = {
     COMMAND_SOURCE_HOST,
@@ -22,6 +27,11 @@ static const command_source_t source_priority[] = {
 static uint8_t CommandManagement_SourceValid(command_source_t source)
 {
     return (source > COMMAND_SOURCE_NONE && source < COMMAND_SOURCE_COUNT) ? 1U : 0U;
+}
+
+static uint8_t CommandManagement_IsRemoteSource(command_source_t source)
+{
+    return (source == COMMAND_SOURCE_HOST || source == COMMAND_SOURCE_ESP12F) ? 1U : 0U;
 }
 
 static uint8_t CommandManagement_Finite(float value)
@@ -90,11 +100,12 @@ uint8_t CommandManagement_Init(const command_management_config_t *config)
     {
         source_commands[index] = (command_velocity_t){0};
     }
-    motion_allowed           = 1U;
-    command_initialized      = 1U;
-    motion_revoke_generation = 0UL;
-    motion_gate_generation   = 0UL;
-    command_generation       = 1UL;
+    motion_allowed             = 1U;
+    command_initialized        = 1U;
+    motion_revoke_generation   = 0UL;
+    motion_gate_generation     = 0UL;
+    command_generation         = 1UL;
+    remote_rearm_required_mask = COMMAND_REMOTE_MASK;
     PlatformCritical_Exit(critical);
     return 1U;
 }
@@ -128,6 +139,27 @@ void CommandManagement_ClearSource(command_source_t source)
     source_commands[source] = (command_velocity_t){0};
     command_generation++;
     PlatformCritical_Exit(critical);
+}
+
+command_result_t CommandManagement_DisableRemoteSource(command_source_t source)
+{
+    platform_critical_state_t critical;
+
+    if (CommandManagement_IsRemoteSource(source) == 0U)
+    {
+        return COMMAND_RESULT_REJECTED;
+    }
+    critical                = PlatformCritical_Enter();
+    source_commands[source] = (command_velocity_t){0};
+    command_generation++;
+    if (motion_allowed == 0U)
+    {
+        PlatformCritical_Exit(critical);
+        return COMMAND_RESULT_REJECTED;
+    }
+    remote_rearm_required_mask &= (uint8_t) ~(1U << source);
+    PlatformCritical_Exit(critical);
+    return COMMAND_RESULT_ACCEPTED;
 }
 
 uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
@@ -166,7 +198,10 @@ static command_result_t CommandManagement_SetInternal(const command_velocity_t *
     }
     sanitized = *command;
     critical  = PlatformCritical_Enter();
-    if (motion_allowed == 0U || (enforce_generation != 0U && motion_revoke_generation != expected_generation))
+    if (motion_allowed == 0U
+        || (CommandManagement_IsRemoteSource(sanitized.source) != 0U
+            && (remote_rearm_required_mask & (uint8_t)(1U << sanitized.source)) != 0U)
+        || (enforce_generation != 0U && motion_revoke_generation != expected_generation))
     {
         PlatformCritical_Exit(critical);
         return COMMAND_RESULT_REJECTED;
@@ -196,7 +231,10 @@ static command_result_t CommandManagement_SetInternal(const command_velocity_t *
     }
 
     critical = PlatformCritical_Enter();
-    if (motion_allowed == 0U || (enforce_generation != 0U && motion_revoke_generation != expected_generation))
+    if (motion_allowed == 0U
+        || (CommandManagement_IsRemoteSource(sanitized.source) != 0U
+            && (remote_rearm_required_mask & (uint8_t)(1U << sanitized.source)) != 0U)
+        || (enforce_generation != 0U && motion_revoke_generation != expected_generation))
     {
         PlatformCritical_Exit(critical);
         return COMMAND_RESULT_REJECTED;
@@ -289,6 +327,7 @@ void CommandManagement_SetMotionGate(uint8_t allowed, uint32_t decision_generati
         {
             source_commands[index] = (command_velocity_t){0};
         }
+        remote_rearm_required_mask |= COMMAND_REMOTE_MASK;
     }
     motion_allowed = next_allowed;
     command_generation++;
@@ -330,9 +369,10 @@ uint32_t CommandManagement_GetStatus(uint32_t now_ms, command_management_status_
             }
         }
     }
-    status->motion_allowed           = motion_allowed;
-    status->motion_revoke_generation = motion_revoke_generation;
-    status->generation               = command_generation;
+    status->motion_allowed             = motion_allowed;
+    status->remote_rearm_required_mask = remote_rearm_required_mask;
+    status->motion_revoke_generation   = motion_revoke_generation;
+    status->generation                 = command_generation;
     PlatformCritical_Exit(critical);
     return status->generation;
 }

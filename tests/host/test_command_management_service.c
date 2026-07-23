@@ -54,6 +54,12 @@ static void reset_owner(void)
     require_int(CommandManagement_Init(&config) != 0U, "command owner initializes");
 }
 
+static void rearm_host(void)
+{
+    require_int(CommandManagement_DisableRemoteSource(COMMAND_SOURCE_HOST) == COMMAND_RESULT_ACCEPTED,
+                "host disable establishes rearm qualification");
+}
+
 static void test_priority_timeout_and_ordinary_fallback(void)
 {
     command_velocity_t active;
@@ -63,6 +69,7 @@ static void test_priority_timeout_and_ordinary_fallback(void)
     command_velocity_t host  = command(COMMAND_SOURCE_HOST, 100U);
 
     reset_owner();
+    rearm_host();
     require_int(CommandManagement_Set(&debug) == COMMAND_RESULT_ACCEPTED, "debug accepted");
     require_int(CommandManagement_Set(&line) == COMMAND_RESULT_ACCEPTED, "line accepted");
     require_int(CommandManagement_Set(&ps2) == COMMAND_RESULT_ACCEPTED, "PS2 accepted");
@@ -79,19 +86,33 @@ static void test_priority_timeout_and_ordinary_fallback(void)
 
 static void test_safety_gate_revokes_without_old_command_recovery(void)
 {
-    command_velocity_t active;
-    command_velocity_t host = command(COMMAND_SOURCE_HOST, 100U);
-    uint32_t           revoke_generation;
+    command_velocity_t          active;
+    command_velocity_t          host = command(COMMAND_SOURCE_HOST, 100U);
+    command_velocity_t          esp  = command(COMMAND_SOURCE_ESP12F, 100U);
+    command_management_status_t status;
+    uint32_t                    revoke_generation;
 
     reset_owner();
+    rearm_host();
     require_int(CommandManagement_Set(&host) == COMMAND_RESULT_ACCEPTED, "host accepted before gate close");
     revoke_generation = CommandManagement_GetMotionRevokeGeneration();
     CommandManagement_SetMotionGate(0U, 10U);
     require_int(CommandManagement_GetMotionRevokeGeneration() == revoke_generation + 1UL,
                 "gate close increments revoke generation once");
     require_int(CommandManagement_GetActive(&active, 101U) == 0U, "closed gate exposes no command");
+    require_int(CommandManagement_DisableRemoteSource(COMMAND_SOURCE_HOST) == COMMAND_RESULT_REJECTED,
+                "disable during closed gate clears source but cannot rearm");
     CommandManagement_SetMotionGate(1U, 11U);
     require_int(CommandManagement_GetActive(&active, 102U) == 0U, "gate reopen does not restore old command");
+    require_int(CommandManagement_Set(&host) == COMMAND_RESULT_REJECTED,
+                "gate reopen still requires a new remote disable");
+    rearm_host();
+    (void)CommandManagement_GetStatus(102U, &status);
+    require_int((status.remote_rearm_required_mask & (1U << COMMAND_SOURCE_HOST)) == 0U,
+                "new host disable clears only host rearm latch");
+    require_int((status.remote_rearm_required_mask & (1U << COMMAND_SOURCE_ESP12F)) != 0U,
+                "ESP remains independently rearm-required");
+    require_int(CommandManagement_Set(&esp) == COMMAND_RESULT_REJECTED, "host rearm cannot authorize ESP source");
     require_int(CommandManagement_SetForGeneration(&host, revoke_generation) == COMMAND_RESULT_REJECTED,
                 "pre-revoke producer generation is rejected");
 }
@@ -106,6 +127,9 @@ static void test_stale_safety_decision_cannot_reopen_gate(void)
     require_int(CommandManagement_Set(&host) == COMMAND_RESULT_REJECTED,
                 "older safety decision cannot reopen a newer closed gate");
     CommandManagement_SetMotionGate(1U, 21U);
+    require_int(CommandManagement_Set(&host) == COMMAND_RESULT_REJECTED,
+                "newer safety decision alone does not rearm remote source");
+    rearm_host();
     require_int(CommandManagement_Set(&host) == COMMAND_RESULT_ACCEPTED, "newer safety decision reopens gate");
 }
 
@@ -116,6 +140,7 @@ static void test_duplicate_refresh_preserves_generation_and_cannot_revive_timeou
     command_velocity_t          host = command(COMMAND_SOURCE_HOST, 100U);
 
     reset_owner();
+    rearm_host();
     require_int(CommandManagement_Set(&host) == COMMAND_RESULT_ACCEPTED, "host accepted before refresh");
     (void)CommandManagement_GetStatus(150U, &before);
     require_int(CommandManagement_RefreshSource(COMMAND_SOURCE_HOST, 150U) != 0U, "live lease refresh succeeds");

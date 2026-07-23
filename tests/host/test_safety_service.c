@@ -369,6 +369,30 @@ static void test_encoder_feedback_latch_and_safe_clear(void)
     require_int(SafetyManagement_IsFaultStop() == 0U, "safe clear releases fault stop when no other cause remains");
 }
 
+static void test_clear_fault_reports_estop_and_business_result(void)
+{
+    safety_clear_result_t      result;
+    safety_management_status_t state;
+
+    reset_fake_monitor();
+    SafetyManagement_LatchEncoderFeedbackFault();
+    SafetyManagement_SetEmergencyStop(1U);
+    result = SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
+    require_int(result.code == SAFETY_CLEAR_RESULT_CONDITION_NOT_CLEARED, "ESTOP blocks CLEAR_FAULT business success");
+    require_int((result.remaining_mask & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U,
+                "blocked clear reports remaining fault mask");
+    (void)SafetyManagement_GetStatus(&state);
+    require_int(state.last_clear_result.code == SAFETY_CLEAR_RESULT_CONDITION_NOT_CLEARED,
+                "Safety Service retains its own last business result");
+
+    SafetyManagement_SetEmergencyStop(0U);
+    fake_encoder_state.speed_valid[MOTOR_ID_M2] = 1U;
+    fake_encoder_state.speed_valid[MOTOR_ID_M3] = 1U;
+    result = SafetyManagement_ClearLatchedFaults(SYSTEM_ERROR_ENCODER_FEEDBACK_LOST);
+    require_int(result.code == SAFETY_CLEAR_RESULT_APPLIED && result.remaining_mask == 0U,
+                "clear reports applied after physical conditions are safe");
+}
+
 static void test_battery_warning_hysteresis(void)
 {
     safety_management_status_t state;
@@ -475,6 +499,7 @@ int main(void)
     test_tim1_break_latches_fault_stop_and_requires_driver_clear();
     test_adc_overcurrent_output_chatter_does_not_fault_when_software_fault_disabled();
     test_encoder_feedback_latch_and_safe_clear();
+    test_clear_fault_reports_estop_and_business_result();
     test_battery_warning_hysteresis();
     test_battery_critical_timing_and_recovery();
     test_invalid_battery_sample_resets_debounce_and_other_fault_survives_recovery();

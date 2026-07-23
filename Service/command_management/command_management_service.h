@@ -19,6 +19,8 @@ extern "C"
                                                         uint32_t                  expected_generation);
     void             CommandManagement_ClearAll(void);
     void             CommandManagement_ClearSource(command_source_t source);
+    /** Clear and rearm Host/ESP only when Safety's motion gate is open. */
+    command_result_t CommandManagement_DisableRemoteSource(command_source_t source);
     /** Refresh one still-valid source lease without changing its target or generation. */
     uint8_t          CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms);
     uint8_t          CommandManagement_GetActive(command_velocity_t *command, uint32_t now_ms);

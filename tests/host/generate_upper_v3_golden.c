@@ -96,6 +96,24 @@ static void emit_hello(void)
     print_frame("hello_v3", UPPER_CMD_HELLO, payload, sizeof(payload), 0U);
 }
 
+static void emit_layout_status(const char *name, uint8_t enabled_mask, uint8_t valid_mask, uint8_t anomaly_mask)
+{
+    upper_status_payload_t status                                          = {0};
+    uint8_t                payload[ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN] = {0U};
+
+    status.motor_enabled_mask     = enabled_mask;
+    status.motor_speed_valid_mask = valid_mask;
+    status.encoder_anomaly_mask   = anomaly_mask;
+    status.status_sequence        = 7U;
+    status.timestamp_ms           = 50U;
+    if (enabled_mask != 0U && enabled_mask == valid_mask)
+    {
+        status.status_flags = UPPER_STATUS_FLAG_SPEED_VALID_ALL;
+    }
+    (void)UpperProtocol_BuildStatusPayload(&status, payload, sizeof(payload));
+    print_frame(name, UPPER_CMD_STATUS, payload, sizeof(payload), 0U);
+}
+
 static void emit_imu(const char *name, int8_t temperature_c, uint8_t is_last)
 {
     upper_imu_status_payload_t imu                                                 = {0};
@@ -151,6 +169,9 @@ int main(void)
     (void)printf("{\n  \"schema\":1,\n  \"protocol_version\":3,\n  \"frames\":[\n");
     emit_hello();
     emit_status();
+    emit_layout_status("status_default_2wd", 0x06U, 0x06U, 0x00U);
+    emit_layout_status("status_4wd", 0x0FU, 0x0FU, 0x00U);
+    emit_layout_status("status_single_wheel_anomaly", 0x06U, 0x02U, 0x04U);
     emit_diagnostic();
     emit_imu("imu_temp_23c", 23, 0U);
     emit_imu("imu_temp_minus_41c", -41, 0U);

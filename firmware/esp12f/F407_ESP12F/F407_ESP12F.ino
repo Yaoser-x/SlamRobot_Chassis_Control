@@ -456,9 +456,10 @@ static bool                g_status_valid = false;
 static bool                g_release_acked = false;
 static bool                g_command_ack_pending = false;
 static uint8_t             g_last_sent_enable = 0U;
+static bool                g_safety_blocked = false;
 
 static bool controlHandshakeReady() {
-  return g_hello_valid && g_status_valid && g_release_acked;
+  return g_hello_valid && g_status_valid && g_release_acked && !g_safety_blocked;
 }
 
 static unsigned long statusAgeMs(unsigned long now) {
@@ -598,7 +599,7 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
       uint8_t buf[PROTO_MAX_PAYLOAD + 5];
       uint16_t len = buildClearFaultFrame(buf, sizeof(buf));
       if (len) sendToSTM32(buf, len);
-      ws.sendTXT(num, "{\"type\":\"faultclear\",\"result\":\"pending\"}");
+      ws.sendTXT(num, "{\"type\":\"faultclear\",\"result\":\"queued\"}");
     }
     else if (cmd.startsWith("{\"cmd\":\"vel\"")) {
       if (!clientIsOwner(num)) {
@@ -717,7 +718,7 @@ function text(id,v){var n=el(id),s=String(v);if(n.textContent!==s){n.textContent
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 function applyControlLock(){var j=el('joy');j.dataset.lockReason=estop?'急停已锁定':'只读模式';j.classList.toggle('locked',estop||!owner);el('btnStop').disabled=estop||!owner;el('btnLine').disabled=estop||!owner;el('btnClearFault').disabled=estop||!owner}
 function setRole(role){owner=role==='owner';text('connText',owner?'已连接 · 控制权':'已连接 · 只读');applyControlLock();if(role==='available')setTimeout(function(){send({cmd:'claim'})},20)}
-function handleMessage(d){if(d&&d.type==='control'){setRole(d.role);return}if(d&&d.type==='faultclear'){text('btnClearFault',d.result==='pending'?'等待主控确认':(d.result==='estop_local_only'?'急停需本地解除':'清除故障'));return}update(d)}
+function handleMessage(d){if(d&&d.type==='control'){setRole(d.role);return}if(d&&d.type==='faultclear'){text('btnClearFault',d.result==='queued'?'请求已入队':(d.result==='estop_local_only'?'急停需本地解除':'清除故障'));return}update(d)}
 function connect(){var ip=location.hostname;ws=new WebSocket('ws://'+ip+':81');ws.onopen=function(){el('top').classList.add('connected');text('connText','申请控制权');send({cmd:'claim'})};ws.onclose=function(){owner=false;active=false;applyControlLock();el('top').classList.remove('connected');text('connText','重连中...');setTimeout(connect,2000)};ws.onerror=function(){try{ws.close()}catch(e){}};ws.onmessage=function(e){try{handleMessage(JSON.parse(e.data))}catch(_){}}}
 function hex(v){return('00000000'+(v>>>0).toString(16).toUpperCase()).slice(-8)}
 function decodeFaults(v){var a=[];for(var i=0;i<faultNames.length;i++)if(v&(1<<faultNames[i][0]))a.push(faultNames[i][1]);return a.length?a.join('、'):'无'}
@@ -939,6 +940,14 @@ void loop() {
       if (cmd == CMD_STATUS && parseStatusFrame(payload, payload_len, g_status)) {
         g_status_valid = true;
         EspLinkPolicy_OnStatus(&g_link_policy, now);
+        bool safety_blocked = (g_status.status_flags & (STATUS_FLAG_ESTOP | STATUS_FLAG_FAULT_STOP)) != 0U;
+        if (safety_blocked && !g_safety_blocked) {
+          g_safety_blocked = true;
+          failClosedAndRequireHandshake();
+        } else if (!safety_blocked && g_safety_blocked) {
+          g_safety_blocked = false;
+          sendVelocityCommand(0.0f, 0.0f, 0U, true);
+        }
         if (g_status.session_id == g_session_id &&
             g_status.applied_sequence == g_last_sent_sequence &&
             (g_status.command_ack_flags & ACK_APPLIED) != 0U) {
@@ -947,7 +956,11 @@ void loop() {
         } else if (g_status.session_id == g_session_id &&
                    g_status.received_sequence == g_last_sent_sequence &&
                    (g_status.command_ack_flags & ACK_REJECTED) != 0U) {
-          failClosedAndRequireHandshake();
+          if (g_safety_blocked) {
+            g_command_ack_pending = false;
+          } else {
+            failClosedAndRequireHandshake();
+          }
         }
       } else if (cmd == CMD_HELLO) {
         g_hello_valid = parseHelloFrame(payload, payload_len, g_hello);

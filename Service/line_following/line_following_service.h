@@ -11,11 +11,11 @@ extern "C"
 {
 #endif
 
-    uint8_t  LineFollowing_Init(const line_following_config_t *config);
-    void     LineFollowing_Update(void);
-    void     LineFollowing_Enable(uint8_t enabled);
-    uint8_t  LineFollowing_IsEnabled(void);
-    uint32_t LineFollowing_GetStatus(line_following_status_t *status);
+    uint8_t                 LineFollowing_Init(const line_following_config_t *config);
+    void                    LineFollowing_Update(void);
+    line_following_result_t LineFollowing_Enable(uint8_t enabled);
+    uint8_t                 LineFollowing_IsEnabled(void);
+    uint32_t                LineFollowing_GetStatus(line_following_status_t *status);
 
 #ifdef __cplusplus
 }

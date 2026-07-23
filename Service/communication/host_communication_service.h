@@ -25,6 +25,7 @@ extern "C"
         uint32_t                         rx_resync_restarts;
         uint32_t                         last_valid_frame_ms;
         communication_session_snapshot_t session;
+        communication_operation_result_t last_operation_result;
     } host_communication_state_t;
 
     /** Initialize Host communication with injected publication periods. */
@@ -33,6 +34,11 @@ extern "C"
     /** Poll Host RX and publish frames from one App-provided coherent model. */
     void     HostCommunication_Update(const communication_publish_model_t *publish_model);
     void     HostCommunication_GetState(host_communication_state_t *state);
+    uint8_t  HostCommunication_TakeOperation(uint32_t now_ms, communication_operation_request_t *request);
+    void     HostCommunication_CompleteOperation(const communication_operation_request_t *request,
+                                                 communication_operation_stage_t          stage,
+                                                 uint32_t                                 detail_mask,
+                                                 uint32_t                                 now_ms);
     uint32_t HostCommunication_GetLastRxTimestamp(void);
     void     HostCommunication_OnUartError(void);
     void     HostCommunication_OnDmaHalf(void);
