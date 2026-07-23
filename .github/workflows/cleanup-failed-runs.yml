@@ -1,0 +1,84 @@
+name: Cleanup Failed Workflow Runs
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: Keep failed workflow runs for this many days
+        required: true
+        type: number
+        default: 7
+      dry_run:
+        description: List eligible runs without deleting them
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-failed-workflow-runs
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete expired failed runs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CURRENT_RUN_ID: ${{ github.run_id }}
+      RETENTION_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.retention_days || 7 }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+
+    steps:
+      - name: Delete failed runs outside retention window
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${RETENTION_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "retention_days must be a positive integer" >&2
+            exit 2
+          fi
+
+          cutoff_epoch=$(date -u -d "${RETENTION_DAYS} days ago" +%s)
+          matched=0
+          deleted=0
+
+          while IFS=$'\t' read -r run_id created_at workflow_name run_url; do
+            if [[ -z "${run_id}" || "${run_id}" == "${CURRENT_RUN_ID}" ]]; then
+              continue
+            fi
+
+            created_epoch=$(date -u -d "${created_at}" +%s)
+            if (( created_epoch > cutoff_epoch )); then
+              continue
+            fi
+
+            matched=$((matched + 1))
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              echo "DRY-RUN ${run_id} ${created_at} ${workflow_name} ${run_url}"
+              continue
+            fi
+
+            echo "Deleting ${run_id} ${created_at} ${workflow_name} ${run_url}"
+            gh api --method DELETE "repos/${GH_REPO}/actions/runs/${run_id}"
+            deleted=$((deleted + 1))
+          done < <(
+            gh api --paginate "repos/${GH_REPO}/actions/runs?status=failure&per_page=100" \
+              --jq '.workflow_runs[] | [.id, .created_at, .name, .html_url] | @tsv'
+          )
+
+          {
+            echo "### Failed workflow cleanup"
+            echo "- Retention: ${RETENTION_DAYS} days"
+            echo "- Dry run: ${DRY_RUN}"
+            echo "- Eligible: ${matched}"
+            echo "- Deleted: ${deleted}"
+          } >> "${GITHUB_STEP_SUMMARY}"
