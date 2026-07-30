@@ -32,6 +32,7 @@ static state_estimation_imu_status_t  fake_imu;
 static chassis_cmd_t                  last_command;
 static uint32_t                       set_command_count;
 static uint32_t                       clear_source_count;
+static uint32_t                       qualify_rearm_count;
 static uint32_t                       fake_motion_revoke_generation;
 static uint8_t                        fake_maintenance_crosses_on_query;
 static line_sensor_calibration_t      fake_cal;
@@ -149,6 +150,13 @@ void CommandManagement_ClearSource(command_source_t source)
     ControlService_ClearSource((uint8_t)source);
 }
 
+command_apply_result_t CommandManagement_QualifyRearm(command_source_t source)
+{
+    qualify_rearm_count++;
+    CommandManagement_ClearSource(source);
+    return (command_apply_result_t){.outcome = COMMAND_OUTCOME_RELEASE_ACCEPTED, .source_cleared = 1U};
+}
+
 uint8_t SafetyManagement_IsMotionAllowed(void)
 {
     return (ControlService_IsEmergencyStop() == 0U && ControlService_IsFaultStop() == 0U
@@ -225,6 +233,7 @@ static void reset_fake(void)
     last_command                      = (chassis_cmd_t){0};
     set_command_count                 = 0UL;
     clear_source_count                = 0UL;
+    qualify_rearm_count               = 0UL;
     fake_motion_revoke_generation     = 0UL;
     fake_maintenance_crosses_on_query = 0U;
     fake_cal                          = (line_sensor_calibration_t){0};
@@ -263,6 +272,18 @@ static void test_center_submits_zero_or_yields_to_line(void)
     fake_tick_ms += 20U;
     Ps2ControlService_Update();
     require_int(set_command_count >= 2UL, "PS2 idle continues normally");
+}
+
+static void test_neutral_rearm_is_qualified_once_per_observation(void)
+{
+    reset_fake();
+    for (uint8_t cycle = 0U; cycle < 10U; ++cycle)
+    {
+        Ps2ControlService_Update();
+        fake_tick_ms += 20U;
+        fake_hal_tick_ms += 20U;
+    }
+    require_int(qualify_rearm_count == 1UL, "held neutral qualifies PS2 rearm only once");
 }
 
 static void test_heading_button_mapping(void)
@@ -475,6 +496,7 @@ static void test_line_state_is_an_input_fact_on_every_path(void)
 int main(void)
 {
     test_center_submits_zero_or_yields_to_line();
+    test_neutral_rearm_is_qualified_once_per_observation();
     test_heading_button_mapping();
     test_heading_imu_freshness_uses_hal_tick_epoch();
     test_imu_gate_and_runtime_cancel();

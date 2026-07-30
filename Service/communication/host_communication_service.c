@@ -15,6 +15,9 @@
 #define UPPER_UART_RX_BUFFER_SIZE    128U
 #define UPPER_UART_TX_QUEUE_CAPACITY 4U
 #define UPPER_UART_TX_SLOT_INVALID   0xFFU
+#define UPPER_TX_SLOT_FREE           0U
+#define UPPER_TX_SLOT_RESERVED       1U
+#define UPPER_TX_SLOT_READY          2U
 
 typedef enum
 {
@@ -31,6 +34,7 @@ typedef struct
     uint32_t sequence;
     uint8_t  priority;
     uint8_t  used;
+    uint32_t enqueued_ms;
 } upper_tx_slot_t;
 
 static uint8_t                           upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE] __attribute__((aligned(4)));
@@ -41,7 +45,7 @@ static uint32_t                          upper_last_status_ms;
 static uint32_t                          upper_last_rx_timestamp_ms;
 static communication_config_t            upper_config;
 static host_communication_state_t        upper_state;
-static uint8_t                           upper_parser_idle_cycles;
+static uint32_t                          upper_last_byte_ms;
 static uint16_t                          upper_last_write_pos;
 static uint8_t                           upper_imu_tx_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
 static uint32_t                          upper_last_imu_status_ms;
@@ -55,7 +59,7 @@ static uint8_t                           upper_hello_pending;
 static communication_firmware_identity_t upper_identity;
 static uint8_t                           upper_hello_tx_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
 
-#define UPPER_PARSER_TIMEOUT_CYCLES 20U /* 20 × 5ms = 100ms 无字节则重置解析器 */
+#define UPPER_PARSER_TIMEOUT_MS 100U
 
 static void HostCommunication_ResetParser(void)
 {
@@ -68,7 +72,7 @@ static uint8_t HostCommunication_SelectNextTxLocked(void)
 
     for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
     {
-        if (upper_tx_queue[i].used == 0U || i == upper_tx_active_slot)
+        if (upper_tx_queue[i].used != UPPER_TX_SLOT_READY || i == upper_tx_active_slot)
         {
             continue;
         }
@@ -88,7 +92,7 @@ static uint8_t HostCommunication_DropQueuedImuLocked(void)
 
     for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
     {
-        if (upper_tx_queue[i].used == 0U || i == upper_tx_active_slot
+        if (upper_tx_queue[i].used != UPPER_TX_SLOT_READY || i == upper_tx_active_slot
             || upper_tx_queue[i].priority != UPPER_TX_PRIORITY_IMU)
         {
             continue;
@@ -105,6 +109,7 @@ static uint8_t HostCommunication_DropQueuedImuLocked(void)
     upper_tx_queue[selected].used = 0U;
     upper_tx_queue_count--;
     upper_state.tx_busy_drops++;
+    upper_state.tx_drop_by_priority[UPPER_TX_PRIORITY_IMU]++;
     return 1U;
 }
 
@@ -112,7 +117,7 @@ static uint8_t HostCommunication_HasQueuedImuLocked(void)
 {
     for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
     {
-        if (upper_tx_queue[i].used != 0U && i != upper_tx_active_slot
+        if (upper_tx_queue[i].used == UPPER_TX_SLOT_READY && i != upper_tx_active_slot
             && upper_tx_queue[i].priority == UPPER_TX_PRIORITY_IMU)
         {
             return 1U;
@@ -139,6 +144,11 @@ static void HostCommunication_TryStartTxLocked(void)
     if (status == TRANSPORT_STATUS_OK)
     {
         upper_tx_active_slot = selected;
+        uint32_t delay_ms    = PlatformTime_TaskNowMs() - upper_tx_queue[selected].enqueued_ms;
+        if (delay_ms > upper_state.tx_max_queue_delay_ms)
+        {
+            upper_state.tx_max_queue_delay_ms = delay_ms;
+        }
     }
     else if (status != TRANSPORT_STATUS_BUSY)
     {
@@ -149,6 +159,7 @@ static void HostCommunication_TryStartTxLocked(void)
         upper_tx_queue[selected].used = 0U;
         upper_tx_queue_count--;
         upper_state.tx_busy_drops++;
+        upper_state.tx_drop_by_priority[upper_tx_queue[selected].priority]++;
     }
 }
 
@@ -172,13 +183,14 @@ static uint8_t HostCommunication_EnqueueTx(const uint8_t *frame, uint16_t frame_
         if (priority == UPPER_TX_PRIORITY_IMU || HostCommunication_DropQueuedImuLocked() == 0U)
         {
             upper_state.tx_busy_drops++;
+            upper_state.tx_drop_by_priority[priority]++;
             PlatformCritical_Exit(primask);
             return 0U;
         }
     }
     for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
     {
-        if (upper_tx_queue[i].used == 0U)
+        if (upper_tx_queue[i].used == UPPER_TX_SLOT_FREE)
         {
             selected = i;
             break;
@@ -187,15 +199,26 @@ static uint8_t HostCommunication_EnqueueTx(const uint8_t *frame, uint16_t frame_
     if (selected == UPPER_UART_TX_SLOT_INVALID)
     {
         upper_state.tx_busy_drops++;
+        upper_state.tx_drop_by_priority[priority]++;
         PlatformCritical_Exit(primask);
         return 0U;
     }
-    memcpy(upper_tx_queue[selected].data, frame, frame_len);
-    upper_tx_queue[selected].length   = frame_len;
-    upper_tx_queue[selected].priority = (uint8_t)priority;
-    upper_tx_queue[selected].sequence = upper_tx_sequence++;
-    upper_tx_queue[selected].used     = 1U;
+    upper_tx_queue[selected].length      = frame_len;
+    upper_tx_queue[selected].priority    = (uint8_t)priority;
+    upper_tx_queue[selected].sequence    = upper_tx_sequence++;
+    upper_tx_queue[selected].enqueued_ms = PlatformTime_TaskNowMs();
+    upper_tx_queue[selected].used        = UPPER_TX_SLOT_RESERVED;
     upper_tx_queue_count++;
+    if (upper_tx_queue_count > upper_state.tx_queue_high_watermark)
+    {
+        upper_state.tx_queue_high_watermark = upper_tx_queue_count;
+    }
+    PlatformCritical_Exit(primask);
+
+    memcpy(upper_tx_queue[selected].data, frame, frame_len);
+
+    primask                       = PlatformCritical_Enter();
+    upper_tx_queue[selected].used = UPPER_TX_SLOT_READY;
     HostCommunication_TryStartTxLocked();
     PlatformCritical_Exit(primask);
     return 1U;
@@ -204,9 +227,9 @@ static uint8_t HostCommunication_EnqueueTx(const uint8_t *frame, uint16_t frame_
 static void HostCommunication_RestartRxDma(uint8_t count_restart)
 {
     HostUartTransport_RestartRx(upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
-    upper_rx_read_pos        = 0U;
-    upper_last_write_pos     = 0U;
-    upper_parser_idle_cycles = 0U;
+    upper_rx_read_pos    = 0U;
+    upper_last_write_pos = 0U;
+    upper_last_byte_ms   = PlatformTime_TaskNowMs();
     HostCommunication_ResetParser();
     if (count_restart != 0U)
     {
@@ -238,6 +261,7 @@ static void HostCommunication_ProcessByte(uint8_t byte)
 static void HostCommunication_PollRx(void)
 {
     uint16_t write_pos;
+    uint32_t now_ms = PlatformTime_TaskNowMs();
 
     write_pos = HostUartTransport_GetRxWritePosition(UPPER_UART_RX_BUFFER_SIZE);
     if (write_pos >= UPPER_UART_RX_BUFFER_SIZE)
@@ -250,8 +274,7 @@ static void HostCommunication_PollRx(void)
         /* 无新字节：若解析器处于中间状态，超时后重置 */
         if (FrameParser_IsIdle(&upper_parser) == 0U)
         {
-            upper_parser_idle_cycles++;
-            if (upper_parser_idle_cycles >= UPPER_PARSER_TIMEOUT_CYCLES)
+            if ((uint32_t)(now_ms - upper_last_byte_ms) >= UPPER_PARSER_TIMEOUT_MS)
             {
                 upper_state.rx_timeout_resets++;
                 HostCommunication_RestartRxDma(1U);
@@ -260,7 +283,7 @@ static void HostCommunication_PollRx(void)
         return;
     }
 
-    upper_parser_idle_cycles = 0U;
+    upper_last_byte_ms = now_ms;
     {
         uint16_t unread   = (write_pos >= upper_rx_read_pos)
                                 ? (uint16_t)(write_pos - upper_rx_read_pos)
@@ -328,6 +351,7 @@ uint8_t HostCommunication_Init(const communication_config_t *config, const commu
     upper_tx_sequence          = 0UL;
     upper_hello_pending        = 0U;
     upper_last_rx_timestamp_ms = 0U;
+    upper_last_byte_ms         = PlatformTime_TaskNowMs();
     HostCommunication_ResetParser();
     CommunicationSessionTracker_Init();
     CommunicationOperationMailbox_ResetLink(COMMUNICATION_LINK_UPPER);
@@ -408,7 +432,19 @@ void HostCommunication_GetState(host_communication_state_t *state)
 {
     if (state != 0)
     {
-        *state = upper_state;
+        *state          = upper_state;
+        uint32_t now_ms = PlatformTime_TaskNowMs();
+        for (uint8_t i = 0U; i < UPPER_UART_TX_QUEUE_CAPACITY; ++i)
+        {
+            if (upper_tx_queue[i].used != UPPER_TX_SLOT_FREE)
+            {
+                uint32_t age_ms = now_ms - upper_tx_queue[i].enqueued_ms;
+                if (age_ms > state->tx_oldest_age_ms)
+                {
+                    state->tx_oldest_age_ms = age_ms;
+                }
+            }
+        }
         CommunicationSessionTracker_GetSnapshot(COMMUNICATION_LINK_UPPER, &state->session);
         CommunicationOperationMailbox_GetLastResult(COMMUNICATION_LINK_UPPER, &state->last_operation_result);
     }
@@ -469,6 +505,11 @@ void HostCommunication_OnTxComplete(void)
     uint32_t primask = PlatformCritical_Enter();
     if (upper_tx_active_slot != UPPER_UART_TX_SLOT_INVALID && upper_tx_queue[upper_tx_active_slot].used != 0U)
     {
+        uint32_t latency_ms = PlatformTime_TaskNowMs() - upper_tx_queue[upper_tx_active_slot].enqueued_ms;
+        if (latency_ms > upper_state.tx_max_send_latency_ms)
+        {
+            upper_state.tx_max_send_latency_ms = latency_ms;
+        }
         upper_tx_queue[upper_tx_active_slot].used = 0U;
         upper_tx_queue_count--;
         upper_state.tx_frames++;

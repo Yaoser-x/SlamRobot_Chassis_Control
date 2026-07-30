@@ -2,6 +2,21 @@
 
 本检查表只记录可追溯的验证结果。未附固件 SHA、日志或测量记录的项目不得勾选。
 
+## v1.0.0-rc2 / HIL_PENDING
+
+- [x] `VERSION` 为 `1.0.0-rc2`
+- [x] 启动默认关门，五来源撤销后独立 rearm
+- [x] 控制 timing、非有限数值和轮速重获取 Host 覆盖
+- [x] Host 半包按最后字节 100 ms 超时，TX 使用 RESERVED/READY 提交
+- [x] 看门狗要求 Safety completion 且 Motor completion generation 前进
+- [x] Upper Protocol v3 与 Flash schema 4 布局不变
+- [ ] cppcheck（当前本机缺少工具）
+- [ ] arduino-cli / ESP 编译（当前本机缺少工具）
+- [ ] rc2 HIL 项目全部归档
+- [ ] 创建本地 annotated tag `v1.0.0-rc2`（HIL 全绿后）
+
+历史 `v1.0.0-rc1` 已存在并指向 `bc472cc`，不得移动或重建。
+
 ## v1.0.0-rc1 / Upper Protocol v3
 
 - [x] `VERSION` 为 `1.0.0-rc1`

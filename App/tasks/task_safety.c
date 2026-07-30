@@ -1,4 +1,5 @@
 #include "app_tasks.h"
+#include "chassis_runtime_coordinator.h"
 
 #include "imu_calibration_orchestrator.h"
 #include "robot_config.h"
@@ -27,24 +28,16 @@ void Task_Safety(void *argument)
     for (;;)
     {
         uint32_t                      now_ms = PlatformTime_TaskNowMs();
-        uint32_t                      motor_hb;
-        param_model_t                 params;
         communication_publish_model_t publish_snapshot;
 
-        (void)ParameterManagement_GetSnapshot(&params);
-        SafetyManagement_SetCurrentThresholds(params.current_observe_a,
-                                              params.current_fault_a,
-                                              params.current_fault_debounce_ms);
-        SafetyManagement_Update();
-        PostService_UpdateRuntime(now_ms);
+        ChassisRuntimeCoordinator_RunSafetyCycle(now_ms);
         AppSystemPublishSnapshot_Collect(now_ms, &publish_config, &publish_snapshot);
         SystemPublishSnapshot_Publish(&publish_snapshot);
         PlatformResetTrace_UpdateControl((uint8_t)CommandManagement_GetActiveSource(now_ms),
                                          SafetyManagement_IsEmergencyStop(),
                                          SafetyManagement_IsFaultStop());
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_SAFETY, now_ms);
-        motor_hb = PlatformResetTrace_GetTaskHeartbeat(RESET_TRACE_TASK_MOTOR);
-        if (motor_hb != 0U && (now_ms - motor_hb) <= 200U)
+        if (ChassisRuntimeCoordinator_ShouldFeedWatchdog() != 0U)
         {
             PlatformWatchdog_Feed();
         }

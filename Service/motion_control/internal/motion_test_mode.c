@@ -6,6 +6,21 @@
 #include "platform_time.h"
 #include "power_management_service.h"
 
+#define MOTION_TEST_MODE_MAX_PERMILLE 300
+
+static int16_t MotionTestMode_ClampDiagnostic(int32_t value)
+{
+    if (value > MOTION_TEST_MODE_MAX_PERMILLE)
+    {
+        return MOTION_TEST_MODE_MAX_PERMILLE;
+    }
+    if (value < -MOTION_TEST_MODE_MAX_PERMILLE)
+    {
+        return -MOTION_TEST_MODE_MAX_PERMILLE;
+    }
+    return (int16_t)value;
+}
+
 static void MotionTestMode_ClearUnsafe(motion_test_mode_t *mode)
 {
     mode->open_loop_enabled                = 0U;
@@ -78,8 +93,8 @@ void MotionTestMode_SetOpenLoop(motion_test_mode_t *mode, int16_t left_permille,
         return;
     }
     critical                               = PlatformCritical_Enter();
-    mode->open_loop_side[MOTOR_SIDE_LEFT]  = MotorOutputCoordinator_Clamp(left_permille);
-    mode->open_loop_side[MOTOR_SIDE_RIGHT] = MotorOutputCoordinator_Clamp(right_permille);
+    mode->open_loop_side[MOTOR_SIDE_LEFT]  = MotionTestMode_ClampDiagnostic(left_permille);
+    mode->open_loop_side[MOTOR_SIDE_RIGHT] = MotionTestMode_ClampDiagnostic(right_permille);
     mode->open_loop_enabled                = (left_permille != 0 || right_permille != 0) ? 1U : 0U;
     mode->raw_input_enabled                = 0U;
     mode->lease_active                     = mode->open_loop_enabled;
@@ -111,8 +126,8 @@ void MotionTestMode_SetRawSides(motion_test_mode_t *mode,
             forward = 0;
             reverse = 0;
         }
-        mode->raw_forward[index] = MotorOutputCoordinator_Clamp(forward);
-        mode->raw_reverse[index] = MotorOutputCoordinator_Clamp(reverse);
+        mode->raw_forward[index] = MotionTestMode_ClampDiagnostic(forward);
+        mode->raw_reverse[index] = MotionTestMode_ClampDiagnostic(reverse);
         if (mode->raw_forward[index] < 0)
         {
             mode->raw_forward[index] = 0;
@@ -161,8 +176,8 @@ void MotionTestMode_SetRawMotor(motion_test_mode_t *mode,
         PlatformCritical_Exit(critical);
         return;
     }
-    mode->raw_forward[motor] = MotorOutputCoordinator_Clamp(forward_permille);
-    mode->raw_reverse[motor] = MotorOutputCoordinator_Clamp(reverse_permille);
+    mode->raw_forward[motor] = MotionTestMode_ClampDiagnostic(forward_permille);
+    mode->raw_reverse[motor] = MotionTestMode_ClampDiagnostic(reverse_permille);
     if (mode->raw_forward[motor] < 0)
     {
         mode->raw_forward[motor] = 0;

@@ -1,5 +1,11 @@
 #include "wheel_speed_pid_controller.h"
 
+static uint8_t PidController_Finite(float value)
+{
+    const float max_float = 3.402823466e+38f;
+    return (value == value && value <= max_float && value >= -max_float) ? 1U : 0U;
+}
+
 void PidController_Init(pid_state_t *pid, const pid_params_t *params)
 {
     if (pid == 0 || params == 0)
@@ -49,8 +55,11 @@ float PidController_StepBounded(pid_state_t *pid,
     float   output;
     uint8_t freeze_integral = 0U;
 
-    if (pid == 0 || pid->initialized == 0U || dt_s <= 0.0f || output_min > output_max)
+    if (pid == 0 || pid->initialized == 0U || PidController_Finite(target) == 0U || PidController_Finite(actual) == 0U
+        || PidController_Finite(dt_s) == 0U || PidController_Finite(output_min) == 0U
+        || PidController_Finite(output_max) == 0U || dt_s <= 0.0f || output_min > output_max)
     {
+        PidController_Reset(pid);
         return 0.0f;
     }
 
@@ -99,6 +108,11 @@ float PidController_StepBounded(pid_state_t *pid,
     i_term = pid->params.ki * pid->integral;
 
     output = p_term + i_term + d_term;
+    if (PidController_Finite(output) == 0U)
+    {
+        PidController_Reset(pid);
+        return 0.0f;
+    }
     if (output > output_max)
     {
         output = output_max;

@@ -140,6 +140,12 @@ void CommandManagement_ClearSource(command_source_t source)
     }
 }
 
+command_apply_result_t CommandManagement_QualifyRearm(command_source_t source)
+{
+    CommandManagement_ClearSource(source);
+    return (command_apply_result_t){.outcome = COMMAND_OUTCOME_RELEASE_ACCEPTED, .source_cleared = 1U};
+}
+
 uint8_t LineSensorDriver_GetSensorData(line_sensor_data_t *data)
 {
     *data = fake_sensor;

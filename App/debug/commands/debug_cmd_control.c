@@ -11,7 +11,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DEBUG_CMD_CONTROL_TX_SIZE 192U
+#define DEBUG_CMD_CONTROL_TX_SIZE     192U
+#define DEBUG_DIAGNOSTIC_MAX_PERMILLE 300
 
 #define CONTROL_LOG(level, fmt, ...)                                                                                   \
     do                                                                                                                 \
@@ -23,13 +24,13 @@
 
 static int16_t DebugCmdControl_ClampPermille(int32_t value)
 {
-    if (value > CHASSIS_PWM_MAX_PERMILLE)
+    if (value > DEBUG_DIAGNOSTIC_MAX_PERMILLE)
     {
-        return CHASSIS_PWM_MAX_PERMILLE;
+        return DEBUG_DIAGNOSTIC_MAX_PERMILLE;
     }
-    if (value < -CHASSIS_PWM_MAX_PERMILLE)
+    if (value < -DEBUG_DIAGNOSTIC_MAX_PERMILLE)
     {
-        return -CHASSIS_PWM_MAX_PERMILLE;
+        return -DEBUG_DIAGNOSTIC_MAX_PERMILLE;
     }
     return (int16_t)value;
 }
@@ -161,6 +162,7 @@ uint8_t DebugCmdControl_TryHandle(const char *line, const debug_cmd_control_cont
         MotionControl_OpenLoopTest(0, 0);
         MotionControl_RawInputTest(0, 0, 0, 0);
         CommandManagement_ClearAll();
+        (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG);
         CONTROL_LOG("INFO", "chassis stopped");
     }
     else if (sscanf(line, "estop %d", &value) == 1)

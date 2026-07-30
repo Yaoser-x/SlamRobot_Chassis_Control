@@ -414,6 +414,10 @@ static void test_control_priority_timeout_and_reject_stop(void)
 
     ControlService_Init();
     fake_tick = 100U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(1U, fake_safety_generation);
+    (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG);
+    (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_PS2);
 
     cmd = (chassis_cmd_t){.linear_x     = 0.1f,
                           .angular_z    = 0.0f,
@@ -524,11 +528,20 @@ static void test_stale_motion_generation_cannot_submit_after_safety_window(void)
     uint32_t stale_generation;
 
     ControlService_Init();
+    fake_emergency_stop   = 0U;
+    fake_fault_stop       = 0U;
+    fake_maintenance_lock = 0U;
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(1U, fake_safety_generation);
+    (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG);
     stale_generation = ControlService_GetMotionRevokeGeneration();
     require_int(ControlService_BeginMaintenance() != 0U, "maintenance starts safety window");
     ControlService_EndMaintenance();
+    fake_safety_generation++;
+    CommandManagement_SetMotionGate(1U, fake_safety_generation);
     require_int(ControlService_SetCommandForGeneration(&cmd, stale_generation) == CONTROL_COMMAND_REJECTED,
                 "stale producer token cannot submit after maintenance");
+    (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG);
     require_int(ControlService_SetCommandForGeneration(&cmd, ControlService_GetMotionRevokeGeneration())
                     == CONTROL_COMMAND_ACCEPTED,
                 "current producer token accepts a new command");
@@ -732,12 +745,28 @@ static void test_encoder_reject_streak_rebuilds_window(void)
                                                          3U,
                                                          &reject_streak,
                                                          &rebuild_count)
-                    != 0U,
-                "third reject rebuilds with current delta");
-    require_int(window.sample_count == 1U, "rebuild starts new window");
-    require_int(window.delta_sum == 115, "rebuild captures current delta");
-    require_int(reject_streak == 0U, "rebuild clears reject streak");
-    require_int(rebuild_count == 1U, "rebuild count increments");
+                    == 0U,
+                "third reject enters reacquiring");
+    require_int(window.sample_count == 0U, "reacquiring excludes rejected sample from baseline");
+    require_int((reject_streak & 0x80U) != 0U, "reacquiring state is explicit");
+    for (int32_t sample = 45; sample <= 47; ++sample)
+    {
+        uint8_t valid = WheelSpeedEstimator_RecordDeltaOrRebuild(&window,
+                                                                 sample,
+                                                                 10U,
+                                                                 2464.0f,
+                                                                 0.035f,
+                                                                 2.5f,
+                                                                 0.45f,
+                                                                 3U,
+                                                                 3U,
+                                                                 &reject_streak,
+                                                                 &rebuild_count);
+        require_int(valid == ((sample == 47) ? 1U : 0U), "three physical samples are required to reacquire");
+    }
+    require_int(window.sample_count == 3U, "reacquired window contains only physical valid samples");
+    require_int(reject_streak == 0U, "successful reacquire clears state");
+    require_int(rebuild_count == 1U, "reacquire count increments after recovery");
 }
 
 static void test_task_timing_next_wake(void)
@@ -986,6 +1015,31 @@ static void test_control_dt_uses_measured_period_and_rejects_long_gap(void)
                 "gap above 100ms is rejected");
 }
 
+static void test_control_timing_classification_and_wrap(void)
+{
+    control_timing_t timing = {0};
+
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 100U) == CONTROL_TIMING_FIRST,
+                "first timing sample initializes without running control");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 100U) == CONTROL_TIMING_EARLY,
+                "zero elapsed is early");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 104U) == CONTROL_TIMING_EARLY,
+                "1-4ms is early");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 105U) == CONTROL_TIMING_NORMAL,
+                "5ms is normal");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 121U) == CONTROL_TIMING_LATE,
+                "16ms is late");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 142U) == CONTROL_TIMING_MISSED,
+                "21ms is missed");
+    timing.last_step_ms = UINT32_MAX - 4U;
+    timing.initialized  = 1U;
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 5U) == CONTROL_TIMING_NORMAL,
+                "uint32 tick wrap is normal modular elapsed");
+    timing.last_step_ms = 100U;
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 90U) == CONTROL_TIMING_MISSED,
+                "backward time is missed");
+}
+
 /* ────────── L2: differential-drive kinematics tests ────────── */
 
 static void test_chassis_math_differential(void)
@@ -1004,6 +1058,9 @@ static void test_chassis_math_differential(void)
     /* 混合：正 angular_z = CCW = 右轮更快 */
     DifferentialDriveKinematics_ResolveDifferentialTargets(0.3f, 1.0f, CHASSIS_TRACK_WIDTH_M, &left, &right);
     require_int(right > left, "turn: positive angular_z → right > left");
+    DifferentialDriveKinematics_ResolveDifferentialTargets(NAN, 0.0f, CHASSIS_TRACK_WIDTH_M, &left, &right);
+    require_close(left, 0.0f, 0.0f, "non-finite kinematics input zeros left target");
+    require_close(right, 0.0f, 0.0f, "non-finite kinematics input zeros right target");
 }
 
 int main(void)
@@ -1038,6 +1095,7 @@ int main(void)
     test_pid_conditional_anti_windup();
     test_pid_external_output_bounds();
     test_control_dt_uses_measured_period_and_rejects_long_gap();
+    test_control_timing_classification_and_wrap();
     test_chassis_math_differential();
     (void)printf("PASS: f407_v2 host tests\n");
     return 0;

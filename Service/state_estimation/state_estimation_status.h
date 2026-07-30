@@ -68,6 +68,25 @@ typedef struct
     uint8_t miso_pulldown;
 } state_estimation_imu_diagnostic_t;
 
+typedef enum
+{
+    STATE_ESTIMATION_WHEEL_UNINITIALIZED = 0,
+    STATE_ESTIMATION_WHEEL_VALID,
+    STATE_ESTIMATION_WHEEL_TRANSIENT_REJECT,
+    STATE_ESTIMATION_WHEEL_REACQUIRING,
+    STATE_ESTIMATION_WHEEL_STALE,
+    STATE_ESTIMATION_WHEEL_FAULT
+} state_estimation_wheel_quality_t;
+
+typedef enum
+{
+    STATE_ESTIMATION_WHEEL_REJECT_NONE = 0,
+    STATE_ESTIMATION_WHEEL_REJECT_TIMING,
+    STATE_ESTIMATION_WHEEL_REJECT_GEOMETRY,
+    STATE_ESTIMATION_WHEEL_REJECT_PHYSICAL_RANGE,
+    STATE_ESTIMATION_WHEEL_REJECT_SPIKE
+} state_estimation_wheel_reject_reason_t;
+
 typedef struct
 {
     int32_t  count[STATE_ESTIMATION_MOTOR_COUNT];
@@ -78,6 +97,10 @@ typedef struct
     uint16_t window_rebuild_count[STATE_ESTIMATION_MOTOR_COUNT];
     uint16_t anomaly_count[STATE_ESTIMATION_MOTOR_COUNT];
     uint8_t  consecutive_anomalies[STATE_ESTIMATION_MOTOR_COUNT];
+    uint8_t  quality[STATE_ESTIMATION_MOTOR_COUNT];
+    uint8_t  reject_reason[STATE_ESTIMATION_MOTOR_COUNT];
+    uint8_t  reacquire_count[STATE_ESTIMATION_MOTOR_COUNT];
+    uint32_t sample_age_ms[STATE_ESTIMATION_MOTOR_COUNT];
     int32_t  left_count;
     int32_t  right_count;
     int32_t  left_delta;

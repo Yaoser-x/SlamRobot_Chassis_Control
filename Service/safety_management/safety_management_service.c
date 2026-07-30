@@ -25,6 +25,8 @@ static uint8_t                    emergency_stop;
 static uint8_t                    fault_stop;
 static uint8_t                    maintenance_lock;
 static uint8_t                    safety_initialized;
+static uint8_t                    normal_runtime_permit;
+static uint8_t                    diagnostic_runtime_permit;
 static uint32_t                   gate_decision_generation;
 
 static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
@@ -169,7 +171,8 @@ uint8_t SafetyManagement_ValidateConfig(const safety_management_config_t *config
 
 static uint8_t SafetyManagement_MotionAllowed(void)
 {
-    return (emergency_stop == 0U && fault_stop == 0U && maintenance_lock == 0U) ? 1U : 0U;
+    return (normal_runtime_permit != 0U && emergency_stop == 0U && fault_stop == 0U && maintenance_lock == 0U) ? 1U
+                                                                                                               : 0U;
 }
 
 uint8_t SafetyManagement_Init(const safety_management_config_t *config)
@@ -180,18 +183,21 @@ uint8_t SafetyManagement_Init(const safety_management_config_t *config)
     {
         return 0U;
     }
-    critical         = PlatformCritical_Enter();
-    safety_config    = *config;
-    monitor_state    = (safety_management_status_t){0};
-    emergency_stop   = 0U;
-    fault_stop       = 0U;
-    maintenance_lock = 0U;
+    critical                  = PlatformCritical_Enter();
+    safety_config             = *config;
+    monitor_state             = (safety_management_status_t){0};
+    emergency_stop            = 0U;
+    fault_stop                = 0U;
+    maintenance_lock          = 0U;
+    normal_runtime_permit     = 0U;
+    diagnostic_runtime_permit = 0U;
     gate_decision_generation++;
     if (gate_decision_generation == 0UL)
     {
         gate_decision_generation = 1UL;
     }
-    monitor_state.motion_allowed = 1U;
+    monitor_state.motion_allowed = 0U;
+    monitor_state.runtime_state  = SAFETY_STATE_BOOT_SAFE;
     monitor_state.generation     = 1UL;
     safety_initialized           = 1U;
     PlatformCritical_Exit(critical);
@@ -206,7 +212,7 @@ uint8_t SafetyManagement_Init(const safety_management_config_t *config)
         overcurrent_blank_until_ms[i]       = 0U;
         inactive_since_ms[i]                = 0U;
     }
-    CommandManagement_SetMotionGate(1U, gate_decision_generation);
+    CommandManagement_SetMotionGate(0U, gate_decision_generation);
     return 1U;
 }
 
@@ -408,6 +414,7 @@ void SafetyManagement_Update(void)
     next_state.fault_stop       = fault_stop;
     next_state.maintenance_lock = maintenance_lock;
     next_state.motion_allowed   = SafetyManagement_MotionAllowed();
+    next_state.runtime_state    = monitor_state.runtime_state;
     next_state.generation       = monitor_state.generation + 1UL;
     monitor_state               = next_state;
     PlatformCritical_Exit(primask);
@@ -437,6 +444,38 @@ uint32_t SafetyManagement_GetStatus(safety_management_status_t *state)
     generation = monitor_state.generation;
     PlatformCritical_Exit(primask);
     return generation;
+}
+
+void SafetyManagement_ApplyRuntimePermit(uint8_t permit, safety_runtime_state_t runtime_state)
+{
+    safety_management_status_t next;
+    uint8_t                    decision;
+    uint32_t                   decision_generation;
+    uint32_t                   primask = PlatformCritical_Enter();
+
+    normal_runtime_permit = (permit != 0U) ? 1U : 0U;
+    if (emergency_stop != 0U)
+    {
+        runtime_state = SAFETY_STATE_ESTOP;
+    }
+    else if (fault_stop != 0U || monitor_state.latched_error_flags != 0UL)
+    {
+        runtime_state = SAFETY_STATE_FAULT_LATCHED;
+    }
+    else if (maintenance_lock != 0U)
+    {
+        runtime_state = SAFETY_STATE_MAINTENANCE;
+    }
+    decision = SafetyManagement_MotionAllowed();
+    gate_decision_generation++;
+    next                = monitor_state;
+    next.motion_allowed = decision;
+    next.runtime_state  = runtime_state;
+    next.generation++;
+    monitor_state       = next;
+    decision_generation = gate_decision_generation;
+    PlatformCritical_Exit(primask);
+    CommandManagement_SetMotionGate(decision, decision_generation);
 }
 
 safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
@@ -725,4 +764,24 @@ uint8_t SafetyManagement_IsMotionAllowed(void)
     value = SafetyManagement_MotionAllowed();
     PlatformCritical_Exit(primask);
     return value;
+}
+
+uint8_t SafetyManagement_IsDiagnosticMotionAllowed(void)
+{
+    uint8_t  value;
+    uint32_t primask = PlatformCritical_Enter();
+
+    value = (diagnostic_runtime_permit != 0U && emergency_stop == 0U && fault_stop == 0U && maintenance_lock == 0U)
+                ? 1U
+                : 0U;
+    PlatformCritical_Exit(primask);
+    return value;
+}
+
+void SafetyManagement_ApplyDiagnosticPermit(uint8_t permit)
+{
+    uint32_t primask = PlatformCritical_Enter();
+
+    diagnostic_runtime_permit = (permit != 0U) ? 1U : 0U;
+    PlatformCritical_Exit(primask);
 }

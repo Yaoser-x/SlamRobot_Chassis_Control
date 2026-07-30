@@ -1,6 +1,9 @@
 #include "wheel_speed_estimator.h"
 
-#define TWO_PI_F 6.28318530718f
+#define TWO_PI_F                      6.28318530718f
+#define WHEEL_REACQUIRING_FLAG        0x80U
+#define WHEEL_REACQUIRE_COUNT_MASK    0x7FU
+#define WHEEL_REACQUIRE_VALID_SAMPLES 3U
 
 static float WheelSpeedEstimator_AbsF(float value)
 {
@@ -114,6 +117,7 @@ uint8_t WheelSpeedEstimator_RecordDeltaOrRebuild(encoder_speed_window_t *window,
                                                  uint16_t               *rebuild_count)
 {
     uint8_t accepted;
+    uint8_t reacquiring = (reject_streak != 0 && (*reject_streak & WHEEL_REACQUIRING_FLAG) != 0U) ? 1U : 0U;
 
     accepted = WheelSpeedEstimator_DeltaAccepted(delta,
                                                  window,
@@ -128,6 +132,19 @@ uint8_t WheelSpeedEstimator_RecordDeltaOrRebuild(encoder_speed_window_t *window,
         WheelSpeedEstimator_SpeedWindowPush(window, delta, dt_ms);
         if (reject_streak != 0)
         {
+            if (reacquiring != 0U)
+            {
+                uint8_t count = (uint8_t)((*reject_streak & WHEEL_REACQUIRE_COUNT_MASK) + 1U);
+                if (count < WHEEL_REACQUIRE_VALID_SAMPLES)
+                {
+                    *reject_streak = (uint8_t)(WHEEL_REACQUIRING_FLAG | count);
+                    return 0U;
+                }
+                if (rebuild_count != 0)
+                {
+                    (*rebuild_count)++;
+                }
+            }
             *reject_streak = 0U;
         }
         return 1U;
@@ -135,17 +152,17 @@ uint8_t WheelSpeedEstimator_RecordDeltaOrRebuild(encoder_speed_window_t *window,
 
     if (reject_streak != 0)
     {
+        if (reacquiring != 0U)
+        {
+            WheelSpeedEstimator_SpeedWindowReset(window);
+            *reject_streak = WHEEL_REACQUIRING_FLAG;
+            return 0U;
+        }
         (*reject_streak)++;
         if (rebuild_after_rejects != 0U && *reject_streak >= rebuild_after_rejects)
         {
             WheelSpeedEstimator_SpeedWindowReset(window);
-            WheelSpeedEstimator_SpeedWindowPush(window, delta, dt_ms);
-            *reject_streak = 0U;
-            if (rebuild_count != 0)
-            {
-                (*rebuild_count)++;
-            }
-            return 1U;
+            *reject_streak = WHEEL_REACQUIRING_FLAG;
         }
     }
 

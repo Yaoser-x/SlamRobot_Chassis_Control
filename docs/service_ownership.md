@@ -1,5 +1,7 @@
 # Service 唯一职权与 Upper Protocol v3 边界
 
+rc2 中 `CommandManagement` 独占五来源槽、租约、rearm 和撤销代次；`SafetyManagement` 独占 ESTOP、fault latch 与正常运动许可；`MotionControl` 独占控制状态和电机输出。Host/ESP dispatcher 只负责 wire、session、sequence 和请求校验，业务结果由 App 应用后回填。
+
 所有权表示“唯一保存可写状态并作出决定”，不等于“唯一读取事实”。任何同一状态的第二个可写副本均视为架构缺陷。
 
 | 能力 | 唯一状态/决策所有者 | 明确禁止 |

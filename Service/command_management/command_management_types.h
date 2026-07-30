@@ -21,6 +21,24 @@ typedef enum
     COMMAND_RESULT_REJECTED_AND_STOPPED = 2
 } command_result_t;
 
+typedef enum
+{
+    COMMAND_OUTCOME_ACTIVE_ACCEPTED = 0,
+    COMMAND_OUTCOME_RELEASE_ACCEPTED,
+    COMMAND_OUTCOME_GATE_CLOSED,
+    COMMAND_OUTCOME_REARM_REQUIRED,
+    COMMAND_OUTCOME_INVALID,
+    COMMAND_OUTCOME_EXPIRED,
+    COMMAND_OUTCOME_GENERATION_CONFLICT
+} command_outcome_t;
+
+typedef struct
+{
+    command_outcome_t outcome;
+    uint8_t           source_cleared;
+    uint32_t          slot_generation;
+} command_apply_result_t;
+
 typedef struct
 {
     float            linear_x;

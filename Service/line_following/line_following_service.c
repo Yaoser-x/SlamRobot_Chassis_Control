@@ -542,7 +542,14 @@ line_following_result_t LineFollowing_Enable(uint8_t enable)
 
     if (clear_source != 0U)
     {
-        CommandManagement_ClearSource(COMMAND_SOURCE_LINE);
+        if (enable == 0U && result == LINE_FOLLOWING_RESULT_APPLIED)
+        {
+            (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_LINE);
+        }
+        else
+        {
+            CommandManagement_ClearSource(COMMAND_SOURCE_LINE);
+        }
     }
     return result;
 }

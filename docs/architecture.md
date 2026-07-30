@@ -45,6 +45,8 @@ Service/
 
 最终 CMake 静态目标固定为 `f407_algorithm / f407_platform / f407_bsp / f407_service / f407_app / f407_app_adapters`。普通 `f407_app` 只链接 Service 与 Platform；`f407_app_adapters` 显式隔离硬件调试、显示、ISR 和传输适配代码。生产树禁止存在 `Domain/`、`Device/`、`Common/`、`Shared/`、`Model/`、`Utils/` 或 `Manager/` 顶层目录。
 
+rc2 由 App 层 `ChassisRuntimeCoordinator` 编排 Motor 10 ms 与 Safety 20 ms 两条周期链。启动许可、命令门应用、快照发布和看门狗完成判定属于 App；任务入口 heartbeat 不代表周期完成。
+
 ## Beta5.4 运行时边界
 
 - 巡线 Service 只拥有请求、采样、校验和 RAM apply；App 协调器持有完整维护租约并区分 PS2 自动提交与 Debug 手动提交。

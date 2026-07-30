@@ -58,6 +58,7 @@ set(F407_APP_SOURCES
     App/composition/firmware_identity_provider.c
     App/config/robot_config.c
     App/composition/system_publish_snapshot_collector.c
+    App/composition/chassis_runtime_coordinator.c
     App/composition/operator_action_router.c
     App/composition/line_calibration_orchestrator.c
     App/composition/imu_calibration_orchestrator.c

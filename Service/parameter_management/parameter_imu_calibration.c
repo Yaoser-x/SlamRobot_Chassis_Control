@@ -32,6 +32,11 @@ void ParameterImuCalibration_Default(imu_calibration_t *calibration)
 
 uint32_t ParameterImuCalibration_Crc(const imu_calibration_t *calibration)
 {
+    return ParameterImuCalibration_IntegrityHash(calibration);
+}
+
+uint32_t ParameterImuCalibration_IntegrityHash(const imu_calibration_t *calibration)
+{
     imu_calibration_t copy;
 
     if (calibration == 0)

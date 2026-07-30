@@ -10,11 +10,14 @@ static uint8_t                     command_initialized;
 static uint32_t                    motion_revoke_generation;
 static uint32_t                    motion_gate_generation;
 static uint32_t                    command_generation;
-static uint8_t                     remote_rearm_required_mask;
+static uint8_t                     rearm_required_mask;
+static uint32_t                    slot_generation[COMMAND_SOURCE_COUNT];
 
-#define COMMAND_REMOTE_HOST_MASK (1U << COMMAND_SOURCE_HOST)
-#define COMMAND_REMOTE_ESP_MASK  (1U << COMMAND_SOURCE_ESP12F)
-#define COMMAND_REMOTE_MASK      (COMMAND_REMOTE_HOST_MASK | COMMAND_REMOTE_ESP_MASK)
+#define COMMAND_SOURCE_MASK(source) ((uint8_t)(1U << (source)))
+#define COMMAND_ALL_SOURCE_MASK                                                                                        \
+    ((uint8_t)(COMMAND_SOURCE_MASK(COMMAND_SOURCE_HOST) | COMMAND_SOURCE_MASK(COMMAND_SOURCE_PS2)                      \
+               | COMMAND_SOURCE_MASK(COMMAND_SOURCE_ESP12F) | COMMAND_SOURCE_MASK(COMMAND_SOURCE_DEBUG)                \
+               | COMMAND_SOURCE_MASK(COMMAND_SOURCE_LINE)))
 
 static const command_source_t source_priority[] = {
     COMMAND_SOURCE_HOST,
@@ -100,12 +103,16 @@ uint8_t CommandManagement_Init(const command_management_config_t *config)
     {
         source_commands[index] = (command_velocity_t){0};
     }
-    motion_allowed             = 1U;
-    command_initialized        = 1U;
-    motion_revoke_generation   = 0UL;
-    motion_gate_generation     = 0UL;
-    command_generation         = 1UL;
-    remote_rearm_required_mask = COMMAND_REMOTE_MASK;
+    motion_allowed           = 0U;
+    command_initialized      = 1U;
+    motion_revoke_generation = 0UL;
+    motion_gate_generation   = 0UL;
+    command_generation       = 1UL;
+    rearm_required_mask      = COMMAND_ALL_SOURCE_MASK;
+    for (uint8_t index = 0U; index < COMMAND_SOURCE_COUNT; ++index)
+    {
+        slot_generation[index] = 1UL;
+    }
     PlatformCritical_Exit(critical);
     return 1U;
 }
@@ -137,29 +144,48 @@ void CommandManagement_ClearSource(command_source_t source)
     }
     critical                = PlatformCritical_Enter();
     source_commands[source] = (command_velocity_t){0};
+    slot_generation[source]++;
     command_generation++;
     PlatformCritical_Exit(critical);
 }
 
 command_result_t CommandManagement_DisableRemoteSource(command_source_t source)
 {
-    platform_critical_state_t critical;
-
     if (CommandManagement_IsRemoteSource(source) == 0U)
     {
         return COMMAND_RESULT_REJECTED;
     }
+    return (CommandManagement_QualifyRearm(source).outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED)
+               ? COMMAND_RESULT_ACCEPTED
+               : COMMAND_RESULT_REJECTED;
+}
+
+command_apply_result_t CommandManagement_QualifyRearm(command_source_t source)
+{
+    command_apply_result_t    result = {.outcome = COMMAND_OUTCOME_INVALID};
+    platform_critical_state_t critical;
+
+    if (CommandManagement_SourceValid(source) == 0U)
+    {
+        return result;
+    }
     critical                = PlatformCritical_Enter();
     source_commands[source] = (command_velocity_t){0};
+    slot_generation[source]++;
     command_generation++;
+    result.source_cleared  = 1U;
+    result.slot_generation = slot_generation[source];
     if (motion_allowed == 0U)
     {
-        PlatformCritical_Exit(critical);
-        return COMMAND_RESULT_REJECTED;
+        result.outcome = COMMAND_OUTCOME_GATE_CLOSED;
     }
-    remote_rearm_required_mask &= (uint8_t) ~(1U << source);
+    else
+    {
+        rearm_required_mask &= (uint8_t)~COMMAND_SOURCE_MASK(source);
+        result.outcome = COMMAND_OUTCOME_RELEASE_ACCEPTED;
+    }
     PlatformCritical_Exit(critical);
-    return COMMAND_RESULT_ACCEPTED;
+    return result;
 }
 
 uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
@@ -184,9 +210,9 @@ uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms
     return 1U;
 }
 
-static command_result_t CommandManagement_SetInternal(const command_velocity_t *command,
-                                                      uint8_t                   enforce_generation,
-                                                      uint32_t                  expected_generation)
+static command_apply_result_t CommandManagement_ApplyInternal(const command_velocity_t *command,
+                                                              uint8_t                   enforce_generation,
+                                                              uint32_t                  expected_generation)
 {
     command_velocity_t        sanitized;
     param_model_t             params;
@@ -194,32 +220,45 @@ static command_result_t CommandManagement_SetInternal(const command_velocity_t *
 
     if (command == 0 || CommandManagement_SourceValid(command->source) == 0U)
     {
-        return COMMAND_RESULT_REJECTED;
+        return (command_apply_result_t){.outcome = COMMAND_OUTCOME_INVALID};
     }
     sanitized = *command;
     critical  = PlatformCritical_Enter();
-    if (motion_allowed == 0U
-        || (CommandManagement_IsRemoteSource(sanitized.source) != 0U
-            && (remote_rearm_required_mask & (uint8_t)(1U << sanitized.source)) != 0U)
-        || (enforce_generation != 0U && motion_revoke_generation != expected_generation))
+    if (motion_allowed == 0U)
     {
         PlatformCritical_Exit(critical);
-        return COMMAND_RESULT_REJECTED;
+        return (command_apply_result_t){.outcome         = COMMAND_OUTCOME_GATE_CLOSED,
+                                        .slot_generation = slot_generation[sanitized.source]};
+    }
+    if (enforce_generation != 0U && motion_revoke_generation != expected_generation)
+    {
+        PlatformCritical_Exit(critical);
+        return (command_apply_result_t){.outcome         = COMMAND_OUTCOME_GENERATION_CONFLICT,
+                                        .slot_generation = slot_generation[sanitized.source]};
+    }
+    PlatformCritical_Exit(critical);
+    if (sanitized.enable == 0U)
+    {
+        return CommandManagement_QualifyRearm(sanitized.source);
+    }
+    critical = PlatformCritical_Enter();
+    if ((rearm_required_mask & COMMAND_SOURCE_MASK(sanitized.source)) != 0U)
+    {
+        PlatformCritical_Exit(critical);
+        return (command_apply_result_t){.outcome         = COMMAND_OUTCOME_REARM_REQUIRED,
+                                        .slot_generation = slot_generation[sanitized.source]};
     }
     PlatformCritical_Exit(critical);
     if (ParameterManagement_GetSnapshot(&params) == 0UL)
     {
-        return COMMAND_RESULT_REJECTED;
+        return (command_apply_result_t){.outcome = COMMAND_OUTCOME_INVALID};
     }
     if (CommandManagement_Finite(sanitized.linear_x) == 0U || CommandManagement_Finite(sanitized.angular_z) == 0U)
     {
         CommandManagement_ClearSource(sanitized.source);
-        return COMMAND_RESULT_REJECTED_AND_STOPPED;
-    }
-    if (sanitized.enable == 0U)
-    {
-        CommandManagement_ClearSource(sanitized.source);
-        return COMMAND_RESULT_REJECTED_AND_STOPPED;
+        return (command_apply_result_t){.outcome         = COMMAND_OUTCOME_INVALID,
+                                        .source_cleared  = 1U,
+                                        .slot_generation = slot_generation[sanitized.source]};
     }
     sanitized.linear_x  = CommandManagement_Clamp(sanitized.linear_x, params.max_linear_mps);
     sanitized.angular_z = CommandManagement_Clamp(sanitized.angular_z, params.max_angular_rps);
@@ -227,32 +266,57 @@ static command_result_t CommandManagement_SetInternal(const command_velocity_t *
         && CommandManagement_Abs(sanitized.angular_z) > 0.0001f)
     {
         CommandManagement_ClearSource(sanitized.source);
-        return COMMAND_RESULT_REJECTED_AND_STOPPED;
+        return (command_apply_result_t){.outcome         = COMMAND_OUTCOME_INVALID,
+                                        .source_cleared  = 1U,
+                                        .slot_generation = slot_generation[sanitized.source]};
     }
 
     critical = PlatformCritical_Enter();
-    if (motion_allowed == 0U
-        || (CommandManagement_IsRemoteSource(sanitized.source) != 0U
-            && (remote_rearm_required_mask & (uint8_t)(1U << sanitized.source)) != 0U)
+    if (motion_allowed == 0U || (rearm_required_mask & COMMAND_SOURCE_MASK(sanitized.source)) != 0U
         || (enforce_generation != 0U && motion_revoke_generation != expected_generation))
     {
         PlatformCritical_Exit(critical);
-        return COMMAND_RESULT_REJECTED;
+        return (command_apply_result_t){.outcome         = (motion_allowed == 0U) ? COMMAND_OUTCOME_GATE_CLOSED
+                                                                                  : COMMAND_OUTCOME_GENERATION_CONFLICT,
+                                        .slot_generation = slot_generation[sanitized.source]};
     }
     source_commands[sanitized.source] = sanitized;
     command_generation++;
+    slot_generation[sanitized.source]++;
+    command_apply_result_t result = {.outcome         = COMMAND_OUTCOME_ACTIVE_ACCEPTED,
+                                     .slot_generation = slot_generation[sanitized.source]};
     PlatformCritical_Exit(critical);
-    return COMMAND_RESULT_ACCEPTED;
+    return result;
+}
+
+command_apply_result_t CommandManagement_Apply(const command_velocity_t *command)
+{
+    return CommandManagement_ApplyInternal(command, 0U, 0UL);
+}
+
+command_apply_result_t CommandManagement_ApplyForGeneration(const command_velocity_t *command,
+                                                            uint32_t                  expected_generation)
+{
+    return CommandManagement_ApplyInternal(command, 1U, expected_generation);
+}
+
+static command_result_t CommandManagement_LegacyResult(command_apply_result_t result)
+{
+    if (result.outcome == COMMAND_OUTCOME_ACTIVE_ACCEPTED || result.outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED)
+    {
+        return COMMAND_RESULT_ACCEPTED;
+    }
+    return (result.source_cleared != 0U) ? COMMAND_RESULT_REJECTED_AND_STOPPED : COMMAND_RESULT_REJECTED;
 }
 
 command_result_t CommandManagement_Set(const command_velocity_t *command)
 {
-    return CommandManagement_SetInternal(command, 0U, 0UL);
+    return CommandManagement_LegacyResult(CommandManagement_Apply(command));
 }
 
 command_result_t CommandManagement_SetForGeneration(const command_velocity_t *command, uint32_t expected_generation)
 {
-    return CommandManagement_SetInternal(command, 1U, expected_generation);
+    return CommandManagement_LegacyResult(CommandManagement_ApplyForGeneration(command, expected_generation));
 }
 
 uint8_t CommandManagement_GetActive(command_velocity_t *command, uint32_t now_ms)
@@ -327,7 +391,11 @@ void CommandManagement_SetMotionGate(uint8_t allowed, uint32_t decision_generati
         {
             source_commands[index] = (command_velocity_t){0};
         }
-        remote_rearm_required_mask |= COMMAND_REMOTE_MASK;
+        rearm_required_mask |= COMMAND_ALL_SOURCE_MASK;
+        for (uint8_t index = 0U; index < COMMAND_SOURCE_COUNT; ++index)
+        {
+            slot_generation[index]++;
+        }
     }
     motion_allowed = next_allowed;
     command_generation++;
@@ -369,10 +437,10 @@ uint32_t CommandManagement_GetStatus(uint32_t now_ms, command_management_status_
             }
         }
     }
-    status->motion_allowed             = motion_allowed;
-    status->remote_rearm_required_mask = remote_rearm_required_mask;
-    status->motion_revoke_generation   = motion_revoke_generation;
-    status->generation                 = command_generation;
+    status->motion_allowed           = motion_allowed;
+    status->rearm_required_mask      = rearm_required_mask;
+    status->motion_revoke_generation = motion_revoke_generation;
+    status->generation               = command_generation;
     PlatformCritical_Exit(critical);
     return status->generation;
 }

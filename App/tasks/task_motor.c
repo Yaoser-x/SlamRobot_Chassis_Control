@@ -1,4 +1,5 @@
 #include "app_tasks.h"
+#include "chassis_runtime_coordinator.h"
 
 #include "robot_config.h"
 #include "motion_control_service.h"
@@ -17,9 +18,7 @@ void Task_MotorControl(void *argument)
         uint32_t now_ms = PlatformTime_TaskNowMs();
 
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_MOTOR, now_ms);
-        StateEstimation_UpdateWheel(now_ms);
-        PowerManagement_UpdateStationary();
-        MotionControl_Step(now_ms);
+        ChassisRuntimeCoordinator_RunMotorCycle(now_ms);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_MOTOR,
                                     &next_wake,
                                     RobotConfig_GetDefault()->tasks[APP_TASK_MOTOR].period_ms);

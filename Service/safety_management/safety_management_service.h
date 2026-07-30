@@ -31,6 +31,12 @@ extern "C"
     uint8_t               SafetyManagement_IsFaultStop(void);
     uint8_t               SafetyManagement_IsMaintenanceLocked(void);
     uint8_t               SafetyManagement_IsMotionAllowed(void);
+    /** Return whether explicitly armed diagnostic test mode may drive at its restricted limit. */
+    uint8_t SafetyManagement_IsDiagnosticMotionAllowed(void);
+    /** Apply the App coordinator's normal-motion permit and published runtime state. */
+    void SafetyManagement_ApplyRuntimePermit(uint8_t permit, safety_runtime_state_t runtime_state);
+    /** Apply the App coordinator's hardware-only permit for restricted diagnostic motion. */
+    void SafetyManagement_ApplyDiagnosticPermit(uint8_t permit);
 
 #ifdef __cplusplus
 }

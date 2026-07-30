@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 uint32_t ParameterManagement_GetSnapshot(param_model_t *params)
 {
@@ -52,6 +53,14 @@ static void reset_owner(void)
     };
 
     require_int(CommandManagement_Init(&config) != 0U, "command owner initializes");
+    require_int(CommandManagement_IsMotionGateOpen() == 0U, "command owner starts fail-closed");
+    CommandManagement_SetMotionGate(1U, 1U);
+    require_int(CommandManagement_QualifyRearm(COMMAND_SOURCE_PS2).outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED,
+                "PS2 neutral qualification rearms PS2 only");
+    require_int(CommandManagement_QualifyRearm(COMMAND_SOURCE_LINE).outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED,
+                "line off qualification rearms line only");
+    require_int(CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG).outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED,
+                "debug stop qualification rearms debug only");
 }
 
 static void rearm_host(void)
@@ -108,13 +117,40 @@ static void test_safety_gate_revokes_without_old_command_recovery(void)
                 "gate reopen still requires a new remote disable");
     rearm_host();
     (void)CommandManagement_GetStatus(102U, &status);
-    require_int((status.remote_rearm_required_mask & (1U << COMMAND_SOURCE_HOST)) == 0U,
+    require_int((status.rearm_required_mask & (1U << COMMAND_SOURCE_HOST)) == 0U,
                 "new host disable clears only host rearm latch");
-    require_int((status.remote_rearm_required_mask & (1U << COMMAND_SOURCE_ESP12F)) != 0U,
+    require_int((status.rearm_required_mask & (1U << COMMAND_SOURCE_ESP12F)) != 0U,
                 "ESP remains independently rearm-required");
     require_int(CommandManagement_Set(&esp) == COMMAND_RESULT_REJECTED, "host rearm cannot authorize ESP source");
     require_int(CommandManagement_SetForGeneration(&host, revoke_generation) == COMMAND_RESULT_REJECTED,
                 "pre-revoke producer generation is rejected");
+}
+
+static void test_structured_result_and_all_source_rearm(void)
+{
+    command_velocity_t     debug = command(COMMAND_SOURCE_DEBUG, 10U);
+    command_apply_result_t result;
+
+    reset_owner();
+    result = CommandManagement_Apply(&debug);
+    require_int(result.outcome == COMMAND_OUTCOME_ACTIVE_ACCEPTED && result.slot_generation > 0UL,
+                "structured active result carries slot generation");
+    CommandManagement_SetMotionGate(0U, 10U);
+    result = CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG);
+    require_int(result.outcome == COMMAND_OUTCOME_GATE_CLOSED && result.source_cleared != 0U,
+                "release while gate closed clears but does not rearm");
+    CommandManagement_SetMotionGate(1U, 11U);
+    result = CommandManagement_Apply(&debug);
+    require_int(result.outcome == COMMAND_OUTCOME_REARM_REQUIRED, "debug must stop again after gate reopens");
+    debug.enable = 0U;
+    result       = CommandManagement_Apply(&debug);
+    require_int(result.outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED,
+                "structured release is accepted while the source requires rearm");
+    debug.enable   = 1U;
+    debug.linear_x = NAN;
+    result         = CommandManagement_Apply(&debug);
+    require_int(result.outcome == COMMAND_OUTCOME_INVALID && result.source_cleared != 0U,
+                "non-finite command is rejected and clears its source");
 }
 
 static void test_stale_safety_decision_cannot_reopen_gate(void)
@@ -156,5 +192,6 @@ int main(void)
     test_safety_gate_revokes_without_old_command_recovery();
     test_stale_safety_decision_cannot_reopen_gate();
     test_duplicate_refresh_preserves_generation_and_cannot_revive_timeout();
+    test_structured_result_and_all_source_rearm();
     return 0;
 }

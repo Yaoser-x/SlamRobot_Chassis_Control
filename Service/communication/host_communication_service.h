@@ -16,6 +16,11 @@ extern "C"
     {
         uint32_t                         tx_frames;
         uint32_t                         tx_busy_drops;
+        uint32_t                         tx_drop_by_priority[4];
+        uint32_t                         tx_queue_high_watermark;
+        uint32_t                         tx_oldest_age_ms;
+        uint32_t                         tx_max_queue_delay_ms;
+        uint32_t                         tx_max_send_latency_ms;
         uint32_t                         rx_checksum_errors;
         uint32_t                         rx_timeout_resets;
         uint32_t                         uart_errors;

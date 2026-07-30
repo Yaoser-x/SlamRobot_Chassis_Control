@@ -181,6 +181,8 @@ static void reset_fake_monitor(void)
     };
     require_int(SystemMonitoring_Init(&system_config, 0UL) != 0U, "system monitor config accepted");
     require_int(SafetyManagement_Init(&safety_config) != 0U, "safety config accepted");
+    require_int(fake_gate_allowed == 0U, "safety initializes motion gate closed");
+    fake_gate_closed_count = 0U;
 }
 
 static void test_task_timeout_mask_aggregates_only_timed_out_task(void)

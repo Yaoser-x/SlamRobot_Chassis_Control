@@ -25,6 +25,7 @@ imu = load("analyze_imu", ROOT / "scripts" / "analyze_imu.py")
 hil = load("hil_smoke", ROOT / "scripts" / "hil_smoke.py")
 hil_imu = load("hil_imu_calibration", ROOT / "scripts" / "hil_imu_calibration.py")
 straight = load("analyze_straight_hil", ROOT / "scripts" / "analyze_straight_hil.py")
+control_analysis = load("analyze_control", ROOT / "scripts" / "analyze_control.py")
 architecture = load(
     "check_architecture_dependencies",
     ROOT / "scripts" / "check_architecture_dependencies.py",
@@ -40,6 +41,24 @@ ownership = load(
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_control_analysis_reports_expected_metrics_and_rejects_bad_time(self):
+        rows = []
+        for index, speed in enumerate((0.0, 0.1, 0.5, 0.9, 1.1, 1.0, 1.0, 1.0, 1.0, 1.0)):
+            rows.append({
+                "time_s": str(index * 0.1), "target_mps": "1.0",
+                "left_mps": str(speed - 0.01), "right_mps": str(speed + 0.01),
+                "left_permille": "1000" if index == 2 else "500",
+                "right_permille": "500", "heading_error_deg": "2.0",
+            })
+        report = control_analysis.analyze(rows)
+        self.assertAlmostEqual(report["rise_time_s"], 0.2)
+        self.assertAlmostEqual(report["overshoot_mps"], 0.1)
+        self.assertAlmostEqual(report["saturation_ratio"], 0.1)
+        self.assertAlmostEqual(report["mean_left_right_speed_difference_mps"], 0.02)
+        rows[2]["time_s"] = rows[1]["time_s"]
+        with self.assertRaises(ValueError):
+            control_analysis.analyze(rows)
+
     def test_five_layer_architecture_dependencies(self):
         self.assertEqual(architecture.analyze(ROOT), [])
         self.assertEqual(naming.analyze(ROOT), [])
@@ -342,6 +361,18 @@ class AnalysisTests(unittest.TestCase):
         result = imu.analyze(rows)
         self.assertEqual(result["yaw_drift_deg_per_min"], 2.0)
         self.assertAlmostEqual(result["level_return_error_deg"], 0.5)
+        self.assertAlmostEqual(result["temperature_yaw_regression"]["slope"], 2.0)
+        self.assertEqual(result["allan_deviation_yaw_deg"][0]["tau_s"], 60.0)
+
+    def test_imu_six_face_report_is_evidence_only(self):
+        rows = [
+            {"t_ms": str(i), "roll_deg": "0", "pitch_deg": "0", "yaw_deg": "0", "temperature_c": "25",
+             "face": face, "accel_x_g": x, "accel_y_g": "0", "accel_z_g": "0"}
+            for i, (face, x) in enumerate((("+x", "1"), ("-x", "-1")))
+        ]
+        result = imu.analyze(rows)
+        self.assertEqual(result["six_face_report"]["+x"]["accel_x_g"], 1.0)
+        self.assertNotIn("parameter_update", result)
 
     def test_hil_report_has_per_command_assertions(self):
         responses = [

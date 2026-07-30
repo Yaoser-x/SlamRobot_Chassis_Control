@@ -1,12 +1,33 @@
 #include "differential_drive_kinematics.h"
 
+static uint8_t DifferentialDriveKinematics_Finite(float value)
+{
+    const float max_float = 3.402823466e+38f;
+    return (value == value && value <= max_float && value >= -max_float) ? 1U : 0U;
+}
+
 void DifferentialDriveKinematics_ResolveDifferentialTargets(float  linear_x,
                                                             float  angular_z,
                                                             float  track_width_m,
                                                             float *left_mps,
                                                             float *right_mps)
 {
-    float half_track_omega = angular_z * track_width_m * 0.5f;
+    float half_track_omega;
+
+    if (DifferentialDriveKinematics_Finite(linear_x) == 0U || DifferentialDriveKinematics_Finite(angular_z) == 0U
+        || DifferentialDriveKinematics_Finite(track_width_m) == 0U || track_width_m <= 0.0f)
+    {
+        if (left_mps != 0)
+        {
+            *left_mps = 0.0f;
+        }
+        if (right_mps != 0)
+        {
+            *right_mps = 0.0f;
+        }
+        return;
+    }
+    half_track_omega = angular_z * track_width_m * 0.5f;
 
     if (left_mps != 0)
     {
@@ -47,4 +68,49 @@ DifferentialDriveKinematics_ControlDt(uint32_t now_ms, uint32_t *last_step_ms, u
     }
     *dt_s = (float)elapsed_ms / 1000.0f;
     return 1U;
+}
+
+control_timing_status_t DifferentialDriveKinematics_EvaluateControlTiming(control_timing_t *timing, uint32_t now_ms)
+{
+    uint32_t elapsed_ms;
+
+    if (timing == 0)
+    {
+        return CONTROL_TIMING_MISSED;
+    }
+    if (timing->initialized == 0U)
+    {
+        timing->last_step_ms = now_ms;
+        timing->initialized  = 1U;
+        timing->status       = CONTROL_TIMING_FIRST;
+        timing->dt_s         = 0.0f;
+        return timing->status;
+    }
+    elapsed_ms = now_ms - timing->last_step_ms;
+    if (elapsed_ms >= 21U)
+    {
+        timing->last_step_ms = now_ms;
+        timing->status       = CONTROL_TIMING_MISSED;
+        timing->dt_s         = 0.0f;
+        timing->missed_count++;
+        return timing->status;
+    }
+    if (elapsed_ms < 5U)
+    {
+        timing->status = CONTROL_TIMING_EARLY;
+        timing->dt_s   = 0.0f;
+        return timing->status;
+    }
+    timing->last_step_ms = now_ms;
+    timing->dt_s         = (float)elapsed_ms / 1000.0f;
+    if (elapsed_ms >= 16U)
+    {
+        timing->status = CONTROL_TIMING_LATE;
+        timing->late_count++;
+    }
+    else
+    {
+        timing->status = CONTROL_TIMING_NORMAL;
+    }
+    return timing->status;
 }

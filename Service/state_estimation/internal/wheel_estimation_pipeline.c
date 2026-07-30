@@ -4,12 +4,15 @@
 #include "wheel_encoder_config.h"
 #include "wheel_speed_estimator.h"
 
-#define TWO_PI_F 6.28318530718f
+#define TWO_PI_F                   6.28318530718f
+#define WHEEL_REACQUIRING_FLAG     0x80U
+#define WHEEL_REACQUIRE_COUNT_MASK 0x7FU
 
 static uint32_t               last_count[STATE_ESTIMATION_MOTOR_COUNT];
 static encoder_speed_window_t speed_window[STATE_ESTIMATION_MOTOR_COUNT];
 static uint32_t               last_update_ms;
 static uint8_t                has_last_update;
+static uint32_t               last_valid_ms[STATE_ESTIMATION_MOTOR_COUNT];
 
 static float WheelEstimationPipeline_AbsF(float value)
 {
@@ -27,6 +30,7 @@ void WheelEstimationPipeline_Init(void)
     {
         last_count[index] = 0U;
         WheelSpeedEstimator_SpeedWindowReset(&speed_window[index]);
+        last_valid_ms[index] = 0U;
     }
     last_update_ms  = 0U;
     has_last_update = 0U;
@@ -98,6 +102,10 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
             status->speed_valid[index]           = 0U;
             status->reject_streak[index]         = 0U;
             status->consecutive_anomalies[index] = 0U;
+            status->quality[index]               = STATE_ESTIMATION_WHEEL_UNINITIALIZED;
+            status->reject_reason[index]         = STATE_ESTIMATION_WHEEL_REJECT_NONE;
+            status->reacquire_count[index]       = 0U;
+            status->sample_age_ms[index]         = 0U;
             WheelSpeedEstimator_SpeedWindowReset(&speed_window[index]);
             continue;
         }
@@ -109,6 +117,12 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
             status->speed_mps[index]     = 0.0f;
             status->speed_valid[index]   = 0U;
             status->reject_streak[index] = 0U;
+            status->quality[index] =
+                (has_last_update == 0U) ? STATE_ESTIMATION_WHEEL_UNINITIALIZED : STATE_ESTIMATION_WHEEL_STALE;
+            status->reject_reason[index]   = (counts_per_rev <= 0.0f || wheel_radius_m <= 0.0f)
+                                                 ? STATE_ESTIMATION_WHEEL_REJECT_GEOMETRY
+                                                 : STATE_ESTIMATION_WHEEL_REJECT_TIMING;
+            status->reacquire_count[index] = 0U;
             WheelSpeedEstimator_SpeedWindowReset(&speed_window[index]);
         }
         else if (WheelSpeedEstimator_RecordDeltaOrRebuild(&speed_window[index],
@@ -132,6 +146,10 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
                                                                               counts_per_rev,
                                                                               wheel_radius_m);
             status->speed_valid[index]           = 1U;
+            status->quality[index]               = STATE_ESTIMATION_WHEEL_VALID;
+            status->reject_reason[index]         = STATE_ESTIMATION_WHEEL_REJECT_NONE;
+            status->reacquire_count[index]       = 0U;
+            last_valid_ms[index]                 = now_ms;
         }
         else
         {
@@ -140,7 +158,27 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
             status->consecutive_anomalies[index]++;
             status->speed_valid[index] =
                 (status->consecutive_anomalies[index] < CHASSIS_ENCODER_MAX_CONSECUTIVE_ANOMALIES) ? 1U : 0U;
+            status->reacquire_count[index] = (uint8_t)(status->reject_streak[index] & WHEEL_REACQUIRE_COUNT_MASK);
+            if ((status->reject_streak[index] & WHEEL_REACQUIRING_FLAG) != 0U)
+            {
+                status->quality[index] = STATE_ESTIMATION_WHEEL_REACQUIRING;
+            }
+            else if (status->speed_valid[index] == 0U)
+            {
+                status->quality[index] = STATE_ESTIMATION_WHEEL_FAULT;
+            }
+            else
+            {
+                status->quality[index] = STATE_ESTIMATION_WHEEL_TRANSIENT_REJECT;
+            }
+            status->reject_reason[index] =
+                (WheelEstimationPipeline_AbsF(
+                     WheelSpeedEstimator_CountDeltaSpeedMps(delta, dt_ms, counts_per_rev, wheel_radius_m))
+                 > CHASSIS_ENCODER_MAX_ABS_MPS)
+                    ? STATE_ESTIMATION_WHEEL_REJECT_PHYSICAL_RANGE
+                    : STATE_ESTIMATION_WHEEL_REJECT_SPIKE;
         }
+        status->sample_age_ms[index] = (last_valid_ms[index] == 0U) ? 0U : (uint32_t)(now_ms - last_valid_ms[index]);
         if (status->speed_valid[index] == 0U)
         {
             status->speed_valid_all = 0U;

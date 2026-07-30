@@ -3,6 +3,8 @@
 
 > rc1 远程速度由 Upper Protocol v3 dispatcher 协调，业务操作经固定 mailbox 交给 App 编排。Communication 负责 wire/session/ACK/请求阶段；CommandManagement 唯一负责五来源租约、rearm 与仲裁；SafetyManagement 唯一决定运动许可；MotionControl 唯一写电机输出。
 
+rc2 控制周期按实测时间分为 FIRST、EARLY（0--4 ms）、NORMAL（5--15 ms）、LATE（16--20 ms）和 MISSED（不少于 21 ms）。EARLY 保持上一输出且不更新 PID；FIRST/MISSED 归零并复位控制状态。轮速连续拒绝三次进入 REACQUIRING，拒绝样本不作为基线，连续三个物理有效样本后恢复。
+
 ## 1. 控制链数据流
 
 ```

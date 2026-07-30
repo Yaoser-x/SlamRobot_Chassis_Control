@@ -149,6 +149,11 @@ uint8_t SafetyManagement_IsMotionAllowed(void)
     return (fake_fault_stop == 0U && fake_maintenance_lock == 0U) ? 1U : 0U;
 }
 
+uint8_t SafetyManagement_IsDiagnosticMotionAllowed(void)
+{
+    return (fake_fault_stop == 0U && fake_maintenance_lock == 0U) ? 1U : 0U;
+}
+
 uint8_t SafetyManagement_BeginMaintenance(void)
 {
     if (fake_maintenance_lock != 0U)
@@ -280,6 +285,7 @@ static void reset_fake_chassis(void)
     fake_adc_state.current_zero_valid  = 1U;
     ParamService_SetDefaults();
     ChassisService_Init();
+    ChassisService_Step(990U);
 }
 
 static void set_closed_loop_command(float linear_mps)
@@ -343,6 +349,21 @@ static void test_raw_test_mode_has_400ms_deadman(void)
     require_int(fake_signed_pwm[MOTOR_ID_M2] == 50, "raw output remains at 400ms boundary");
     ChassisService_Step(1401U);
     require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "raw output stops after 400ms lease");
+}
+
+static void test_diagnostic_outputs_are_capped_at_300_permille(void)
+{
+    reset_fake_chassis();
+    fake_tick_ms = 1000U;
+    ChassisService_RawMotorInputTest(MOTOR_ID_M2, 900, 0);
+    ChassisService_Step(1000U);
+    ChassisService_Step(1010U);
+    require_int(fake_signed_pwm[MOTOR_ID_M2] == 300, "raw diagnostic output is capped at 300 permille");
+
+    ChassisService_OpenLoopTest(-900, 900);
+    ChassisService_Step(1020U);
+    require_int(fake_signed_pwm[MOTOR_ID_M2] == -300, "left open-loop output is capped at -300 permille");
+    require_int(fake_signed_pwm[MOTOR_ID_M3] == 300, "right open-loop output is capped at 300 permille");
 }
 
 static void test_maintenance_lock_cancels_raw_before_output(void)
@@ -593,6 +614,7 @@ int main(void)
     test_high_adc_current_does_not_throttle_pwm_output();
     test_invalid_current_zero_blocks_test_outputs();
     test_raw_test_mode_has_400ms_deadman();
+    test_diagnostic_outputs_are_capped_at_300_permille();
     test_maintenance_lock_cancels_raw_before_output();
     test_runtime_track_width_changes_side_targets();
     test_invalid_enabled_encoder_stops_whole_chassis_same_step();

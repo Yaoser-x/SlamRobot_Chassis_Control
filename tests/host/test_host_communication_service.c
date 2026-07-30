@@ -393,10 +393,8 @@ static void test_parser_timeout_and_uart_error_restart_dma(void)
     rx_buffer[0]                  = ROBOT_LINK_PROTOCOL_HEAD_0;
     huart3.hdmarx->Instance->NDTR = (uint32_t)(rx_size - 1U);
     HostCommunication_Update();
-    for (uint8_t i = 0U; i < 21U; ++i)
-    {
-        HostCommunication_Update();
-    }
+    fake_tick += 101U;
+    HostCommunication_Update();
     HostCommunication_GetState(&state);
     require_int(state.rx_timeout_resets != 0U, "parser timeout reset counted");
     require_int(state.rx_resync_restarts != 0U, "parser timeout restarts dma");

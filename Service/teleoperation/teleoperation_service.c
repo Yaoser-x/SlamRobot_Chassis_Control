@@ -26,6 +26,7 @@ static uint8_t                       heading_button;
 static uint8_t                       heading_zero_pending;
 static uint32_t                      heading_motion_generation;
 static uint32_t                      ps2_idle_start_ms;
+static uint8_t                       ps2_neutral_rearm_count;
 
 #define PS2_HEADING_CRITICAL_QUALITY_MASK                                                                              \
     (STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR | STATE_ESTIMATION_IMU_QUALITY_INIT_FAILED                                 \
@@ -262,6 +263,7 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     ps2_state.right_y         = (uint8_t)teleoperation_config.axis_center;
     last_btn2                 = 0U;
     consecutive_read_failures = 0U;
+    ps2_neutral_rearm_count   = 0U;
     RelativeHeadingController_Init(&heading_control);
     heading_button            = 0U;
     heading_zero_pending      = 0U;
@@ -377,6 +379,22 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     angular_z = Ps2ControlService_ClampFloat(angular_z, teleoperation_config.angular_max_rps);
 
     manual_active = Ps2ControlService_ManualInputActive(linear_x, angular_z);
+    if (CommandManagement_IsMotionGateOpen() != 0U && manual_active == 0U && macro_pressed == 0U)
+    {
+        if (ps2_neutral_rearm_count < 4U)
+        {
+            ps2_neutral_rearm_count++;
+        }
+        if (ps2_neutral_rearm_count == 3U)
+        {
+            (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_PS2);
+            ps2_neutral_rearm_count = 4U;
+        }
+    }
+    else
+    {
+        ps2_neutral_rearm_count = 0U;
+    }
     if (CommandManagement_IsMotionGateOpen() == 0U || input_revoked != 0U
         || (heading_control.active != 0U && heading_motion_generation != CommandManagement_GetMotionRevokeGeneration()))
     {

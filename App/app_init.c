@@ -1,4 +1,5 @@
 #include "app_init.h"
+#include "chassis_runtime_coordinator.h"
 
 #include "system_publish_snapshot_service.h"
 #include "app_hardware_init.h"
@@ -110,6 +111,7 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
     PostService_Run();
     AppHardware_InitDisplay();
     OLED_UI_Init();
+    ChassisRuntimeCoordinator_Init();
     return 1U;
 }
 

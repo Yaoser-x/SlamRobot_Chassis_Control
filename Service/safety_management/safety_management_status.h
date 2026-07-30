@@ -28,6 +28,16 @@ typedef enum
     SAFETY_CLEAR_RESULT_CONDITION_NOT_CLEARED
 } safety_clear_result_code_t;
 
+typedef enum
+{
+    SAFETY_STATE_BOOT_SAFE = 0,
+    SAFETY_STATE_STANDBY,
+    SAFETY_STATE_ACTIVE,
+    SAFETY_STATE_MAINTENANCE,
+    SAFETY_STATE_ESTOP,
+    SAFETY_STATE_FAULT_LATCHED
+} safety_runtime_state_t;
+
 typedef struct
 {
     safety_clear_result_code_t code;
@@ -38,28 +48,29 @@ typedef struct
 
 typedef struct
 {
-    float                 battery_voltage;
-    float                 motor_current_a[4];
-    float                 left_current_a;
-    float                 right_current_a;
-    uint32_t              current_observe_over_limit_count[4];
-    uint32_t              current_fault_would_latch_count[4];
-    uint32_t              error_flags;
-    uint32_t              latched_error_flags;
-    uint32_t              task_last_heartbeat_ms[SYSTEM_MONITORING_TASK_COUNT];
-    uint32_t              task_timeout_count[SYSTEM_MONITORING_TASK_COUNT];
-    uint8_t               task_timed_out[SYSTEM_MONITORING_TASK_COUNT];
-    uint16_t              task_timeout_mask;
-    uint8_t               control_mode;
-    uint8_t               current_control_valid;
-    uint8_t               current_control_valid_mask;
-    uint8_t               motor_fault_mask;
-    uint8_t               emergency_stop;
-    uint8_t               fault_stop;
-    uint8_t               maintenance_lock;
-    uint8_t               motion_allowed;
-    safety_clear_result_t last_clear_result;
-    uint32_t              generation;
+    float                  battery_voltage;
+    float                  motor_current_a[4];
+    float                  left_current_a;
+    float                  right_current_a;
+    uint32_t               current_observe_over_limit_count[4];
+    uint32_t               current_fault_would_latch_count[4];
+    uint32_t               error_flags;
+    uint32_t               latched_error_flags;
+    uint32_t               task_last_heartbeat_ms[SYSTEM_MONITORING_TASK_COUNT];
+    uint32_t               task_timeout_count[SYSTEM_MONITORING_TASK_COUNT];
+    uint8_t                task_timed_out[SYSTEM_MONITORING_TASK_COUNT];
+    uint16_t               task_timeout_mask;
+    uint8_t                control_mode;
+    uint8_t                current_control_valid;
+    uint8_t                current_control_valid_mask;
+    uint8_t                motor_fault_mask;
+    uint8_t                emergency_stop;
+    uint8_t                fault_stop;
+    uint8_t                maintenance_lock;
+    uint8_t                motion_allowed;
+    safety_runtime_state_t runtime_state;
+    safety_clear_result_t  last_clear_result;
+    uint32_t               generation;
 } safety_management_status_t;
 
 #endif /* SAFETY_MANAGEMENT_STATUS_H */

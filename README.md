@@ -2,7 +2,7 @@
 
 基于 STM32F407VET6 的四轮左右差速底盘控制固件。构建系统采用 STM32CubeMX + FreeRTOS + CMake + Ninja + GNU Arm Embedded Toolchain。
 
-> **当前状态**：`1.0.0-rc1` 软件冻结候选 / Upper Protocol v3。默认两驱启用 M2（左侧）和 M3（右侧）；与 Ros2_Slam v0.4.0 配对，创建 rc1 标签前仍需完成双链路 HIL、故障注入和实车停车。
+> **当前状态**：`1.0.0-rc2` 软件候选 / `HIL_PENDING` / Upper Protocol v3。历史候选 `v1.0.0-rc1` 已存在并指向 `bc472cc`，本批次不移动该标签。默认两驱启用 M2（左侧）和 M3（右侧）。
 
 ## 快速开始
 
@@ -38,7 +38,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 ```
 ├── App/              应用编排层（App_Init、ISR 分发、十个业务任务、UI/调试适配）
 ├── Service/          用例层（控制/安全/参数/传感器快照/通信编排）
-├── Domain/           纯领域层（值类型、运动学、PID、IMU/编码器/协议算法）
+├── Algorithm/        纯算法层（运动学、PID、IMU/编码器估计与标定）
 ├── Platform/         系统能力层（时钟、临界区、事件、看门狗、复位追踪）
 ├── BSP/              板级驱动层（硬件访问与 UART transport）
 │   ├── adc/           ADC DMA 采样换算

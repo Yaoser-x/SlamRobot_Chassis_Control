@@ -20,6 +20,8 @@ typedef struct
 
 void     ParameterImuCalibration_Default(imu_calibration_t *calibration);
 uint32_t ParameterImuCalibration_Crc(const imu_calibration_t *calibration);
+/** Schema 4 compatibility integrity field: FNV-1a, stored in the legacy crc member. */
+uint32_t ParameterImuCalibration_IntegrityHash(const imu_calibration_t *calibration);
 uint8_t  ParameterImuCalibration_Validate(const imu_calibration_t *calibration);
 
 #endif /* PARAMETER_IMU_CALIBRATION_TYPES_H */

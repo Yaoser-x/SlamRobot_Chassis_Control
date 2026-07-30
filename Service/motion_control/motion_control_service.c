@@ -32,8 +32,7 @@
 static motion_control_status_t    chassis_state;
 static motion_control_status_t    published_state;
 static motion_control_config_t    motion_config;
-static uint32_t                   last_control_step_ms;
-static uint8_t                    control_dt_initialized;
+static control_timing_t           control_timing;
 static uint8_t                    control_step_active;
 static motion_parameter_sync_t    param_sync;
 static wheel_target_planner_t     target_planner;
@@ -193,9 +192,8 @@ uint8_t MotionControl_Init(const motion_control_config_t *config)
     WheelFeedbackMonitor_Init(&feedback_guard, config);
     MotionTestMode_Init(&test_mode, config);
     MotionMaintenance_Init(config->maintenance_max_speed_mps);
-    last_control_step_ms   = 0U;
-    control_dt_initialized = 0U;
-    control_step_active    = 0U;
+    control_timing      = (control_timing_t){0};
+    control_step_active = 0U;
     (void)ChassisService_RefreshRuntimeParams();
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
@@ -228,14 +226,16 @@ static void ChassisService_StepImpl(uint32_t now_ms)
     }
     MotionStatusBuilder_SyncSides(&chassis_state);
 
-    if (SafetyManagement_IsMotionAllowed() == 0U)
+    MotionTestMode_GetSnapshot(&test_mode, now_ms, &test_snapshot);
+    if (SafetyManagement_IsMotionAllowed() == 0U
+        && ((test_snapshot.open_loop_active == 0U && test_snapshot.raw_input_active == 0U)
+            || SafetyManagement_IsDiagnosticMotionAllowed() == 0U))
     {
         MotionControl_CancelTestMode();
         MotionControl_EmergencyStop();
         return;
     }
 
-    MotionTestMode_GetSnapshot(&test_mode, now_ms, &test_snapshot);
     if (test_snapshot.expired != 0U)
     {
         CommandManagement_ClearAll();
@@ -243,13 +243,19 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         return;
     }
 
-    valid_cmd = CommandManagement_GetActive(&cmd, now_ms);
-    if (DifferentialDriveKinematics_ControlDt(now_ms, &last_control_step_ms, &control_dt_initialized, &dt_s) == 0U)
+    valid_cmd                             = CommandManagement_GetActive(&cmd, now_ms);
+    control_timing_status_t timing_status = DifferentialDriveKinematics_EvaluateControlTiming(&control_timing, now_ms);
+    if (timing_status == CONTROL_TIMING_EARLY)
+    {
+        return;
+    }
+    if (timing_status == CONTROL_TIMING_FIRST || timing_status == CONTROL_TIMING_MISSED)
     {
         WheelSpeedControlLoop_Reset(&speed_loop);
         ChassisService_StopOutput();
         return;
     }
+    dt_s = control_timing.dt_s;
 
     {
         power_management_status_t adc_state;
