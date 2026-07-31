@@ -20,8 +20,9 @@
 
 **无需命令**，通过以下方式间接验证：
 
-- `rtos` 输出中任务持续运行（`safetyTask` 正常喂狗）。若 IWDG 未启用或喂狗失败，系统会在 ~1.0s 内自动复位——可从 OLED 欢迎屏重新出现判断
-- `safetyTask` 喂狗条件：`motorTask` 心跳在 200ms 内有效。若 `motorTask` 挂死，IWDG 不应再喂狗，系统应复位
+- `rtos` 输出中任务持续运行。IWDG 名义门限约 800ms；复位后用 `resettrace`/复位原因确认，不以 OLED 现象单独下结论
+- 喂狗同时要求 Motor 20ms、Safety 40ms 内各有新的完整周期 completion；任务入口 heartbeat 不等于完成
+- Safety permit 超过 40ms 时 Motor 应先归零 PWM，随后才因 completion 不推进而等待 IWDG 复位
 - 验证方式：长时间运行系统（> 10 分钟），确认无异常复位（`rtos` 的 runtime 计数不归零）
 
 ---

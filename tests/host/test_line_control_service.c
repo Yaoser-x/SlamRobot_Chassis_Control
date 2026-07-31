@@ -4,6 +4,7 @@
 
 #include "command_management_service.h"
 #include "line_sensor_driver.h"
+#include "motion_maintenance_orchestrator.h"
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
 #include "parameter_management_service.h"
@@ -12,27 +13,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static uint32_t                            fake_revoke_generation;
-static uint32_t                            fake_tick;
-static uint32_t                            submitted_count;
-static uint32_t                            clear_count;
-static uint8_t                             fake_estop;
-static uint8_t                             fake_fault_stop;
-static uint8_t                             fake_maintenance;
-static motion_control_maintenance_result_t fake_maintenance_result;
-static uint8_t                             fake_save_success;
-static uint8_t                             fake_parameter_set_success;
-static uint8_t                             save_ready_mask;
-static uint32_t                            maintenance_begin_count;
-static uint32_t                            maintenance_end_count;
-static uint32_t                            flash_save_count;
-static command_velocity_t                  last_command;
-static line_sensor_data_t                  fake_sensor;
-static param_model_t                       fake_params;
-static uint32_t                            fake_parameter_generation;
-static uint32_t                            threshold_apply_count;
-static uint16_t                            applied_threshold[LINE_SENSOR_CHANNELS];
-static uint8_t                             applied_active_low;
+static uint32_t                        fake_revoke_generation;
+static uint32_t                        fake_tick;
+static uint32_t                        submitted_count;
+static uint32_t                        clear_count;
+static uint8_t                         fake_estop;
+static uint8_t                         fake_fault_stop;
+static uint8_t                         fake_maintenance;
+static app_motion_maintenance_result_t fake_maintenance_result;
+static uint8_t                         fake_save_success;
+static uint8_t                         fake_parameter_set_success;
+static uint8_t                         save_ready_mask;
+static uint32_t                        maintenance_begin_count;
+static uint32_t                        maintenance_end_count;
+static uint32_t                        flash_save_count;
+static command_velocity_t              last_command;
+static line_sensor_data_t              fake_sensor;
+static param_model_t                   fake_params;
+static uint32_t                        fake_parameter_generation;
+static uint32_t                        threshold_apply_count;
+static uint16_t                        applied_threshold[LINE_SENSOR_CHANNELS];
+static uint8_t                         applied_active_low;
 
 static void require_int(int condition, const char *message);
 
@@ -70,18 +71,18 @@ uint8_t ParameterManagement_Save(void)
     return fake_save_success;
 }
 
-motion_control_maintenance_result_t MotionControl_BeginMaintenance(void)
+app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
 {
     maintenance_begin_count++;
-    if (fake_maintenance_result != MOTION_CONTROL_MAINTENANCE_OK)
+    if (fake_maintenance_result != APP_MOTION_MAINTENANCE_OK)
     {
         return fake_maintenance_result;
     }
     fake_maintenance = 1U;
-    return MOTION_CONTROL_MAINTENANCE_OK;
+    return APP_MOTION_MAINTENANCE_OK;
 }
 
-void MotionControl_EndMaintenance(void)
+void AppMotionMaintenance_End(void)
 {
     maintenance_end_count++;
     fake_maintenance = 0U;
@@ -146,6 +147,36 @@ command_apply_result_t CommandManagement_QualifyRearm(command_source_t source)
     return (command_apply_result_t){.outcome = COMMAND_OUTCOME_RELEASE_ACCEPTED, .source_cleared = 1U};
 }
 
+command_apply_result_t CommandManagement_ApplyIntent(const command_intent_t *intent)
+{
+    command_apply_result_t result = {COMMAND_OUTCOME_RELEASE_ACCEPTED, 0U, 1UL};
+
+    if (intent->kind == COMMAND_INTENT_ACTIVE || intent->kind == COMMAND_INTENT_NEUTRAL)
+    {
+        command_velocity_t command = {
+            .linear_x     = (intent->kind == COMMAND_INTENT_NEUTRAL) ? 0.0f : intent->linear_x,
+            .angular_z    = (intent->kind == COMMAND_INTENT_NEUTRAL) ? 0.0f : intent->angular_z,
+            .enable       = 1U,
+            .source       = intent->source,
+            .timestamp_ms = intent->sample_time_ms,
+        };
+        result.outcome = (CommandManagement_SetForGeneration(&command, intent->expected_revoke_generation)
+                          == COMMAND_RESULT_ACCEPTED)
+                             ? COMMAND_OUTCOME_ACTIVE_ACCEPTED
+                             : COMMAND_OUTCOME_GENERATION_CONFLICT;
+    }
+    else if (intent->kind == COMMAND_INTENT_RELEASE)
+    {
+        CommandManagement_ClearSource(intent->source);
+        result.source_cleared = 1U;
+    }
+    else if (intent->kind == COMMAND_INTENT_REARM)
+    {
+        result = CommandManagement_QualifyRearm(intent->source);
+    }
+    return result;
+}
+
 uint8_t LineSensorDriver_GetSensorData(line_sensor_data_t *data)
 {
     *data = fake_sensor;
@@ -161,7 +192,7 @@ static void reset_fake(void)
     fake_estop                              = 0U;
     fake_fault_stop                         = 0U;
     fake_maintenance                        = 0U;
-    fake_maintenance_result                 = MOTION_CONTROL_MAINTENANCE_OK;
+    fake_maintenance_result                 = APP_MOTION_MAINTENANCE_OK;
     fake_save_success                       = 1U;
     fake_parameter_set_success              = 1U;
     save_ready_mask                         = 0U;

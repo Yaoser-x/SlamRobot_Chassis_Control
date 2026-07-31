@@ -70,11 +70,14 @@ DifferentialDriveKinematics_ControlDt(uint32_t now_ms, uint32_t *last_step_ms, u
     return 1U;
 }
 
-control_timing_status_t DifferentialDriveKinematics_EvaluateControlTiming(control_timing_t *timing, uint32_t now_ms)
+control_timing_status_t
+DifferentialDriveKinematics_EvaluateControlTiming(control_timing_t *timing, uint32_t now_ms, uint32_t nominal_period_ms)
 {
     uint32_t elapsed_ms;
+    uint64_t elapsed_twice;
+    uint64_t period;
 
-    if (timing == 0)
+    if (timing == 0 || nominal_period_ms == 0UL)
     {
         return CONTROL_TIMING_MISSED;
     }
@@ -86,24 +89,25 @@ control_timing_status_t DifferentialDriveKinematics_EvaluateControlTiming(contro
         timing->dt_s         = 0.0f;
         return timing->status;
     }
-    elapsed_ms = now_ms - timing->last_step_ms;
-    if (elapsed_ms >= 21U)
-    {
-        timing->last_step_ms = now_ms;
-        timing->status       = CONTROL_TIMING_MISSED;
-        timing->dt_s         = 0.0f;
-        timing->missed_count++;
-        return timing->status;
-    }
-    if (elapsed_ms < 5U)
+    elapsed_ms    = now_ms - timing->last_step_ms;
+    elapsed_twice = (uint64_t)elapsed_ms * 2ULL;
+    period        = (uint64_t)nominal_period_ms;
+    if (elapsed_twice < period)
     {
         timing->status = CONTROL_TIMING_EARLY;
         timing->dt_s   = 0.0f;
         return timing->status;
     }
     timing->last_step_ms = now_ms;
-    timing->dt_s         = (float)elapsed_ms / 1000.0f;
-    if (elapsed_ms >= 16U)
+    if ((uint64_t)elapsed_ms > period * 2ULL)
+    {
+        timing->status = CONTROL_TIMING_MISSED;
+        timing->dt_s   = 0.0f;
+        timing->missed_count++;
+        return timing->status;
+    }
+    timing->dt_s = (float)elapsed_ms / 1000.0f;
+    if (elapsed_twice > period * 3ULL)
     {
         timing->status = CONTROL_TIMING_LATE;
         timing->late_count++;

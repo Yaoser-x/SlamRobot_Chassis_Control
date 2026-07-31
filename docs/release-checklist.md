@@ -1,21 +1,31 @@
-# F407 V1.0 发布检查表
+# F407 V2.0 发布检查表
 
 本检查表只记录可追溯的验证结果。未附固件 SHA、日志或测量记录的项目不得勾选。
 
 ## v1.0.0-rc2 / HIL_PENDING
 
 - [x] `VERSION` 为 `1.0.0-rc2`
-- [x] 启动默认关门，五来源撤销后独立 rearm
-- [x] 控制 timing、非有限数值和轮速重获取 Host 覆盖
+- [x] 看门狗双 completion、年龄门和 Evaluate/Feed/Commit Host 覆盖
+- [x] 40 ms Safety permit 在 Motor 侧独立过期停机
+- [x] 五模式、PS2 去抖接管和 MANUAL 后 neutral→enable rearm
+- [x] 控制 timing、非有限数值、轮速重获取和异常 delivery latch Host 覆盖
+- [x] effective parameter CRC 与四轮 `pid_kd=0` schema 4 兼容覆盖
+- [x] gyro OADEV 的 white/flicker/RRW/constant、缺口和抖动 fixture
 - [x] Host 半包按最后字节 100 ms 超时，TX 使用 RESERVED/READY 提交
-- [x] 看门狗要求 Safety completion 且 Motor completion generation 前进
 - [x] Upper Protocol v3 与 Flash schema 4 布局不变
-- [ ] cppcheck（当前本机缺少工具）
-- [ ] arduino-cli / ESP 编译（当前本机缺少工具）
+- [x] 最终本地 `main` Host Test 62/62 通过
+- [x] 最终本地 `main` 的 Debug/Release、size、架构、所有权、CubeMX 和格式证据
+- [x] Host AddressSanitizer / UndefinedBehaviorSanitizer 61/61；插桩放大的静态栈预算项由普通 Host 独立通过
+- [x] cppcheck 2.21.0 检查 416 个 C/H 文件通过；clang-format 18.1.8 通过
+- [x] arduino-cli 1.5.1、ESP8266 Core 3.1.2、WebSockets 2.7.2 编译与安全策略检查通过
+- [x] Lower STATUS → Upper v3 decoder → WheelObservation → formal odometry 联合 fixture 40/40（Upper `c472bc6`）
 - [ ] rc2 HIL 项目全部归档
 - [ ] 创建本地 annotated tag `v1.0.0-rc2`（HIL 全绿后）
 
 历史 `v1.0.0-rc1` 已存在并指向 `bc472cc`，不得移动或重建。
+
+最终本地软件门禁 size：Debug `text=189212, data=532, bss=90264`；Release
+`text=168876, data=528, bss=90248`。以上不代表实板 HIL 已完成。
 
 ## v1.0.0-rc1 / Upper Protocol v3
 

@@ -2,7 +2,7 @@
 
 #include "line_calibration_orchestrator.h"
 #include "line_following_service.h"
-#include "command_management_service.h"
+#include "control_mode_coordinator.h"
 
 void OperatorActionRouter_Handle(const teleoperation_action_t *action)
 {
@@ -14,11 +14,18 @@ void OperatorActionRouter_Handle(const teleoperation_action_t *action)
     switch (action->type)
     {
         case TELEOPERATION_ACTION_TOGGLE_LINE:
-            LineFollowing_Enable((LineFollowing_IsEnabled() == 0U) ? 1U : 0U);
-            if (LineFollowing_IsEnabled() != 0U)
+            if (LineFollowing_IsEnabled() == 0U)
             {
-                /* Yield PS2 command slot so lower-priority LINE can take over immediately. */
-                CommandManagement_ClearSource(COMMAND_SOURCE_PS2);
+                if (ControlModeCoordinator_Request(CONTROL_MODE_LINE) != 0U)
+                {
+                    (void)LineFollowing_Enable(0U);
+                    (void)LineFollowing_Enable(1U);
+                }
+            }
+            else
+            {
+                (void)LineFollowing_Enable(0U);
+                (void)ControlModeCoordinator_Request(CONTROL_MODE_AUTO);
             }
             break;
 

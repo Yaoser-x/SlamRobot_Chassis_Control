@@ -81,11 +81,40 @@ target_include_directories(test_f407_v2 PRIVATE
 
 add_test(NAME f407_v2_host COMMAND test_f407_v2)
 
+add_executable(test_watchdog_completion_gate
+    test_watchdog_completion_gate.c
+    ../../App/composition/watchdog_completion_gate.c
+)
+add_test(NAME watchdog_completion_gate COMMAND test_watchdog_completion_gate)
+
+add_executable(test_safety_motion_permit_guard
+    test_safety_motion_permit_guard.c
+    ../../Service/motion_control/internal/safety_motion_permit_guard.c
+)
+add_test(NAME safety_motion_permit_guard COMMAND test_safety_motion_permit_guard)
+
+add_executable(test_safety_capability_policy
+    test_safety_capability_policy.c
+    ../../Service/safety_management/internal/safety_capability_policy.c
+)
+add_test(NAME safety_capability_policy COMMAND test_safety_capability_policy)
+
 add_executable(test_command_management_service
     test_command_management_service.c
     ../../Service/command_management/command_management_service.c
 )
 add_test(NAME command_management_service COMMAND test_command_management_service)
+
+add_executable(test_control_mode_coordinator
+    test_control_mode_coordinator.c
+    ../../App/config/control_mode_config.c
+    ../../App/composition/control_mode_coordinator.c
+)
+target_include_directories(test_control_mode_coordinator PRIVATE
+    ../../App/config
+    ../../App/composition
+)
+add_test(NAME control_mode_coordinator COMMAND test_control_mode_coordinator)
 
 add_executable(test_motor_hardware_layout_2wd
     test_chassis_layout_2wd.c
@@ -328,6 +357,7 @@ add_executable(test_safety_service
     test_safety_service.c
     ../../Service/safety_management/internal/battery_voltage_monitor.c
     ../../Service/safety_management/internal/fault_stop_policy.c
+    ../../Service/safety_management/internal/safety_capability_policy.c
     ../../Service/safety_management/safety_management_service.c
     ../../Service/system_monitoring/system_monitoring_service.c
 )
@@ -346,6 +376,7 @@ add_executable(test_safety_service_fault_enabled
     test_safety_service.c
     ../../Service/safety_management/internal/battery_voltage_monitor.c
     ../../Service/safety_management/internal/fault_stop_policy.c
+    ../../Service/safety_management/internal/safety_capability_policy.c
     ../../Service/safety_management/safety_management_service.c
     ../../Service/system_monitoring/system_monitoring_service.c
 )
@@ -411,8 +442,8 @@ add_executable(test_chassis_service_current_limit
     ../../Service/motion_control/internal/wheel_feedback_monitor.c
     ../../Service/motion_control/internal/motor_output_coordinator.c
     ../../Service/motion_control/internal/motion_test_mode.c
+    ../../Service/motion_control/internal/safety_motion_permit_guard.c
     ../../Service/motion_control/internal/motion_status_builder.c
-    ../../Service/motion_control/internal/motion_maintenance_service.c
     ../../Algorithm/kinematics/differential_drive_kinematics.c
     ../../Algorithm/control/straight_line_controller.c
     ../../Service/motion_control/internal/motor_current_limiter.c
@@ -466,8 +497,7 @@ add_test(NAME chassis_speed_feedback COMMAND test_chassis_speed_feedback)
 
 add_executable(test_chassis_maintenance_service
     test_chassis_maintenance_service.c
-    fakes/chassis/chassis_maintenance_service.c
-    ../../Service/motion_control/internal/motion_maintenance_service.c
+    ../../App/composition/motion_maintenance_orchestrator.c
 )
 
 target_include_directories(test_chassis_maintenance_service PRIVATE
@@ -475,6 +505,9 @@ target_include_directories(test_chassis_maintenance_service PRIVATE
     ../../BSP
     ../../BSP/encoder
     ../../BSP/motor
+    ../../App/config
+    ../../App/composition
+    ../../App/adapters
 )
 
 add_test(NAME chassis_maintenance_service COMMAND test_chassis_maintenance_service)
@@ -630,6 +663,7 @@ add_test(NAME param_service COMMAND test_param_service)
 add_executable(test_app_config
     test_app_config.c
     ../../App/config/robot_config.c
+    ../../App/config/control_mode_config.c
     ../../Service/parameter_management/parameter_management_service.c
     fakes/service/motion_control_validate.c
     fakes/service/teleoperation_validate.c
@@ -664,6 +698,7 @@ add_test(NAME app_config COMMAND test_app_config)
 add_executable(test_foundation_services
     test_foundation_services.c
     ../../App/config/robot_config.c
+    ../../App/config/control_mode_config.c
     ../../App/composition/imu_calibration_orchestrator.c
     ../../Service/state_estimation/internal/imu_calibration_coordinator.c
     ../../Service/state_estimation/internal/imu_quality_monitor.c

@@ -5,6 +5,7 @@
 
 #include "feature_config.h"
 #include "task_config.h"
+#include "control_mode_config.h"
 
 #include "command_management_config.h"
 #include "communication_config.h"
@@ -36,6 +37,7 @@ typedef struct
     safety_management_config_t    safety;
     command_management_config_t   command;
     teleoperation_config_t        teleoperation;
+    control_mode_config_t         control_mode;
     line_following_config_t       line;
     communication_config_t        communication;
     parameter_management_config_t parameter;

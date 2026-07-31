@@ -2,6 +2,7 @@
 #define COMMUNICATION_SESSION_TRACKER_H
 
 #include "communication_types.h"
+#include "command_management_types.h"
 
 #include <stdint.h>
 
@@ -33,7 +34,13 @@ void                             CommunicationSessionTracker_Complete(communicat
                                                                       uint32_t             sequence,
                                                                       uint8_t              applied,
                                                                       uint8_t              reject_reason);
-void CommunicationSessionTracker_RecordReject(communication_link_t link, uint8_t reject_reason);
-void CommunicationSessionTracker_GetSnapshot(communication_link_t link, communication_session_snapshot_t *snapshot);
+void    CommunicationSessionTracker_RecordReject(communication_link_t link, uint8_t reject_reason);
+uint8_t CommunicationSessionTracker_SetRefreshToken(communication_link_t           link,
+                                                    uint32_t                       sequence,
+                                                    const command_refresh_token_t *token);
+uint8_t CommunicationSessionTracker_GetRefreshToken(communication_link_t     link,
+                                                    uint32_t                 sequence,
+                                                    command_refresh_token_t *token);
+void    CommunicationSessionTracker_GetSnapshot(communication_link_t link, communication_session_snapshot_t *snapshot);
 
 #endif

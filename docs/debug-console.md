@@ -84,14 +84,15 @@ adccal plan m2 500             用 M2 当前读数和已知 500mA 负载估算�
 | `motor` | `m1_mms, m2_mms, m3_mms, m4_mms, m1_pwm, m2_pwm, m3_pwm, m4_pwm` | 8 | 相邻日志帧累计计数计算的约 500ms 平均轮速 + `ChassisService_GetState` |
 | `adc` | `vbat_mv, m1_ma, m2_ma, m3_ma, m4_ma` | 5 | `PowerAdcDriver_GetState` 的慢速稳定电流，兼容旧 CSV |
 | `adcraw` | `m*_mean_ma, m*_rms_ma, m*_pk_ma, m*_n` | 16 | 最近 ADC 窗口的均值/RMS/峰值/样本数，用于电流校准；不改变旧列顺序 |
-| `imu` | `imu_online, imu_chip, imu_acc_x/y/z_mg, imu_gyro_corr_x/y/z_mdps, imu_gyro_filt_x/y/z_mdps, imu_roll/pitch/yaw_mdeg, imu_stime, imu_q*_milli, imu_quality` | 20 | `Bmi270Driver_GetState`（车体坐标系） |
-| `errors` | `errors` | 1 | `SafetyService_GetState` |
-| `source` | `source` | 1 | `SafetyService_GetState` |
+| `imu` | `imu_online, imu_chip, imu_acc_x/y/z_g, imu_gyro_corr_x/y/z_dps, imu_gyro_filt_x/y/z_dps, imu_roll/pitch/yaw_deg, imu_stime, imu_qw/qx/qy/qz, imu_quality` | 20 | `StateEstimation_GetImu`（车体坐标系） |
+| `errors` | `errors` | 1 | `SafetyManagement_GetStatus` |
+| `source` | `source` | 1 | `SafetyManagement_GetStatus.active_source`（同代输入事实） |
 | `ps2` | `ps2_ok, ps2_fail` | 2 | `Ps2Control_GetState` |
 | `line` | `line_bytes, line_frames` | 2 | `LineSensorDriver_GetState` |
 | `esp` | `esp_rx, esp_tx` | 2 | `WirelessCommunication_GetState` |
 
-**输出格式**：第一列为 `t_ms`（`osKernelGetTickCount()`），后续按用户输入顺序排列字段列。所有浮点值缩放为毫/微单位整数（×1000），避免 `printf` 浮点开销。
+**输出格式**：第一列为 `t_ms`，后续按用户输入顺序排列字段列。motor/adc 使用 milli 整数列；
+IMU 列按表头直接输出 `g / deg/s / deg` 浮点单位，OADEV 工具不得再除以 1000。
 
 **性能**：过滤模式下惰性获取状态快照——仅获取选中字段对应的子系统数据，其余不调用 `GetState`。日志行通过 `HAL_UART_Transmit` 同步输出（100ms 超时），USART TX 繁忙时阻塞等待。
 

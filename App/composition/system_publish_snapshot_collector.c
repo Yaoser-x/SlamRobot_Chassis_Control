@@ -1,6 +1,7 @@
 #include "system_publish_snapshot_collector.h"
 
 #include "command_management_service.h"
+#include "control_mode_coordinator.h"
 #include "host_communication_service.h"
 #include "line_following_service.h"
 #include "motion_control_service.h"
@@ -54,6 +55,7 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
     host_communication_state_t     upper;
     wireless_communication_state_t esp;
     power_on_self_test_result_t    post;
+    control_mode_snapshot_t        control_mode;
 
     if (config == 0 || snapshot == 0)
     {
@@ -68,6 +70,7 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
     (void)SystemMonitoring_GetStatus(&system);
     (void)LineFollowing_GetStatus(&line);
     (void)Teleoperation_GetStatus(&teleoperation);
+    (void)ControlModeCoordinator_GetSnapshot(&control_mode);
     PowerOnSelfTest_GetResult(&post);
     HostCommunication_GetState(&upper);
     WirelessCommunication_GetState(&esp);
@@ -101,18 +104,16 @@ void AppSystemPublishSnapshot_Collect(uint32_t                                  
         snapshot->encoder.speed_mps[index]             = state.wheel.speed_mps[index];
         snapshot->encoder.speed_valid[index]           = state.wheel.speed_valid[index];
         snapshot->safety.motor_current_a[index]        = safety.motor_current_a[index];
-        if (state.wheel.anomaly_count[index] > 0U)
-        {
-            snapshot->encoder.anomaly_mask |= (uint8_t)(1U << index);
-        }
     }
+    snapshot->encoder.anomaly_mask         = state.wheel.current_anomaly_mask | state.wheel.latched_for_host_mask;
+    snapshot->encoder.anomaly_generation   = state.wheel.anomaly_delivery_generation;
     snapshot->chassis.motor_enabled_mask   = motion.motor_enabled_mask;
     snapshot->encoder.speed_valid_all      = state.wheel.speed_valid_all;
     snapshot->safety.battery_voltage       = safety.battery_voltage;
     snapshot->safety.error_flags           = safety.error_flags;
     snapshot->safety.latched_error_flags   = safety.latched_error_flags;
     snapshot->safety.task_timeout_mask     = safety.task_timeout_mask;
-    snapshot->safety.control_mode          = safety.control_mode;
+    snapshot->safety.control_mode          = (uint8_t)control_mode.mode;
     snapshot->safety.current_control_valid = safety.current_control_valid;
     snapshot->safety.tim_break_active      = ((safety.error_flags & SYSTEM_ERROR_TIM_BREAK) != 0U) ? 1U : 0U;
     snapshot->safety.motor_fault_mask      = safety.motor_fault_mask;

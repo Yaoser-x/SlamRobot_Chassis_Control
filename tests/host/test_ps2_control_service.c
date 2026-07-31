@@ -157,6 +157,36 @@ command_apply_result_t CommandManagement_QualifyRearm(command_source_t source)
     return (command_apply_result_t){.outcome = COMMAND_OUTCOME_RELEASE_ACCEPTED, .source_cleared = 1U};
 }
 
+command_apply_result_t CommandManagement_ApplyIntent(const command_intent_t *intent)
+{
+    command_apply_result_t result = {COMMAND_OUTCOME_RELEASE_ACCEPTED, 0U, 1UL};
+
+    if (intent->kind == COMMAND_INTENT_ACTIVE || intent->kind == COMMAND_INTENT_NEUTRAL)
+    {
+        command_velocity_t command = {
+            .linear_x     = (intent->kind == COMMAND_INTENT_NEUTRAL) ? 0.0f : intent->linear_x,
+            .angular_z    = (intent->kind == COMMAND_INTENT_NEUTRAL) ? 0.0f : intent->angular_z,
+            .enable       = 1U,
+            .source       = intent->source,
+            .timestamp_ms = intent->sample_time_ms,
+        };
+        result.outcome = (CommandManagement_SetForGeneration(&command, intent->expected_revoke_generation)
+                          == COMMAND_RESULT_ACCEPTED)
+                             ? COMMAND_OUTCOME_ACTIVE_ACCEPTED
+                             : COMMAND_OUTCOME_GENERATION_CONFLICT;
+    }
+    else if (intent->kind == COMMAND_INTENT_RELEASE)
+    {
+        CommandManagement_ClearSource(intent->source);
+        result.source_cleared = 1U;
+    }
+    else if (intent->kind == COMMAND_INTENT_REARM)
+    {
+        result = CommandManagement_QualifyRearm(intent->source);
+    }
+    return result;
+}
+
 uint8_t SafetyManagement_IsMotionAllowed(void)
 {
     return (ControlService_IsEmergencyStop() == 0U && ControlService_IsFaultStop() == 0U

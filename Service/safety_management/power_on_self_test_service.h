@@ -41,7 +41,10 @@ extern "C"
         post_item_status_t adc_status;
         post_item_status_t imu_status;
         post_item_status_t encoder_status;
-        uint32_t           error_flags;
+        uint32_t           fatal_error_flags;
+        uint32_t           degraded_error_flags;
+        /** Aggregate retained for the Upper v3 diagnostic wire contract. */
+        uint32_t error_flags;
     } power_on_self_test_result_t;
 
     /** Evaluates a POST snapshot without accessing hardware. */

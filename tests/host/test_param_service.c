@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static uint32_t fake_primask;
@@ -27,7 +28,7 @@ static void require_int(int condition, const char *message)
     if (!condition)
     {
         (void)printf("FAIL: %s\n", message);
-        __builtin_exit(1);
+        exit(1);
     }
 }
 
@@ -36,7 +37,7 @@ static void require_close(float actual, float expected, float tolerance, const c
     if (fabsf(actual - expected) > tolerance)
     {
         (void)printf("FAIL: %s actual=%f expected=%f\n", message, actual, expected);
-        __builtin_exit(1);
+        exit(1);
     }
 }
 

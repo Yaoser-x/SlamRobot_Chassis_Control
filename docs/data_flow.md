@@ -1,10 +1,11 @@
-# rc1 数据流与并发契约
+# rc2 数据流与并发契约
 
 Upper Protocol v3 的命令流固定为：
 
 ```text
 link RX → pure codec → per-link session tracker
-                       → velocity: CommandManagement Set/Disable/Refresh → tracker ACK
+                       → velocity: Communication 验证 session/sequence/duplicate
+                                   → CommandManagement Apply/Disable/RefreshToken → tracker ACK
                        → operation: fixed mailbox → App → Safety/Line business result
 ```
 
@@ -16,20 +17,24 @@ tracker 和 mailbox 临界区内不得调用 Command、Safety、Line 或 TX。Ho
 Host / PS2 / ESP12F / Line / Debug
                  |
                  v
-        Command Management <----- Safety gate
-                 |                    ^
-                 v                    |
-          Motion Control <--- State / Power / Parameter
-                 |
-                 v
-             Motor BSP
+App facts → Safety capability/permit → ModeCoordinator
+                                      → CommandManagement mask/rearm/arbitration
+                                                        |
+                                                        v
+                                                  App Motion DTO → MotionControl → Motor BSP
+              ^                                           |
+              └──────────── App routes MotionEvent ────────┘
 ```
 
-Safety 消费 Power、State、System 和 App 分发的安全操作，发布运动许可。安全转换先关闭 gate、清空所有命令并闩锁 Host/ESP rearm，再发布新的 safety generation。Motion 只消费已经通过 gate 的活动命令。
+App 为 Safety 收集 Power、State、System 和 Motor 事实；Safety 不主动拉取兄弟 Service，
+只计算能力和带租约许可。App 先将 Safety capability source mask 与 mode mask 求交并原子应用，
+再同步 Safety gate、让 CommandManagement 仲裁，
+最后把完整 Motion DTO 交给 MotionControl。Motion 只写电机并返回事件，不直接修改 Safety 或 Command。
 
 ## 状态流
 
 - Encoder BSP 原始计数进入 State 的 10 ms wheel 链。
+- 编码器累计以 `uint32_t` 模 2^32 保存；异常 latch 只有 Host STATUS 物理发送完成且 generation 匹配才清除。
 - IMU BSP 的 DRDY/FIFO 事实进入 State 的事件驱动 IMU 链；10 ms 超时入口继续保留。
 - ADC BSP 原始值进入 Power；Power 发布电压、电流、有效性、零点和阈值状态。
 - Parameter、wheel、IMU、Power 和 System 均以完整 DTO 发布单调 generation；wheel 与 IMU generation 相互独立。
@@ -51,4 +56,4 @@ Beta5 不创建 odometry、x/y、pose 或位姿融合数据流。
 
 轮速和 IMU 使用独立时间戳、有效位、质量位与 generation，不以“统一状态”为由合并调度入口。
 
-迁移期间旧 `ParamService`、`EncoderService`、`ImuService`、`CurrentSensorService`、`TaskHealthService` 和 `ResetReasonService` 仅转发新 owner，不再保存状态。IMU 设备采集管线和 ADC/Encoder 设备工作区仍属于 BSP 实现细节，Service 对外状态不再泄漏 BSP 头类型。
+IMU 设备采集管线和 ADC/Encoder 设备工作区属于 BSP 实现细节，Service 对外状态不泄漏 BSP 头类型。

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import math
+import random
 import sys
 import tempfile
 import unittest
@@ -115,6 +118,35 @@ class AnalysisTests(unittest.TestCase):
             )
             errors = architecture.analyze(root)
             self.assertTrue(any("public Service callback alias is forbidden" in error for error in errors), errors)
+
+    def test_ownership_rejects_safety_pull_and_motion_cross_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "Service/safety_management/safety_management_service.c",
+                "void update(void) { PowerManagement_Update(); CommandManagement_SetMotionGate(0, 1); }\n",
+            )
+            self.write_fixture(
+                root,
+                "Service/motion_control/motion_control_service.c",
+                "void step(void) { SafetyManagement_SetFaultStop(1); }\n",
+            )
+            errors = ownership.analyze(root)
+            self.assertTrue(any("Safety must consume App-composed facts" in error for error in errors), errors)
+            self.assertTrue(any("Motion must consume DTO facts" in error for error in errors), errors)
+
+    def test_ownership_rejects_removed_entrypoint_and_direct_safety_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                "App/feature.c",
+                "void run(void) { MotionControl_Step(1); SafetyManagement_SetEmergencyStop(1); }\n",
+            )
+            errors = ownership.analyze(root)
+            self.assertTrue(any("removed pull-based runtime entrypoint" in error for error in errors), errors)
+            self.assertTrue(any("Safety mutations must be routed" in error for error in errors), errors)
 
     def test_hil_imu_success_requires_terminal_state(self):
         self.assertTrue(hil_imu.calibration_succeeded("IMU acal=4,1,1"))
@@ -359,10 +391,95 @@ class AnalysisTests(unittest.TestCase):
             {"t_ms": "60000", "roll_deg": "0.3", "pitch_deg": "0.4", "yaw_deg": "3", "temperature_c": "21"},
         ]
         result = imu.analyze(rows)
-        self.assertEqual(result["yaw_drift_deg_per_min"], 2.0)
+        self.assertEqual(result["yaw_output_stability"]["drift_deg_per_min"], 2.0)
         self.assertAlmostEqual(result["level_return_error_deg"], 0.5)
-        self.assertAlmostEqual(result["temperature_yaw_regression"]["slope"], 2.0)
-        self.assertEqual(result["allan_deviation_yaw_deg"][0]["tau_s"], 60.0)
+        self.assertAlmostEqual(result["yaw_output_stability"]["temperature_regression"]["slope"], 2.0)
+        self.assertNotIn("allan_deviation_yaw_deg", result)
+
+    @staticmethod
+    def gyro_rows(values, dt_ms=10):
+        return [
+            {
+                "t_ms": str(index * dt_ms),
+                "imu_gyro_corr_x_dps": str(value),
+                "imu_gyro_corr_y_dps": str(value * 0.5),
+                "imu_gyro_corr_z_dps": str(value * 2.0),
+                "imu_quality": "0",
+                "imu_temp_c": str(24.0 + index / max(len(values), 1)),
+            }
+            for index, value in enumerate(values)
+        ]
+
+    def test_gyro_oadev_white_noise_and_constant_bias_fixtures(self):
+        rng = random.Random(1667971)
+        white = [rng.gauss(0.0, 1.0) for _ in range(16384)]
+        result, curve = imu.analyze_gyro(self.gyro_rows(white))
+        self.assertGreaterEqual(len(curve), 5)
+        self.assertIsNotNone(result["axes"]["x"]["angle_random_walk"])
+        self.assertAlmostEqual(result["sample_rate_hz"], 100.0)
+        self.assertEqual(result["input_unit"], "deg/s")
+
+        constant, constant_curve = imu.analyze_gyro(self.gyro_rows([0.25] * 16384))
+        self.assertTrue(all(point["adev_x_dps"] < 1e-12 for point in constant_curve))
+        self.assertIsNone(constant["axes"]["x"]["bias_instability"])
+
+    def test_gyro_oadev_flicker_and_rate_random_walk_fixtures(self):
+        rng = random.Random(1234)
+        octave_states = [0.0] * 16
+        flicker = []
+        for index in range(65536):
+            for octave in range(len(octave_states)):
+                if index % (1 << octave) == 0:
+                    octave_states[octave] = rng.gauss(0.0, 1.0)
+            flicker.append(sum(octave_states))
+        flicker_result, _ = imu.analyze_gyro(self.gyro_rows(flicker))
+        self.assertIsNotNone(flicker_result["axes"]["x"]["bias_instability"])
+
+        rng = random.Random(1667971)
+        random_walk = []
+        value = 0.0
+        for _ in range(16384):
+            value += rng.gauss(0.0, 0.001)
+            random_walk.append(value)
+        walk_result, _ = imu.analyze_gyro(self.gyro_rows(random_walk))
+        self.assertIsNotNone(walk_result["axes"]["x"]["rate_random_walk"])
+
+    def test_gyro_oadev_splits_invalid_gaps_and_rejects_jitter(self):
+        rows = self.gyro_rows([math.sin(index * 0.1) for index in range(192)])
+        rows[64]["imu_quality"] = "0x08"
+        result, _ = imu.analyze_gyro(rows)
+        self.assertEqual(result["quality_reject_count"], 1)
+        self.assertEqual(result["valid_segments"], [64, 127])
+
+        jittered = self.gyro_rows([math.sin(index * 0.1) for index in range(256)])
+        for index in range(1, len(jittered)):
+            jittered[index]["t_ms"] = str(int(jittered[index - 1]["t_ms"]) + (11 if index % 10 == 0 else 10))
+        with self.assertRaisesRegex(ValueError, "sample jitter exceeds limit"):
+            imu.analyze_gyro(jittered)
+
+    def test_gyro_oadev_writes_machine_readable_artifacts(self):
+        rng = random.Random(1667971)
+        rows = self.gyro_rows([rng.gauss(0.0, 0.1) for _ in range(8192)])
+        metadata = {
+            "firmware_sha": "deadbeef",
+            "parameter_crc": "0x12345678",
+            "input_signal_stage": "corrected_unfiltered",
+            "imu_odr": "100Hz",
+            "imu_bandwidth_profile": "normal",
+            "bias_correction_enabled": True,
+            "filter_enabled": False,
+        }
+        result, curve = imu.analyze_gyro(rows, metadata)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            imu.write_artifacts(output, result, curve)
+            self.assertTrue((output / "allan_curve.csv").is_file())
+            self.assertTrue((output / "summary.md").is_file())
+            stored = json.loads((output / "allan_result.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["firmware_sha"], "deadbeef")
+        self.assertEqual(stored["parameter_crc"], "0x12345678")
+        self.assertEqual(stored["input_signal_stage"], "corrected_unfiltered")
+        self.assertIn("curve", stored)
 
     def test_imu_six_face_report_is_evidence_only(self):
         rows = [

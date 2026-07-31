@@ -203,7 +203,7 @@ static size_t DebugTelemetry_WriteFieldData(char *tx, size_t pos, log_field_id_t
 
         case LOG_FLD_SOURCE:
             (void)SafetyManagement_GetStatus(&mon);
-            pos += (size_t)snprintf(tx + pos, DEBUG_TELEMETRY_TX_SIZE - pos, "%u", mon.control_mode);
+            pos += (size_t)snprintf(tx + pos, DEBUG_TELEMETRY_TX_SIZE - pos, "%u", mon.active_source);
             break;
 
         case LOG_FLD_PS2:

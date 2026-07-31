@@ -7,6 +7,7 @@
 #include "wheel_speed_control_loop.h"
 #include "wheel_target_planner.h"
 #include "motion_test_mode.h"
+#include "safety_motion_permit_guard.h"
 #include "platform_critical.h"
 #include "platform_time.h"
 
@@ -14,31 +15,42 @@
 
 #include "differential_drive_kinematics.h"
 
-#include "command_management_service.h"
-
 #include "motor_current_limiter.h"
 
 #include "motor_driver.h"
-#include "motion_maintenance.h"
 
-#include "parameter_management_service.h"
+static motion_control_status_t      chassis_state;
+static motion_control_status_t      published_state;
+static motion_control_config_t      motion_config;
+static control_timing_t             control_timing;
+static uint8_t                      control_step_active;
+static motion_parameter_sync_t      param_sync;
+static wheel_target_planner_t       target_planner;
+static wheel_speed_control_loop_t   speed_loop;
+static wheel_feedback_monitor_t     feedback_guard;
+static motion_test_mode_t           test_mode;
+static safety_motion_permit_guard_t safety_permit_guard;
+static uint32_t                     motion_event_generation;
+static float                        motion_wheel_speed_cache[MOTOR_ID_COUNT];
 
-#include "power_management_service.h"
-
-#include "safety_management_service.h"
-
-#include "state_estimation_service.h"
-
-static motion_control_status_t    chassis_state;
-static motion_control_status_t    published_state;
-static motion_control_config_t    motion_config;
-static control_timing_t           control_timing;
-static uint8_t                    control_step_active;
-static motion_parameter_sync_t    param_sync;
-static wheel_target_planner_t     target_planner;
-static wheel_speed_control_loop_t speed_loop;
-static wheel_feedback_monitor_t   feedback_guard;
-static motion_test_mode_t         test_mode;
+static void MotionControl_SetEvent(motion_control_event_t *event, uint32_t flags, uint32_t now_ms)
+{
+    if (event == 0 || flags == 0UL)
+    {
+        return;
+    }
+    if (event->flags == 0UL)
+    {
+        motion_event_generation++;
+        if (motion_event_generation == 0UL)
+        {
+            motion_event_generation = 1UL;
+        }
+        event->occurred_at_ms = now_ms;
+        event->generation     = motion_event_generation;
+    }
+    event->flags |= flags;
+}
 
 static float ChassisService_AbsFloat(float value)
 {
@@ -71,12 +83,25 @@ static void ChassisService_ResolveSideTargetsWithParams(float                lin
                                                            right_mps);
 }
 
-void MotionControl_ResolveSideTargets(float linear_x, float angular_z, float *left_mps, float *right_mps)
+void MotionControl_ResolveSideTargetsWithParameters(float                linear_x,
+                                                    float                angular_z,
+                                                    const param_model_t *params,
+                                                    float               *left_mps,
+                                                    float               *right_mps)
 {
-    param_model_t params;
-
-    (void)ParameterManagement_GetSnapshot(&params);
-    ChassisService_ResolveSideTargetsWithParams(linear_x, angular_z, &params, left_mps, right_mps);
+    if (params == 0)
+    {
+        if (left_mps != 0)
+        {
+            *left_mps = 0.0f;
+        }
+        if (right_mps != 0)
+        {
+            *right_mps = 0.0f;
+        }
+        return;
+    }
+    ChassisService_ResolveSideTargetsWithParams(linear_x, angular_z, params, left_mps, right_mps);
 }
 
 static void ChassisService_ResetRamps(void)
@@ -121,9 +146,11 @@ static void MotionControl_SyncDriverFacts(void)
     }
 }
 
-static uint8_t ChassisService_RefreshRuntimeParams(void)
+static uint8_t ChassisService_ApplyRuntimeParams(const motion_parameter_fact_t *parameters)
 {
-    if (MotionParameterSync_Refresh(&param_sync, speed_loop.pid_motor) == 0U)
+    if (parameters == 0 || parameters->validity == 0UL
+        || MotionParameterSync_Apply(&param_sync, &parameters->value, parameters->generation, speed_loop.pid_motor)
+               == 0U)
     {
         return 0U;
     }
@@ -146,7 +173,7 @@ static void ChassisService_StopOutput(void)
         chassis_state.motor_error_mps[i]     = 0.0f;
         chassis_state.motor_pid_active[i]    = 0U;
         chassis_state.motor_feedback_lost[i] = 0U;
-        MotorOutputCoordinator_SetMotor(&chassis_state, (motor_id_t)i, 0);
+        MotorOutputCoordinator_StopMotor(&chassis_state, (motor_id_t)i);
     }
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
@@ -156,10 +183,7 @@ static void ChassisService_StopOutput(void)
 
 static float MotionControl_GetMotorSpeedMps(motor_id_t motor)
 {
-    state_estimation_wheel_status_t state;
-
-    (void)StateEstimation_GetWheel(&state);
-    return ((uint32_t)motor < MOTOR_ID_COUNT) ? state.speed_mps[motor] : 0.0f;
+    return ((uint32_t)motor < MOTOR_ID_COUNT) ? motion_wheel_speed_cache[motor] : 0.0f;
 }
 
 uint8_t MotionControl_ValidateConfig(const motion_control_config_t *config)
@@ -191,10 +215,14 @@ uint8_t MotionControl_Init(const motion_control_config_t *config)
     WheelSpeedControlLoop_Init(&speed_loop, config);
     WheelFeedbackMonitor_Init(&feedback_guard, config);
     MotionTestMode_Init(&test_mode, config);
-    MotionMaintenance_Init(config->maintenance_max_speed_mps);
-    control_timing      = (control_timing_t){0};
-    control_step_active = 0U;
-    (void)ChassisService_RefreshRuntimeParams();
+    SafetyMotionPermitGuard_Init(&safety_permit_guard);
+    control_timing          = (control_timing_t){0};
+    control_step_active     = 0U;
+    motion_event_generation = 0UL;
+    for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
+    {
+        motion_wheel_speed_cache[index] = 0.0f;
+    }
     ChassisService_ResetRamps();
     ChassisService_ResetPidTargets();
     MotorDriver_StopAll(MOTOR_STOP_LOW_SIDE_BRAKE);
@@ -204,21 +232,41 @@ uint8_t MotionControl_Init(const motion_control_config_t *config)
     return 1U;
 }
 
-static void ChassisService_StepImpl(uint32_t now_ms)
+static void ChassisService_StepImpl(const motion_control_input_t *input, motion_control_event_t *event)
 {
     command_velocity_t              cmd;
     state_estimation_wheel_status_t encoder_state;
     uint8_t                         valid_cmd;
     motion_test_mode_snapshot_t     test_snapshot;
     float                           dt_s;
+    uint32_t                        now_ms            = input->now_ms;
+    uint32_t                        nominal_period_ms = input->nominal_period_ms;
+    safety_motion_permit_result_t   permit_result;
 
-    (void)ChassisService_RefreshRuntimeParams();
+    permit_result = SafetyMotionPermitGuard_Evaluate(&safety_permit_guard, &input->safety_permit.value, now_ms);
+    if (permit_result != SAFETY_MOTION_PERMIT_ALLOW)
+    {
+        if (permit_result == SAFETY_MOTION_PERMIT_STALE || permit_result == SAFETY_MOTION_PERMIT_INVALID)
+        {
+            MotionControl_SetEvent(event, MOTION_EVENT_SAFETY_PERMIT_STALE, now_ms);
+        }
+        else if (permit_result == SAFETY_MOTION_PERMIT_GENERATION_CHANGED)
+        {
+            MotionControl_SetEvent(event, MOTION_EVENT_SAFETY_PERMIT_CHANGED, now_ms);
+        }
+        MotionControl_EmergencyStop();
+        return;
+    }
+
+    (void)ChassisService_ApplyRuntimeParams(&input->parameters);
     MotorDriver_UpdateFaults();
     if (MotorDriver_HasFault() != 0U)
     {
-        SafetyManagement_SetFaultStop(1U);
+        MotionControl_SetEvent(event, MOTION_EVENT_DRIVER_FAULT, now_ms);
+        MotionControl_EmergencyStop();
+        return;
     }
-    (void)StateEstimation_GetWheel(&encoder_state);
+    encoder_state = input->wheel.value;
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         chassis_state.motor_actual_mps[i]  = encoder_state.speed_mps[i];
@@ -227,9 +275,9 @@ static void ChassisService_StepImpl(uint32_t now_ms)
     MotionStatusBuilder_SyncSides(&chassis_state);
 
     MotionTestMode_GetSnapshot(&test_mode, now_ms, &test_snapshot);
-    if (SafetyManagement_IsMotionAllowed() == 0U
+    if (input->normal_motion_allowed == 0U
         && ((test_snapshot.open_loop_active == 0U && test_snapshot.raw_input_active == 0U)
-            || SafetyManagement_IsDiagnosticMotionAllowed() == 0U))
+            || input->diagnostic_motion_allowed == 0U))
     {
         MotionControl_CancelTestMode();
         MotionControl_EmergencyStop();
@@ -238,13 +286,15 @@ static void ChassisService_StepImpl(uint32_t now_ms)
 
     if (test_snapshot.expired != 0U)
     {
-        CommandManagement_ClearAll();
+        MotionControl_SetEvent(event, MOTION_EVENT_TEST_LEASE_EXPIRED | MOTION_EVENT_COMMAND_REVOKE, now_ms);
         ChassisService_StopOutput();
         return;
     }
 
-    valid_cmd                             = CommandManagement_GetActive(&cmd, now_ms);
-    control_timing_status_t timing_status = DifferentialDriveKinematics_EvaluateControlTiming(&control_timing, now_ms);
+    valid_cmd = (input->command.validity != 0UL) ? 1U : 0U;
+    cmd       = input->command.value;
+    control_timing_status_t timing_status =
+        DifferentialDriveKinematics_EvaluateControlTiming(&control_timing, now_ms, nominal_period_ms);
     if (timing_status == CONTROL_TIMING_EARLY)
     {
         return;
@@ -258,10 +308,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
     dt_s = control_timing.dt_s;
 
     {
-        power_management_status_t adc_state;
-
-        (void)PowerManagement_GetStatus(&adc_state);
-        if (adc_state.current_zero_valid == 0U)
+        if (input->power.validity == 0UL || input->power.value.current_zero_valid == 0U)
         {
             ChassisService_StopOutput();
             return;
@@ -270,7 +317,11 @@ static void ChassisService_StepImpl(uint32_t now_ms)
 
     if (test_snapshot.open_loop_active != 0U)
     {
-        MotionTestMode_ApplyOpenLoop(&test_snapshot, &chassis_state, &speed_loop);
+        MotionTestMode_ApplyOpenLoop(&test_snapshot,
+                                     &chassis_state,
+                                     &speed_loop,
+                                     &input->power.value,
+                                     &param_sync.params);
         chassis_state.output_enabled = MotorOutputCoordinator_AnyActive(&chassis_state);
         ChassisService_ResetRamps();
         MotionStatusBuilder_SetSideTargets(&chassis_state, 0.0f, 0.0f, 1U);
@@ -280,7 +331,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
 
     if (test_snapshot.raw_input_active != 0U)
     {
-        MotionTestMode_ApplyRaw(&test_snapshot, &chassis_state, &speed_loop);
+        MotionTestMode_ApplyRaw(&test_snapshot, &chassis_state, &speed_loop, &input->power.value, &param_sync.params);
         ChassisService_ResetRamps();
         MotionStatusBuilder_SetSideTargets(&chassis_state, 0.0f, 0.0f, 1U);
         chassis_state.output_enabled = MotorOutputCoordinator_AnyActive(&chassis_state);
@@ -296,7 +347,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
 
         if (MotorHardwareLayout_HasBothSides() == 0U)
         {
-            CommandManagement_ClearAll();
+            MotionControl_SetEvent(event, MOTION_EVENT_COMMAND_REVOKE, now_ms);
             ChassisService_StopOutput();
             return;
         }
@@ -305,7 +356,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         planner_input.dt_s                  = dt_s;
         planner_input.command               = &cmd;
         planner_input.params                = &param_sync.params;
-        planner_input.motion_generation     = CommandManagement_GetMotionRevokeGeneration();
+        planner_input.motion_generation     = input->command.revoke_generation;
         planner_input.actual_left_mps       = chassis_state.left_actual_mps;
         planner_input.actual_right_mps      = chassis_state.right_actual_mps;
         planner_input.left_speed_valid      = chassis_state.left_speed_valid;
@@ -316,20 +367,18 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         planner_input.right_current_limited = chassis_state.right_current_limited;
         if (ChassisService_AbsFloat(cmd.angular_z) <= 0.0001f && ChassisService_AbsFloat(cmd.linear_x) > 0.001f)
         {
-            state_estimation_imu_status_t imu_state;
-
-            (void)StateEstimation_GetImu(&imu_state);
+            const state_estimation_imu_status_t *imu_state = &input->imu.value;
             planner_input.imu_valid =
-                (imu_state.online != 0U && imu_state.gyro_calibrated != 0U
-                 && (uint32_t)(now_ms - imu_state.last_update_ms) <= 100U
-                 && (imu_state.quality_flags
+                (input->imu.validity != 0UL && imu_state->online != 0U && imu_state->gyro_calibrated != 0U
+                 && (uint32_t)(now_ms - imu_state->last_update_ms) <= 100U
+                 && (imu_state->quality_flags
                      & (STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR | STATE_ESTIMATION_IMU_QUALITY_TIMESTAMP_ERROR
                         | STATE_ESTIMATION_IMU_QUALITY_GYRO_SATURATION | STATE_ESTIMATION_IMU_QUALITY_INIT_FAILED
                         | STATE_ESTIMATION_IMU_QUALITY_PROFILE_MISMATCH))
                         == 0U)
                     ? 1U
                     : 0U;
-            planner_input.gyro_z_dps = imu_state.gyro_corrected_dps[2];
+            planner_input.gyro_z_dps = imu_state->gyro_corrected_dps[2];
         }
         WheelTargetPlanner_Step(&target_planner, &planner_input, &planner_result);
         MotionStatusBuilder_SetSideTargets(&chassis_state,
@@ -347,7 +396,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
         if (WheelFeedbackMonitor_DetectFault(&feedback_guard, now_ms, &chassis_state, &encoder_state, &motor_state)
             != 0U)
         {
-            SafetyManagement_LatchEncoderFeedbackFault();
+            MotionControl_SetEvent(event, MOTION_EVENT_ENCODER_FEEDBACK_LOST, now_ms);
             MotionControl_EmergencyStop();
             return;
         }
@@ -358,7 +407,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
             ChassisService_ResetPidTargets();
             for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
             {
-                MotorOutputCoordinator_SetMotor(&chassis_state, (motor_id_t)i, 0);
+                MotorOutputCoordinator_StopMotor(&chassis_state, (motor_id_t)i);
             }
             chassis_state.output_enabled = MotorOutputCoordinator_AnyActive(&chassis_state);
             MotionStatusBuilder_SyncSides(&chassis_state);
@@ -376,7 +425,7 @@ static void ChassisService_StepImpl(uint32_t now_ms)
                 chassis_state.motor_pid_active[i]    = 0U;
                 chassis_state.motor_feedback_lost[i] = 0U;
                 chassis_state.motor_error_mps[i]     = 0.0f;
-                MotorOutputCoordinator_SetMotor(&chassis_state, (motor_id_t)i, 0);
+                MotorOutputCoordinator_StopMotor(&chassis_state, (motor_id_t)i);
                 continue;
             }
             base_permille = MotorOutputCoordinator_MpsToPermille(chassis_state.motor_target_mps[i]);
@@ -416,7 +465,11 @@ static void ChassisService_StepImpl(uint32_t now_ms)
                 chassis_state.motor_error_mps[i]     = 0.0f;
                 permille                             = base_permille;
             }
-            MotorOutputCoordinator_SetMotor(&chassis_state, (motor_id_t)i, permille);
+            MotorOutputCoordinator_SetMotorWithPower(&chassis_state,
+                                                     (motor_id_t)i,
+                                                     permille,
+                                                     &input->power.value,
+                                                     &param_sync.params);
         }
         chassis_state.output_enabled = 1U;
         MotionStatusBuilder_SyncSides(&chassis_state);
@@ -430,12 +483,34 @@ static void ChassisService_StepImpl(uint32_t now_ms)
     }
 }
 
-void MotionControl_Step(uint32_t now_ms)
+void MotionControl_StepWithInput(const motion_control_input_t *input, motion_control_event_t *event)
 {
-    uint32_t primask    = PlatformCritical_Enter();
+    motion_control_event_t ignored_event = {0};
+    uint32_t               primask       = PlatformCritical_Enter();
+
+    if (event == 0)
+    {
+        event = &ignored_event;
+    }
+    *event              = (motion_control_event_t){0};
     control_step_active = 1U;
     PlatformCritical_Exit(primask);
-    ChassisService_StepImpl(now_ms);
+    if (input != 0 && input->wheel.validity != 0UL)
+    {
+        for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
+        {
+            motion_wheel_speed_cache[index] = input->wheel.value.speed_mps[index];
+        }
+    }
+    if (input == 0 || input->nominal_period_ms == 0UL)
+    {
+        MotionControl_SetEvent(event, MOTION_EVENT_SAFETY_PERMIT_STALE, (input != 0) ? input->now_ms : 0UL);
+        MotionControl_EmergencyStop();
+    }
+    else
+    {
+        ChassisService_StepImpl(input, event);
+    }
     MotionControl_SyncDriverFacts();
     primask = PlatformCritical_Enter();
     chassis_state.generation++;

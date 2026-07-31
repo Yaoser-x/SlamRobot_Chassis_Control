@@ -1,5 +1,6 @@
 #include "esp12f_flash_bridge.h"
 
+#include "motion_maintenance_orchestrator.h"
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
 #include "uart_bridge_transport.h"
@@ -7,22 +8,22 @@
 #include <assert.h>
 #include <stdio.h>
 
-static motion_control_maintenance_result_t maintenance_result;
-static uart_bridge_transport_state_t       transport_state;
-static uint8_t                             transport_start_ok;
-static uint32_t                            transport_idle_ms;
-static uint32_t                            maintenance_end_count;
-static uint32_t                            normal_boot_count;
-static uint32_t                            download_boot_count;
-static uint32_t                            debug_restart_count;
-static uint32_t                            esp_restart_count;
-static uint32_t                            fake_now_ms;
+static app_motion_maintenance_result_t maintenance_result;
+static uart_bridge_transport_state_t   transport_state;
+static uint8_t                         transport_start_ok;
+static uint32_t                        transport_idle_ms;
+static uint32_t                        maintenance_end_count;
+static uint32_t                        normal_boot_count;
+static uint32_t                        download_boot_count;
+static uint32_t                        debug_restart_count;
+static uint32_t                        esp_restart_count;
+static uint32_t                        fake_now_ms;
 
-motion_control_maintenance_result_t MotionControl_BeginMaintenance(void)
+app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
 {
     return maintenance_result;
 }
-void MotionControl_EndMaintenance(void)
+void AppMotionMaintenance_End(void)
 {
     maintenance_end_count++;
 }
@@ -94,7 +95,7 @@ void UartBridgeTransport_GetState(uart_bridge_transport_state_t *state)
 
 static void ResetFakes(void)
 {
-    maintenance_result    = MOTION_CONTROL_MAINTENANCE_OK;
+    maintenance_result    = APP_MOTION_MAINTENANCE_OK;
     transport_start_ok    = 1U;
     transport_idle_ms     = 0U;
     maintenance_end_count = 0U;
@@ -135,7 +136,7 @@ static void TestStartFailureAndMaintenanceRejection(void)
     assert(maintenance_end_count == 1U);
 
     ResetFakes();
-    maintenance_result = MOTION_CONTROL_MAINTENANCE_BUSY;
+    maintenance_result = APP_MOTION_MAINTENANCE_BUSY;
     assert(Esp12fFlashBridge_Enable(0U) == 0U);
     assert(normal_boot_count == 0U && maintenance_end_count == 0U);
 }

@@ -12,8 +12,11 @@ static uint8_t RemoteCommandDispatcher_Finite(float value)
 
 static uint8_t RemoteCommandDispatcher_CommandRejectReason(void)
 {
-    return (CommandManagement_IsMotionGateOpen() == 0U) ? COMMUNICATION_REJECT_FAULT
-                                                        : COMMUNICATION_REJECT_SOURCE_NOT_PERMITTED;
+    if (CommandManagement_IsMotionGateOpen() == 0U)
+    {
+        return COMMUNICATION_REJECT_FAULT;
+    }
+    return COMMUNICATION_REJECT_SOURCE_NOT_PERMITTED;
 }
 
 static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
@@ -24,7 +27,9 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
     upper_velocity_payload_t         velocity;
     communication_wire_target_t      target;
     communication_session_decision_t decision;
+    command_apply_result_t           command_result;
     uint8_t                          applied = 0U;
+    command_refresh_token_t          refresh_token;
 
     if (frame->payload_len != ROBOT_LINK_PROTOCOL_VELOCITY_PAYLOAD_LEN)
     {
@@ -63,28 +68,59 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
     decision = CommunicationSessionTracker_Evaluate(link, &target, now_ms);
     if (decision == COMMUNICATION_SESSION_DISABLE)
     {
-        applied = (CommandManagement_DisableRemoteSource(source) == COMMAND_RESULT_ACCEPTED) ? 1U : 0U;
+        command_intent_t intent = {
+            .kind                       = COMMAND_INTENT_REMOTE_DISABLE,
+            .source                     = source,
+            .sample_time_ms             = now_ms,
+            .expected_revoke_generation = CommandManagement_GetMotionRevokeGeneration(),
+            .mode                       = velocity.mode,
+        };
+
+        command_result = CommandManagement_ApplyIntent(&intent);
+        applied        = (command_result.outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED) ? 1U : 0U;
     }
     else if (decision == COMMUNICATION_SESSION_NEW_COMMAND)
     {
-        command_velocity_t command = {
-            .linear_x     = velocity.linear_x,
-            .angular_z    = velocity.angular_z,
-            .enable       = 1U,
-            .source       = source,
-            .timestamp_ms = now_ms,
+        command_intent_t intent = {
+            .kind                       = COMMAND_INTENT_ACTIVE,
+            .source                     = source,
+            .linear_x                   = velocity.linear_x,
+            .angular_z                  = velocity.angular_z,
+            .sample_time_ms             = now_ms,
+            .expected_revoke_generation = CommandManagement_GetMotionRevokeGeneration(),
+            .mode                       = velocity.mode,
         };
-        applied = (CommandManagement_Set(&command) == COMMAND_RESULT_ACCEPTED) ? 1U : 0U;
+
+        command_result = CommandManagement_ApplyIntent(&intent);
+        applied        = (command_result.outcome == COMMAND_OUTCOME_ACTIVE_ACCEPTED) ? 1U : 0U;
+        if (applied != 0U)
+        {
+            applied = (CommandManagement_GetRefreshToken(source, command_result.slot_generation, &refresh_token) != 0U
+                       && CommunicationSessionTracker_SetRefreshToken(link, velocity.sequence, &refresh_token) != 0U)
+                          ? 1U
+                          : 0U;
+        }
     }
     else if (decision == COMMUNICATION_SESSION_DUPLICATE_KEEPALIVE)
     {
         if (velocity.enable == 0U)
         {
-            applied = 1U;
+            command_intent_t intent = {
+                .kind                       = COMMAND_INTENT_REMOTE_DISABLE,
+                .source                     = source,
+                .sample_time_ms             = now_ms,
+                .expected_revoke_generation = CommandManagement_GetMotionRevokeGeneration(),
+                .mode                       = velocity.mode,
+            };
+
+            command_result = CommandManagement_ApplyIntent(&intent);
+            applied        = (command_result.outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED) ? 1U : 0U;
         }
         else
         {
-            applied = CommandManagement_RefreshSource(source, now_ms);
+            applied = (CommunicationSessionTracker_GetRefreshToken(link, velocity.sequence, &refresh_token) != 0U)
+                          ? CommandManagement_RefreshAccepted(&refresh_token, now_ms)
+                          : 0U;
         }
     }
     if (decision == COMMUNICATION_SESSION_DISABLE || decision == COMMUNICATION_SESSION_NEW_COMMAND

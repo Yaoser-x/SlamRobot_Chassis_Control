@@ -1,13 +1,14 @@
 #include "power_on_self_test_service.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 static void require_int(int condition, const char *message)
 {
     if (!condition)
     {
         (void)printf("FAIL: %s\n", message);
-        __builtin_exit(1);
+        exit(1);
     }
 }
 
@@ -67,6 +68,11 @@ static void test_evaluate_reports_each_failed_runtime_subsystem(void)
     require_int((result.error_flags & PowerOnSelfTest_ERROR_ADC) != 0UL, "adc bit");
     require_int((result.error_flags & PowerOnSelfTest_ERROR_IMU) != 0UL, "imu bit");
     require_int((result.error_flags & PowerOnSelfTest_ERROR_ENCODER) != 0UL, "encoder bit");
+    require_int((result.fatal_error_flags
+                 & (PowerOnSelfTest_ERROR_DRV_FAULT | PowerOnSelfTest_ERROR_ADC | PowerOnSelfTest_ERROR_ENCODER))
+                    == (PowerOnSelfTest_ERROR_DRV_FAULT | PowerOnSelfTest_ERROR_ADC | PowerOnSelfTest_ERROR_ENCODER),
+                "driver adc and encoder failures are fatal");
+    require_int(result.degraded_error_flags == PowerOnSelfTest_ERROR_IMU, "imu failure is degraded");
     require_int(result.drv_fault_mask == 0x05U, "fault mask retained");
 }
 

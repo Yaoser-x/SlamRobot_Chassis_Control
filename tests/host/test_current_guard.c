@@ -56,17 +56,26 @@ static power_management_status_t valid_adc_state(void)
     return state;
 }
 
+static param_model_t valid_params(void)
+{
+    param_model_t params;
+
+    (void)ParamService_GetSnapshot(&params);
+    return params;
+}
+
 #if !defined(CURRENT_GUARD_TEST_SOFT_LIMIT)
 static void test_observe_only_does_not_change_pwm(void)
 {
-    power_management_status_t     adc = valid_adc_state();
+    power_management_status_t     adc    = valid_adc_state();
+    param_model_t                 params = valid_params();
     motor_current_limiter_state_t state;
     uint8_t                       limited = 0U;
     int16_t                       applied;
 
     MotorCurrentLimiter_Init(&guard_config);
     adc.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
-    applied                    = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, 1000U, &limited);
+    applied                    = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, &params, 1000U, &limited);
     MotorCurrentLimiter_GetState(&state);
 
     require_int(applied == 600, "observe-only keeps requested PWM");
@@ -79,23 +88,24 @@ static void test_observe_only_does_not_change_pwm(void)
 
 static void test_fault_would_latch_uses_consecutive_samples(void)
 {
-    power_management_status_t     adc = valid_adc_state();
+    power_management_status_t     adc    = valid_adc_state();
+    param_model_t                 params = valid_params();
     motor_current_limiter_state_t state;
 
     MotorCurrentLimiter_Init(&guard_config);
     adc.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
     for (uint8_t i = 0U; i < (uint8_t)(MOTOR_OVERCURRENT_DEBOUNCE_COUNT - 1U); ++i)
     {
-        (void)MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, 1000U + i, 0);
+        (void)MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, &params, 1000U + i, 0);
     }
     MotorCurrentLimiter_GetState(&state);
     require_int(state.fault_would_latch[MOTOR_ID_M2] == 0U, "guard does not latch before debounce threshold");
 
     adc.current_a[MOTOR_ID_M2] = 0.0f;
-    (void)MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, 2000U, 0);
+    (void)MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, &params, 2000U, 0);
 
     adc.current_a[MOTOR_ID_M2] = MOTOR_STALL_CURRENT_A + 1.0f;
-    (void)MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, 3000U, 0);
+    (void)MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, &params, 3000U, 0);
     MotorCurrentLimiter_GetState(&state);
     require_int(state.fault_would_latch[MOTOR_ID_M2] == 0U, "below-threshold sample resets debounce");
 }
@@ -103,7 +113,8 @@ static void test_fault_would_latch_uses_consecutive_samples(void)
 
 static void test_invalid_current_never_intervenes(void)
 {
-    power_management_status_t     adc = valid_adc_state();
+    power_management_status_t     adc    = valid_adc_state();
+    param_model_t                 params = valid_params();
     motor_current_limiter_state_t state;
     uint8_t                       limited = 99U;
     int16_t                       applied;
@@ -112,7 +123,7 @@ static void test_invalid_current_never_intervenes(void)
     adc.current_control_valid      = 0U;
     adc.current_control_valid_mask = 0U;
     adc.current_a[MOTOR_ID_M2]     = MOTOR_STALL_CURRENT_A + 2.0f;
-    applied                        = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 700, &adc, 1000U, &limited);
+    applied = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 700, &adc, &params, 1000U, &limited);
     MotorCurrentLimiter_GetState(&state);
 
     require_int(applied == 700, "invalid current keeps requested PWM");
@@ -124,14 +135,15 @@ static void test_invalid_current_never_intervenes(void)
 #if defined(CURRENT_GUARD_TEST_SOFT_LIMIT)
 static void test_soft_limit_scales_when_enabled(void)
 {
-    power_management_status_t     adc = valid_adc_state();
+    power_management_status_t     adc    = valid_adc_state();
+    param_model_t                 params = valid_params();
     motor_current_limiter_state_t state;
     uint8_t                       limited = 0U;
     int16_t                       applied;
 
     MotorCurrentLimiter_Init(&guard_config);
     adc.current_a[MOTOR_ID_M2] = 2.0f;
-    applied                    = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, 1000U, &limited);
+    applied                    = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M2, 600, &adc, &params, 1000U, &limited);
     MotorCurrentLimiter_GetState(&state);
 
     require_int(applied == 300, "enabled soft limit scales PWM by current ratio");
@@ -143,14 +155,15 @@ static void test_soft_limit_scales_when_enabled(void)
 
 static void test_disabled_motor_does_not_participate(void)
 {
-    power_management_status_t     adc = valid_adc_state();
+    power_management_status_t     adc    = valid_adc_state();
+    param_model_t                 params = valid_params();
     motor_current_limiter_state_t state;
     uint8_t                       limited = 99U;
     int16_t                       applied;
 
     MotorCurrentLimiter_Init(&guard_config);
     adc.current_a[MOTOR_ID_M1] = MOTOR_STALL_CURRENT_A + 2.0f;
-    applied                    = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M1, 600, &adc, 1000U, &limited);
+    applied                    = MotorCurrentLimiter_ApplyMotorLimit(MOTOR_ID_M1, 600, &adc, &params, 1000U, &limited);
     MotorCurrentLimiter_GetState(&state);
 
     require_int(applied == 0, "disabled motor output is forced to zero by guard");

@@ -1,7 +1,7 @@
 #include "motor_current_limiter.h"
 
 #include "motor_hardware_layout.h"
-#include "parameter_management_service.h"
+#include "parameter_management_types.h"
 
 static motor_current_limiter_state_t motor_current_limiter_state;
 static uint8_t                       motor_current_limiter_over_limit_debounce[MOTOR_ID_COUNT];
@@ -48,22 +48,22 @@ void MotorCurrentLimiter_Init(const motion_control_config_t *config)
 int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       motor,
                                             int16_t                          requested_permille,
                                             const power_management_status_t *power_status,
+                                            const param_model_t             *params,
                                             uint32_t                         now_ms,
                                             uint8_t                         *limited)
 {
-    uint8_t       control_valid;
-    uint8_t       over_soft_limit  = 0U;
-    uint8_t       over_fault_limit = 0U;
-    int16_t       applied;
-    param_model_t params;
-    uint8_t       debounce_count;
+    uint8_t control_valid;
+    uint8_t over_soft_limit  = 0U;
+    uint8_t over_fault_limit = 0U;
+    int16_t applied;
+    uint8_t debounce_count;
 
     (void)now_ms;
     if (limited != 0)
     {
         *limited = 0U;
     }
-    if ((uint32_t)motor >= MOTOR_ID_COUNT)
+    if ((uint32_t)motor >= MOTOR_ID_COUNT || params == 0)
     {
         return 0;
     }
@@ -81,9 +81,8 @@ int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       mot
         return 0;
     }
 
-    applied = requested_permille;
-    (void)ParameterManagement_GetSnapshot(&params);
-    debounce_count = (uint8_t)((params.current_fault_debounce_ms + 9U) / 10U);
+    applied        = requested_permille;
+    debounce_count = (uint8_t)((params->current_fault_debounce_ms + 9U) / 10U);
     if (debounce_count == 0U)
     {
         debounce_count = 1U;
@@ -95,12 +94,12 @@ int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       mot
         return applied;
     }
 
-    if (power_status->current_a[motor] > params.current_observe_a[motor])
+    if (power_status->current_a[motor] > params->current_observe_a[motor])
     {
         motor_current_limiter_state.observe_over_limit_count[motor]++;
         motor_current_limiter_state.observe_over_limit[motor] = 1U;
     }
-    if (power_status->current_a[motor] > params.current_fault_a[motor])
+    if (power_status->current_a[motor] > params->current_fault_a[motor])
     {
         over_fault_limit = 1U;
         if (motor_current_limiter_over_limit_debounce[motor] < debounce_count)
@@ -113,8 +112,8 @@ int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       mot
         motor_current_limiter_over_limit_debounce[motor] = 0U;
     }
 
-    if (params.current_soft_limit_a[motor] > 0.0f && power_status->current_a[motor] > params.current_soft_limit_a[motor]
-        && requested_permille != 0)
+    if (params->current_soft_limit_a[motor] > 0.0f
+        && power_status->current_a[motor] > params->current_soft_limit_a[motor] && requested_permille != 0)
     {
         over_soft_limit                                           = 1U;
         motor_current_limiter_state.soft_limit_would_apply[motor] = 1U;
@@ -130,7 +129,7 @@ int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       mot
     {
         applied = MotorCurrentLimiter_ClampPermille(
             (int32_t)((float)requested_permille
-                      * (params.current_soft_limit_a[motor] / power_status->current_a[motor])));
+                      * (params->current_soft_limit_a[motor] / power_status->current_a[motor])));
         motor_current_limiter_state.soft_limit_applied[motor] = 1U;
         if (limited != 0)
         {

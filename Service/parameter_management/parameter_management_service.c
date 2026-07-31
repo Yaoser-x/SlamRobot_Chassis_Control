@@ -11,9 +11,12 @@ static param_model_t     factory_params;
 static uint8_t           current_params_initialized;
 static uint8_t           factory_params_initialized;
 static uint32_t          current_params_generation;
-static uint32_t          current_params_identity_crc;
+static uint32_t          effective_parameter_crc32;
+static uint32_t          persisted_parameter_crc32;
+static uint32_t          parameter_diagnostic_flags;
 static imu_calibration_t current_imu_calibration;
 static uint8_t           current_flash_loaded;
+static uint8_t           persisted_model_valid;
 static uint8_t           persist_current_zero;
 
 typedef struct
@@ -29,10 +32,39 @@ static uint8_t ParameterManagement_Finite(float value)
     return (value > -3.4e38f && value < 3.4e38f) ? 1U : 0U;
 }
 
+static uint32_t ParameterManagement_Normalize(param_model_t *params)
+{
+    uint32_t flags = 0UL;
+
+    for (uint8_t index = 0U; index < PARAM_MODEL_MOTOR_COUNT; ++index)
+    {
+        uint32_t bits;
+
+        memcpy(&bits, &params->pid_kd[index], sizeof(bits));
+        if (bits != 0UL)
+        {
+            flags |= PARAM_NORMALIZED_PID_KD;
+        }
+        params->pid_kd[index] = 0.0f;
+    }
+    return flags;
+}
+
+static void ParameterManagement_UpdateMismatchFlag(void)
+{
+    parameter_diagnostic_flags &= ~PARAM_PERSISTED_EFFECTIVE_MISMATCH;
+    if (persisted_model_valid != 0U && persisted_parameter_crc32 != effective_parameter_crc32)
+    {
+        parameter_diagnostic_flags |= PARAM_PERSISTED_EFFECTIVE_MISMATCH;
+    }
+}
+
 uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
 {
-    uint32_t identity_crc;
-    uint32_t primask;
+    param_model_t effective;
+    uint32_t      diagnostic_flags;
+    uint32_t      identity_crc;
+    uint32_t      primask;
 
     if (config == 0 || config->load_flash_on_boot > 1U || config->persist_imu_calibration > 1U
         || config->persist_current_zero > 1U || ParameterManagement_Validate(&config->factory_defaults) == 0U)
@@ -40,17 +72,22 @@ uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
         return 0U;
     }
 
-    identity_crc               = ParameterIdentityCrc_Calculate(&config->factory_defaults);
+    effective                  = config->factory_defaults;
+    diagnostic_flags           = ParameterManagement_Normalize(&effective);
+    identity_crc               = ParameterIdentityCrc_Calculate(&effective);
     primask                    = PlatformCritical_Enter();
-    factory_params             = config->factory_defaults;
-    current_params             = config->factory_defaults;
+    factory_params             = effective;
+    current_params             = effective;
     current_imu_calibration    = (imu_calibration_t){0};
     current_flash_loaded       = 0U;
+    persisted_model_valid      = 0U;
+    persisted_parameter_crc32  = 0UL;
     persist_current_zero       = config->persist_current_zero;
     factory_params_initialized = 1U;
     current_params_initialized = 1U;
     current_params_generation++;
-    current_params_identity_crc = identity_crc;
+    effective_parameter_crc32  = identity_crc;
+    parameter_diagnostic_flags = diagnostic_flags;
     PlatformCritical_Exit(primask);
     return 1U;
 }
@@ -71,6 +108,7 @@ void ParameterManagement_Defaults(param_model_t *params)
 void ParameterManagement_ResetToDefaults(void)
 {
     param_model_t defaults;
+    uint32_t      diagnostic_flags;
     uint32_t      identity_crc;
     uint32_t      primask;
 
@@ -79,19 +117,22 @@ void ParameterManagement_ResetToDefaults(void)
     {
         return;
     }
+    diagnostic_flags           = ParameterManagement_Normalize(&defaults);
     identity_crc               = ParameterIdentityCrc_Calculate(&defaults);
     primask                    = PlatformCritical_Enter();
     current_params             = defaults;
     current_params_initialized = 1U;
     current_params_generation++;
-    current_params_identity_crc = identity_crc;
+    effective_parameter_crc32 = identity_crc;
+    parameter_diagnostic_flags |= diagnostic_flags;
+    ParameterManagement_UpdateMismatchFlag();
     PlatformCritical_Exit(primask);
 }
 
 uint32_t ParameterManagement_GetIdentityCrc32(void)
 {
     uint32_t primask = PlatformCritical_Enter();
-    uint32_t crc     = (current_params_initialized != 0U) ? current_params_identity_crc : 0UL;
+    uint32_t crc     = (current_params_initialized != 0U) ? effective_parameter_crc32 : 0UL;
 
     PlatformCritical_Exit(primask);
     return crc;
@@ -121,12 +162,16 @@ uint32_t ParameterManagement_GetStatus(parameter_management_status_t *status)
     {
         return 0UL;
     }
-    primask                 = PlatformCritical_Enter();
-    status->params          = current_params;
-    status->generation      = current_params_generation;
-    status->initialized     = current_params_initialized;
-    status->flash_loaded    = current_flash_loaded;
-    status->imu_calibration = current_imu_calibration;
+    primask                           = PlatformCritical_Enter();
+    status->params                    = current_params;
+    status->generation                = current_params_generation;
+    status->persisted_parameter_crc32 = persisted_parameter_crc32;
+    status->effective_parameter_crc32 = effective_parameter_crc32;
+    status->diagnostic_flags          = parameter_diagnostic_flags;
+    status->initialized               = current_params_initialized;
+    status->flash_loaded              = current_flash_loaded;
+    status->persisted_model_valid     = persisted_model_valid;
+    status->imu_calibration           = current_imu_calibration;
     PlatformCritical_Exit(primask);
     return status->generation;
 }
@@ -168,20 +213,47 @@ void ParameterManagement_SetCurrentZeroPersistence(uint8_t enabled)
 
 void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle)
 {
-    uint32_t identity_crc;
-    uint32_t primask;
+    param_model_t effective;
+    uint32_t      diagnostic_flags;
+    uint32_t      effective_crc;
+    uint32_t      persisted_crc;
+    uint32_t      primask;
 
     if (bundle == 0 || ParameterManagement_Validate(&bundle->params) == 0U)
     {
         return;
     }
-    identity_crc            = ParameterIdentityCrc_Calculate(&bundle->params);
-    primask                 = PlatformCritical_Enter();
-    current_params          = bundle->params;
-    current_imu_calibration = bundle->imu_calibration;
-    current_flash_loaded    = 1U;
+    persisted_crc             = ParameterIdentityCrc_Calculate(&bundle->params);
+    effective                 = bundle->params;
+    diagnostic_flags          = ParameterManagement_Normalize(&effective);
+    effective_crc             = ParameterIdentityCrc_Calculate(&effective);
+    primask                   = PlatformCritical_Enter();
+    current_params            = effective;
+    current_imu_calibration   = bundle->imu_calibration;
+    current_flash_loaded      = 1U;
+    persisted_model_valid     = 1U;
+    persisted_parameter_crc32 = persisted_crc;
     current_params_generation++;
-    current_params_identity_crc = identity_crc;
+    effective_parameter_crc32 = effective_crc;
+    parameter_diagnostic_flags |= diagnostic_flags;
+    ParameterManagement_UpdateMismatchFlag();
+    PlatformCritical_Exit(primask);
+}
+
+void ParameterManagementInternal_CommitPersisted(const param_model_t *params)
+{
+    uint32_t persisted_crc;
+    uint32_t primask;
+
+    if (params == 0 || ParameterManagement_Validate(params) == 0U)
+    {
+        return;
+    }
+    persisted_crc             = ParameterIdentityCrc_Calculate(params);
+    primask                   = PlatformCritical_Enter();
+    persisted_parameter_crc32 = persisted_crc;
+    persisted_model_valid     = 1U;
+    ParameterManagement_UpdateMismatchFlag();
     PlatformCritical_Exit(primask);
 }
 
@@ -303,20 +375,26 @@ uint8_t ParameterManagement_Validate(const param_model_t *params)
 
 uint8_t ParameterManagement_Set(const param_model_t *params)
 {
-    uint32_t identity_crc;
-    uint32_t primask;
+    param_model_t effective;
+    uint32_t      diagnostic_flags;
+    uint32_t      identity_crc;
+    uint32_t      primask;
 
     if (ParameterManagement_Validate(params) == 0U)
     {
         return 0U;
     }
 
-    identity_crc               = ParameterIdentityCrc_Calculate(params);
+    effective                  = *params;
+    diagnostic_flags           = ParameterManagement_Normalize(&effective);
+    identity_crc               = ParameterIdentityCrc_Calculate(&effective);
     primask                    = PlatformCritical_Enter();
-    current_params             = *params;
+    current_params             = effective;
     current_params_initialized = 1U;
     current_params_generation++;
-    current_params_identity_crc = identity_crc;
+    effective_parameter_crc32 = identity_crc;
+    parameter_diagnostic_flags |= diagnostic_flags;
+    ParameterManagement_UpdateMismatchFlag();
     PlatformCritical_Exit(primask);
     return 1U;
 }

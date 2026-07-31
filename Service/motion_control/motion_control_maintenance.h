@@ -4,23 +4,13 @@
 #include <stdint.h>
 
 #include "motion_control_config.h"
+#include "parameter_management_types.h"
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-    typedef enum
-    {
-        MOTION_CONTROL_MAINTENANCE_OK = 0,
-        MOTION_CONTROL_MAINTENANCE_BUSY,
-        MOTION_CONTROL_MAINTENANCE_NOT_STATIONARY
-    } motion_control_maintenance_result_t;
-
-    /** Acquire maintenance ownership after stopping and verifying the drivetrain. */
-    motion_control_maintenance_result_t MotionControl_BeginMaintenance(void);
-    /** Release maintenance ownership acquired through Motion Control. */
-    void MotionControl_EndMaintenance(void);
     /** Revoke commands, reset controllers, and stop all motion outputs. */
     void MotionControl_EmergencyStop(void);
     /** Cancel every active debug motor-test lease. */
@@ -35,7 +25,11 @@ extern "C"
     /** Apply or refresh the gated raw input test for motor identifier. */
     void MotionControl_RawMotorInputTest(uint8_t motor, int16_t forward_permille, int16_t reverse_permille);
     /** Resolve differential side targets using the active runtime parameter model. */
-    void MotionControl_ResolveSideTargets(float linear_x, float angular_z, float *left_mps, float *right_mps);
+    void MotionControl_ResolveSideTargetsWithParameters(float                linear_x,
+                                                        float                angular_z,
+                                                        const param_model_t *params,
+                                                        float               *left_mps,
+                                                        float               *right_mps);
 
 #ifdef __cplusplus
 }

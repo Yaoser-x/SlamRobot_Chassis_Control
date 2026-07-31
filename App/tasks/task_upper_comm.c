@@ -6,6 +6,7 @@
 #include "platform_time.h"
 #include "system_monitoring_service.h"
 #include "host_communication_service.h"
+#include "state_estimation_service.h"
 
 void Task_RpiComm(void *argument)
 {
@@ -17,6 +18,14 @@ void Task_RpiComm(void *argument)
 
         (void)SystemPublishSnapshot_Get(&publish_model);
         HostCommunication_Update(&publish_model);
+        {
+            uint32_t anomaly_generation;
+
+            if (HostCommunication_TakeAnomalyDelivery(&anomaly_generation) != 0U)
+            {
+                (void)StateEstimation_AcknowledgeWheelAnomalyDelivery(anomaly_generation);
+            }
+        }
         for (;;)
         {
             communication_operation_request_t request;

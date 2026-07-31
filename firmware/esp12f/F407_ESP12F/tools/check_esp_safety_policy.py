@@ -125,7 +125,7 @@ def main() -> int:
     bridge_disable = section(bridge, "void Esp12fFlashBridge_Disable", "uint8_t Esp12fFlashBridge_IsActive")
     bridge_update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_GetState")
     bridge_rx_failure = section(bridge_enable, "if (UartBridgeTransport_Start", "return 1U;")
-    begin_index = bridge_enable.find("MotionControl_BeginMaintenance()")
+    begin_index = bridge_enable.find("AppMotionMaintenance_Begin()")
     active_index = bridge_enable.find("UartBridgeTransport_Start(")
     failure_end_index = bridge_rx_failure.find("Esp12fFlashBridge_ReleaseMaintenance();")
     failure_return_index = bridge_rx_failure.find("return 0U;")
@@ -133,8 +133,9 @@ def main() -> int:
     disable_end_index = bridge_disable.rfind("Esp12fFlashBridge_ReleaseMaintenance();")
     idle_condition_index = bridge_update.find("idle_ms >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS")
     idle_disable_index = bridge_update.find("Esp12fFlashBridge_Disable();", idle_condition_index)
-    if ('#include "motion_control_service.h"' not in bridge or
+    if ('#include "motion_maintenance_orchestrator.h"' not in bridge or
             "bridge_maintenance_lock_held" not in bridge or
+            "AppMotionMaintenance_End();" not in bridge or
             begin_index < 0 or active_index < 0 or begin_index > active_index or
             failure_end_index < 0 or failure_return_index < 0 or
             failure_end_index > failure_return_index or

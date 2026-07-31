@@ -16,5 +16,8 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
 void WheelEstimationPipeline_AggregateSideValidity(const uint8_t speed_valid[STATE_ESTIMATION_MOTOR_COUNT],
                                                    uint8_t      *left_valid,
                                                    uint8_t      *right_valid);
+/** Clear a delivered anomaly latch only when the Host completed the same generation. */
+uint8_t WheelEstimationPipeline_AcknowledgeAnomalyDelivery(state_estimation_wheel_status_t *status,
+                                                           uint32_t                         generation);
 
 #endif /* WHEEL_ESTIMATION_PIPELINE_H */

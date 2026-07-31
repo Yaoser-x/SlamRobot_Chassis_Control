@@ -1,5 +1,6 @@
 #include "app_init.h"
 #include "chassis_runtime_coordinator.h"
+#include "control_mode_coordinator.h"
 
 #include "system_publish_snapshot_service.h"
 #include "app_hardware_init.h"
@@ -98,6 +99,10 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
     AppHardware_InitLineSensor(params.line_threshold_raw, params.line_active_low);
     LineCalibrationOrchestrator_Init(0U);
     if (LineFollowing_Init(&config->line) == 0U || Teleoperation_Init(&config->teleoperation) == 0U)
+    {
+        return 0U;
+    }
+    if (ControlModeCoordinator_Init(&config->control_mode) == 0U)
     {
         return 0U;
     }

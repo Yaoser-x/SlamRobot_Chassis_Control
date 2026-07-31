@@ -59,8 +59,13 @@ static void test_default_matches_beta4_constants(void)
     require_int(config->teleoperation.angular_max_rps == PS2_ANGULAR_MAX_RPS, "PS2 angular max");
     require_int(config->teleoperation.idle_release_ms == PS2_IDLE_RELEASE_MS, "PS2 idle release");
     require_int(config->teleoperation.heading_imu_fresh_ms == PS2_HEADING_IMU_FRESH_MS, "PS2 IMU freshness");
+    require_int(config->control_mode.takeover_enter_threshold == 0.15f, "PS2 takeover enter threshold");
+    require_int(config->control_mode.takeover_exit_threshold == 0.10f, "PS2 takeover exit threshold");
+    require_int(config->control_mode.takeover_confirm_samples == 3U, "PS2 takeover debounce samples");
+    require_int(config->control_mode.manual_neutral_restore_ms == 2000U, "PS2 neutral restore duration");
     require_int(config->line.angular_max_rps == LINE_ANGULAR_MAX_RPS, "line angular limit");
     require_int(config->line.sensor_timeout_ms == LINE_SENSOR_TIMEOUT_MS, "line freshness");
+    require_int(config->command.remote_max_lifetime_ms == 2000U, "remote command hard lifetime");
     require_int(config->communication.host_status_period_ms == UPPER_UART_STATUS_PERIOD_MS, "host status period");
     require_int(config->communication.host_imu_status_period_ms == UPPER_IMU_STATUS_PERIOD_MS, "host IMU period");
     require_int(config->communication.host_diagnostic_period_ms == UPPER_DIAGNOSTIC_PERIOD_MS,
@@ -107,6 +112,10 @@ static void test_validation_accepts_legal_config_and_rejects_illegal(void)
     copy.command.host_timeout_ms = 500U;
     require_int(RobotConfig_Validate(&copy) == 1U, "legal command timeout within range is accepted");
 
+    copy                                = *RobotConfig_GetDefault();
+    copy.command.remote_max_lifetime_ms = copy.command.host_timeout_ms - 1U;
+    require_int(RobotConfig_Validate(&copy) == 0U, "remote maximum lifetime cannot be shorter than source lease");
+
     /* Illegal: zero max linear speed is rejected. */
     copy                       = *RobotConfig_GetDefault();
     copy.motion.max_linear_mps = 0.0f;
@@ -138,6 +147,10 @@ static void test_validation_accepts_legal_config_and_rejects_illegal(void)
     copy                             = *RobotConfig_GetDefault();
     copy.teleoperation.axis_deadzone = 127;
     require_int(RobotConfig_Validate(&copy) == 0U, "axis deadzone == 127 is rejected by Service");
+
+    copy                                      = *RobotConfig_GetDefault();
+    copy.control_mode.takeover_exit_threshold = copy.control_mode.takeover_enter_threshold;
+    require_int(RobotConfig_Validate(&copy) == 0U, "takeover hysteresis requires distinct enter and exit thresholds");
 
     copy                            = *RobotConfig_GetDefault();
     copy.safety.battery_low_clear_v = copy.safety.battery_low_warn_v;

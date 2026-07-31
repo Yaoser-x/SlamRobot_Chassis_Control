@@ -21,6 +21,8 @@ extern "C"
     /** Forward the IMU data-ready event from ISR context. */
     void     StateEstimation_OnImuDataReadyFromIsr(void);
     uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status);
+    /** Acknowledge physical Host delivery of a STATUS carrying an anomaly generation. */
+    uint8_t  StateEstimation_AcknowledgeWheelAnomalyDelivery(uint32_t generation);
     uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *status);
     uint32_t StateEstimation_GetStatus(uint32_t now_ms, state_estimation_status_t *status);
 

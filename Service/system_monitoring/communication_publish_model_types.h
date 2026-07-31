@@ -53,11 +53,12 @@ extern "C"
 
     typedef struct
     {
-        int32_t count[COMMUNICATION_PUBLISH_MOTOR_COUNT];
-        float   speed_mps[COMMUNICATION_PUBLISH_MOTOR_COUNT];
-        uint8_t speed_valid[COMMUNICATION_PUBLISH_MOTOR_COUNT];
-        uint8_t speed_valid_all;
-        uint8_t anomaly_mask;
+        int32_t  count[COMMUNICATION_PUBLISH_MOTOR_COUNT];
+        float    speed_mps[COMMUNICATION_PUBLISH_MOTOR_COUNT];
+        uint8_t  speed_valid[COMMUNICATION_PUBLISH_MOTOR_COUNT];
+        uint8_t  speed_valid_all;
+        uint8_t  anomaly_mask;
+        uint32_t anomaly_generation;
     } communication_publish_encoder_t;
 
     typedef struct

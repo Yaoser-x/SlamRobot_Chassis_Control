@@ -78,30 +78,75 @@ static float Ps2ControlService_ClampFloat(float value, float limit)
     return value;
 }
 
+static float Ps2ControlService_AbsFloat(float value)
+{
+    return (value < 0.0f) ? -value : value;
+}
+
+static float Ps2ControlService_MaxStickMagnitude(const ps2_controller_driver_sample_t *sample)
+{
+    float maximum = 0.0f;
+    float axes[4];
+
+    if (sample == 0)
+    {
+        return 0.0f;
+    }
+    axes[0] = Ps2ControlService_AbsFloat(Ps2ControlService_NormalizeAxis(sample->left_x));
+    axes[1] = Ps2ControlService_AbsFloat(Ps2ControlService_NormalizeAxis(sample->left_y));
+    axes[2] = Ps2ControlService_AbsFloat(Ps2ControlService_NormalizeAxis(sample->right_x));
+    axes[3] = Ps2ControlService_AbsFloat(Ps2ControlService_NormalizeAxis(sample->right_y));
+    for (uint8_t index = 0U; index < 4U; ++index)
+    {
+        if (axes[index] > maximum)
+        {
+            maximum = axes[index];
+        }
+    }
+    return maximum;
+}
+
 static void Ps2ControlService_SubmitCommand(float linear_x, float angular_z, uint32_t input_generation)
 {
-    command_velocity_t cmd = {
-        .linear_x     = linear_x,
-        .angular_z    = angular_z,
-        .enable       = 1U,
-        .source       = COMMAND_SOURCE_PS2,
-        .timestamp_ms = PlatformTime_TaskNowMs(),
+    command_intent_t intent = {
+        .kind                = (linear_x == 0.0f && angular_z == 0.0f) ? COMMAND_INTENT_NEUTRAL : COMMAND_INTENT_ACTIVE,
+        .source              = COMMAND_SOURCE_PS2,
+        .linear_x            = linear_x,
+        .angular_z           = angular_z,
+        .sample_time_ms      = PlatformTime_TaskNowMs(),
+        .producer_generation = ps2_state.generation,
+        .expected_revoke_generation = input_generation,
     };
 
-    (void)CommandManagement_SetForGeneration(&cmd, input_generation);
+    (void)CommandManagement_ApplyIntent(&intent);
 }
 
 static void Ps2ControlService_SubmitHeadingCommand(float angular_z)
 {
-    command_velocity_t cmd = {
-        .linear_x     = 0.0f,
-        .angular_z    = angular_z,
-        .enable       = 1U,
-        .source       = COMMAND_SOURCE_PS2,
-        .timestamp_ms = PlatformTime_TaskNowMs(),
+    command_intent_t intent = {
+        .kind                       = COMMAND_INTENT_ACTIVE,
+        .source                     = COMMAND_SOURCE_PS2,
+        .linear_x                   = 0.0f,
+        .angular_z                  = angular_z,
+        .sample_time_ms             = PlatformTime_TaskNowMs(),
+        .producer_generation        = ps2_state.generation,
+        .expected_revoke_generation = heading_motion_generation,
     };
 
-    (void)CommandManagement_SetForGeneration(&cmd, heading_motion_generation);
+    (void)CommandManagement_ApplyIntent(&intent);
+}
+
+static void Ps2ControlService_ApplySlotIntent(command_intent_kind_t kind, uint32_t input_generation)
+{
+    command_intent_t intent = {
+        .kind                       = kind,
+        .source                     = COMMAND_SOURCE_PS2,
+        .sample_time_ms             = PlatformTime_TaskNowMs(),
+        .producer_generation        = ps2_state.generation,
+        .expected_revoke_generation = input_generation,
+    };
+
+    (void)CommandManagement_ApplyIntent(&intent);
 }
 
 static uint8_t Ps2ControlService_ManualInputActive(float linear_x, float angular_z)
@@ -299,6 +344,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     {
         Ps2ControlService_CopyState(&next_state, &ps2_state);
         next_state.line_tracking_enabled = line_tracking_enabled;
+        next_state.sample_valid          = 0U;
         next_state.rx_fail_count++;
         if (consecutive_read_failures < teleoperation_config.offline_fail_limit)
         {
@@ -330,7 +376,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
         next_state.generation++;
         Ps2ControlService_CopyState(&ps2_state, &next_state);
         ps2_idle_start_ms = 0U;
-        CommandManagement_ClearSource(COMMAND_SOURCE_PS2);
+        Ps2ControlService_ApplySlotIntent(COMMAND_INTENT_RELEASE, input_generation);
         return;
     }
     consecutive_read_failures = 0U;
@@ -387,7 +433,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
         }
         if (ps2_neutral_rearm_count == 3U)
         {
-            (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_PS2);
+            Ps2ControlService_ApplySlotIntent(COMMAND_INTENT_REARM, input_generation);
             ps2_neutral_rearm_count = 4U;
         }
     }
@@ -463,26 +509,32 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
 
     Ps2ControlService_CopyState(&next_state, &ps2_state);
     next_state.rx_ok_count++;
-    next_state.online                  = 1U;
-    next_state.analog_mode             = Ps2ControllerDriver_IsAnalogMode(sample.mode);
-    next_state.drive_enabled           = command_active;
-    next_state.btn1                    = sample.btn1;
-    next_state.btn2                    = sample.btn2;
-    next_state.left_x                  = sample.left_x;
-    next_state.left_y                  = sample.left_y;
-    next_state.right_x                 = sample.right_x;
-    next_state.right_y                 = sample.right_y;
-    next_state.macro_active            = heading_control.active;
-    next_state.macro_button            = heading_button;
-    next_state.heading_active          = heading_control.active;
-    next_state.heading_end_reason      = (uint8_t)heading_control.end_reason;
-    next_state.pressed_btn2            = pressed_btn2;
+    next_state.online             = 1U;
+    next_state.analog_mode        = Ps2ControllerDriver_IsAnalogMode(sample.mode);
+    next_state.drive_enabled      = command_active;
+    next_state.btn1               = sample.btn1;
+    next_state.btn2               = sample.btn2;
+    next_state.left_x             = sample.left_x;
+    next_state.left_y             = sample.left_y;
+    next_state.right_x            = sample.right_x;
+    next_state.right_y            = sample.right_y;
+    next_state.macro_active       = heading_control.active;
+    next_state.macro_button       = heading_button;
+    next_state.heading_active     = heading_control.active;
+    next_state.heading_end_reason = (uint8_t)heading_control.end_reason;
+    next_state.pressed_btn2       = pressed_btn2;
+    next_state.sample_valid       = 1U;
+    next_state.dpad_active =
+        ((sample.btn1 & (PS2_DPAD_UP_MASK | PS2_DPAD_RIGHT_MASK | PS2_DPAD_DOWN_MASK | PS2_DPAD_LEFT_MASK)) != 0U) ? 1U
+                                                                                                                   : 0U;
+    next_state.macro_edge              = (macro_pressed != 0U) ? 1U : 0U;
     next_state.heading_gate_flags      = Ps2ControlService_ImuGateFlags(&imu_state, imu_now_ms);
     next_state.imu_age_ms              = (uint32_t)(imu_now_ms - imu_state.last_update_ms);
     next_state.heading_target_deg      = heading_control.target_delta_deg;
     next_state.heading_accumulated_deg = heading_control.accumulated_delta_deg;
     next_state.linear_x                = linear_x;
     next_state.angular_z               = angular_z;
+    next_state.stick_max_normalized    = Ps2ControlService_MaxStickMagnitude(&sample);
     next_state.line_tracking_enabled   = line_tracking_enabled;
     next_state.generation++;
     Ps2ControlService_CopyState(&ps2_state, &next_state);
@@ -515,10 +567,19 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     }
     if ((uint32_t)(now_ms - ps2_idle_start_ms) >= teleoperation_config.idle_release_ms)
     {
-        CommandManagement_ClearSource(COMMAND_SOURCE_PS2);
+        Ps2ControlService_ApplySlotIntent(COMMAND_INTENT_RELEASE, input_generation);
         return;
     }
     Ps2ControlService_SubmitCommand(0.0f, 0.0f, input_generation);
+}
+
+void Teleoperation_OnManualModeEntered(uint32_t motion_revoke_generation)
+{
+    if (heading_control.active != 0U)
+    {
+        heading_motion_generation = motion_revoke_generation;
+    }
+    ps2_neutral_rearm_count = 4U;
 }
 
 uint32_t Teleoperation_GetStatus(teleoperation_status_t *state)

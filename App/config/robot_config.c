@@ -51,17 +51,20 @@ static const robot_config_t robot_default_config = {
             .overcurrent_startup_rearm_ms = 200U,
             .battery_low_monitor_enabled  = 1U,
             .overcurrent_fault_enabled    = 0U,
+            .remote_velocity_requires_imu = 0U,
+            .motion_permit_valid_ms       = 40U,
             .current_observe_a            = {1.5f, 1.5f, 1.5f, 1.5f},
             .current_fault_a              = {2.5f, 2.5f, 2.5f, 2.5f},
             .current_fault_debounce_ms    = 100U,
         },
     .command =
         {
-            .host_timeout_ms   = 200U,
-            .ps2_timeout_ms    = 500U,
-            .esp12f_timeout_ms = 500U,
-            .line_timeout_ms   = 50U,
-            .debug_timeout_ms  = 2000U,
+            .host_timeout_ms        = 200U,
+            .ps2_timeout_ms         = 500U,
+            .esp12f_timeout_ms      = 500U,
+            .line_timeout_ms        = 50U,
+            .debug_timeout_ms       = 2000U,
+            .remote_max_lifetime_ms = 2000U,
         },
     .teleoperation =
         {
@@ -84,6 +87,13 @@ static const robot_config_t robot_default_config = {
             .line_toggle_mask           = 0x10U,
             .linecal_floor_mask         = 0x80U,
             .linecal_line_mask          = 0x20U,
+        },
+    .control_mode =
+        {
+            .takeover_enter_threshold  = 0.15f,
+            .takeover_exit_threshold   = 0.10f,
+            .manual_neutral_restore_ms = 2000U,
+            .takeover_confirm_samples  = 3U,
         },
     .line =
         {
@@ -112,7 +122,7 @@ static const robot_config_t robot_default_config = {
                     .track_width_m                 = 0.176f,
                     .pid_kp                        = {50.0f, 1000.0f, 1200.0f, 100.0f},
                     .pid_ki                        = {8.0f, 800.0f, 1000.0f, 0.0f},
-                    .pid_kd                        = {0.05f, 0.15f, 0.18f, 0.0f},
+                    .pid_kd                        = {0.0f, 0.0f, 0.0f, 0.0f},
                     .pid_integral_limit            = 60.0f,
                     .motor_dir                     = {-1, -1, 1, 1},
                     .encoder_dir                   = {1, 1, -1, -1},
@@ -400,6 +410,15 @@ static uint8_t RobotConfig_SafetyValid(const safety_management_config_t *config)
     {
         return 0U;
     }
+    if (config->remote_velocity_requires_imu > 1U)
+    {
+        return 0U;
+    }
+    if (config->motion_permit_valid_ms < config->update_period_ms
+        || config->motion_permit_valid_ms > config->update_period_ms * 2UL)
+    {
+        return 0U;
+    }
     if (config->current_fault_debounce_ms == 0U || config->current_fault_debounce_ms > 5000U)
     {
         return 0U;
@@ -431,7 +450,8 @@ uint8_t RobotConfig_Validate(const robot_config_t *config)
        Init() reuses the same ValidateConfig() entry point. */
     if (RobotConfig_MotionValid(&config->motion) == 0U || MotionControl_ValidateConfig(&config->motion) == 0U
         || RobotConfig_TeleoperationValid(&config->teleoperation) == 0U
-        || Teleoperation_ValidateConfig(&config->teleoperation) == 0U || RobotConfig_TasksValid(config) == 0U
+        || Teleoperation_ValidateConfig(&config->teleoperation) == 0U
+        || ControlModeConfig_Validate(&config->control_mode) == 0U || RobotConfig_TasksValid(config) == 0U
         || RobotConfig_SafetyValid(&config->safety) == 0U || SafetyManagement_ValidateConfig(&config->safety) == 0U)
     {
         return 0U;
@@ -475,6 +495,12 @@ uint8_t RobotConfig_Validate(const robot_config_t *config)
         return 0U;
     }
     if (config->command.debug_timeout_ms == 0UL || config->command.debug_timeout_ms > 30000UL)
+    {
+        return 0U;
+    }
+    if (config->command.remote_max_lifetime_ms < config->command.host_timeout_ms
+        || config->command.remote_max_lifetime_ms < config->command.esp12f_timeout_ms
+        || config->command.remote_max_lifetime_ms > 60000UL)
     {
         return 0U;
     }

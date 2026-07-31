@@ -16,7 +16,15 @@ Flash schema 4、340 字节 bundle、364 字节 image、双槽/CRC 和 schema 1�
 
 Parameter、State、Power、System 基础能力已消费 App 注入配置：Parameter 接收完整 factory defaults 和三项持久化策略；State 接收 wheel/IMU 独立新鲜度；Power 接收电流零点静止速度；System 接收 App 根据既有任务周期计算出的九项超时毫秒值。Parameter factory defaults 允许在有效范围内形成产品变体，其余尚未迁移能力仍只接受与 Beta4 逐字段等价的值。
 
+rc2 新增的安全与模式策略仍属于非持久化产品配置：`remote_velocity_requires_imu=0`、
+`motion_permit_valid_ms=40`、PS2 takeover enter/exit 为 `0.15/0.10`、连续 3 个有效样本、
+neutral restore 为 2000 ms。启动时只接受合法范围，运行期没有 Debug 修改入口，也不占用 schema 4 reserved 字段。
+
 启动参数合并顺序已经由 App 明确执行：先用注入 factory defaults 初始化唯一 RAM owner，再按 `load_flash_on_boot` 加载兼容 Flash bundle，之后运行期整包 RAM 更新只递增 generation，不会隐式保存。`persist_imu_calibration` 和 `persist_current_zero` 分别控制首次 IMU 自动标定保存以及保存 bundle 时是否携带电流零点；Beta5 默认值均为 1，与 Beta2 行为一致。
+
+旧 schema 4 中非零 `pid_kd` 通过完整性校验后，只在 active model 中规范化为四轮零值，不自动写 Flash。
+HELLO 的 `parameter_crc32` 是 effective model CRC；诊断另报 persisted CRC 和 mismatch 标志。
+只有显式保存成功后 persisted/effective CRC 才重新一致。
 
 ## 调度配置
 

@@ -57,8 +57,13 @@ set(F407_APP_SOURCES
     App/app_init.c
     App/composition/firmware_identity_provider.c
     App/config/robot_config.c
+    App/config/control_mode_config.c
     App/composition/system_publish_snapshot_collector.c
+    App/composition/control_mode_coordinator.c
     App/composition/chassis_runtime_coordinator.c
+    App/composition/safety_workflow_coordinator.c
+    App/composition/motion_maintenance_orchestrator.c
+    App/composition/watchdog_completion_gate.c
     App/composition/operator_action_router.c
     App/composition/line_calibration_orchestrator.c
     App/composition/imu_calibration_orchestrator.c
@@ -78,6 +83,7 @@ set(F407_APP_SOURCES
 set(F407_APP_ADAPTER_SOURCES
     App/app_isr.c
     App/adapters/app_hardware_init.c
+    App/adapters/motor_driver_snapshot_adapter.c
     App/adapters/status_led_adapter.c
     App/debug/debug_maintenance_policy.c
     App/debug/debug_log_policy.c
@@ -125,13 +131,13 @@ set(F407_PLATFORM_SOURCES
 
 set(F407_SERVICE_SOURCES
     Service/motion_control/motion_control_service.c
-    Service/motion_control/internal/motion_maintenance_service.c
     Service/motion_control/internal/motion_parameter_sync.c
     Service/motion_control/internal/wheel_target_planner.c
     Service/motion_control/internal/wheel_speed_control_loop.c
     Service/motion_control/internal/wheel_feedback_monitor.c
     Service/motion_control/internal/motor_output_coordinator.c
     Service/motion_control/internal/motion_test_mode.c
+    Service/motion_control/internal/safety_motion_permit_guard.c
     Service/motion_control/internal/motion_status_builder.c
     Service/motion_control/internal/motor_current_limiter.c
     Service/command_management/command_management_service.c
@@ -140,6 +146,7 @@ set(F407_SERVICE_SOURCES
     Service/teleoperation/teleoperation_service.c
     Service/safety_management/internal/battery_voltage_monitor.c
     Service/safety_management/internal/fault_stop_policy.c
+    Service/safety_management/internal/safety_capability_policy.c
     Service/safety_management/safety_management_service.c
     Service/safety_management/internal/power_on_self_test.c
     Service/parameter_management/parameter_management_service.c

@@ -24,7 +24,10 @@ static void UpperProtocol_WriteU16(uint8_t *out, uint16_t value)
 
 static void UpperProtocol_WriteI32(uint8_t *out, int32_t value)
 {
-    UpperProtocol_WriteU32(out, (uint32_t)value);
+    uint32_t bits;
+
+    memcpy(&bits, &value, sizeof(bits));
+    UpperProtocol_WriteU32(out, bits);
 }
 
 static void UpperProtocol_WriteI16(uint8_t *out, int16_t value)

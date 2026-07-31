@@ -1,6 +1,6 @@
 #include "imu_calibration_orchestrator.h"
 
-#include "motion_control_maintenance.h"
+#include "motion_maintenance_orchestrator.h"
 #include "motion_control_service.h"
 #include "parameter_management_service.h"
 #include "platform_critical.h"
@@ -87,7 +87,7 @@ void ImuCalibrationOrchestrator_ProcessPersistence(uint32_t now_ms)
     {
         return;
     }
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
     {
         return;
     }
@@ -96,7 +96,7 @@ void ImuCalibrationOrchestrator_ProcessPersistence(uint32_t now_ms)
         critical                 = PlatformCritical_Enter();
         persistence.save_next_ms = now_ms + APP_IMU_AUTOSAVE_RETRY_MS;
         PlatformCritical_Exit(critical);
-        MotionControl_EndMaintenance();
+        AppMotionMaintenance_End();
         return;
     }
 
@@ -134,5 +134,5 @@ void ImuCalibrationOrchestrator_ProcessPersistence(uint32_t now_ms)
         persistence.save_next_ms = now_ms + APP_IMU_AUTOSAVE_RETRY_MS;
     }
     PlatformCritical_Exit(critical);
-    MotionControl_EndMaintenance();
+    AppMotionMaintenance_End();
 }

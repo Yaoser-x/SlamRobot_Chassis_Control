@@ -42,7 +42,7 @@
 | **调试口** | USART1（命令台 + CSV/JSON 日志流） |
 | **上位机口** | USART3（Raspberry Pi 通信, DMA 环形缓冲） |
 | **手柄** | PS2 无线手柄（GPIO bit-bang SPI, DWT 时序容错） |
-| **看门狗** | IWDG（预分频 32, 重载 1000, 超时 ~1.0s） |
+| **看门狗** | IWDG（预分频 32, 重载 1000, 名义超时约 0.8s） |
 | **硬件保护** | TIM1_BKIN (PE15) + TIM8_BKIN (PA6) 低电平硬件切断 PWM |
 
 ### 1.2 软件分层
@@ -84,7 +84,7 @@ firmware/esp12f/        ESP12F Arduino 固件源码
 
 | # | 任务名 | 入口函数 | 栈大小 | 优先级 | 周期 | 调度方式 | 核心职责 |
 |---|--------|----------|--------|--------|------|----------|----------|
-| 1 | `safetyTask` | `Task_Safety` | 4096B | High (osPriorityHigh) | 20ms | osDelayUntil | 状态聚合、命令超时检测、fault-stop 触发、IWDG 条件喂狗、POST 运行时检查 |
+| 1 | `safetyTask` | `Task_Safety` | 4096B | High (osPriorityHigh) | 20ms | osDelayUntil | App 事实聚合、Safety permit、完整周期 completion、IWDG 门控 |
 | 2 | `motorTask` | `Task_MotorControl` | 2048B | AboveNormal (osPriorityAboveNormal) | 10ms | osDelayUntil | 编码器更新、ChassisService_Step（差速+PID+PWM）、ADC 静止门控 |
 | 3 | `rpiCommTask` | `Task_RpiComm` | 2048B | Normal (osPriorityNormal) | 5ms | osDelayUntil | USART3 DMA 上位机协议收发（200Hz） |
 | 4 | `imuTask` | `Task_Imu` | 2048B | Normal (osPriorityNormal) | 事件驱动 | osThreadFlagsWait (EXTI0) | BMI270 FIFO/直接采样、Mahony 融合、校准门控、自动校准状态机 |
@@ -1517,14 +1517,14 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 **模块：** `Service/safety_management/safety_management_service.c`
 
-**SafetyService_Update() 每 20ms（safetyTask）执行流程：**
+**App 收集事实并调用 `SafetyManagement_UpdateWithInput()`（20ms）：**
 
-1. **任务超时更新：** 调用 ChassisTaskTiming_UpdateTimeouts，获取 task_timeout_mask
-2. **ADC 更新：** PowerAdcDriver_Update() → 电流/电压/有效性标志
-3. **电机故障：** MotorDriver_UpdateFaults() → DRV nFAULT 状态
+1. **App 事实快照：** Power、State、System、Command 与 Motor adapter 各自携带时间、generation、validity、quality
+2. **能力决策：** fatal POST 与基础硬件决定 base motion；IMU 降级 heading 能力
+3. **许可租约：** 发布 generation、issued_at 和 40ms 有效期，App 同步 Command gate
 4. **过流评估（带去抖）：**
    - 启动消隐：上电后 PWM=0 期间 ARM，激活后 blank 期
-   - 连续超阈值计数：需 5 次连续 @ 20ms = 100ms 去抖
+   - 连续超阈值计数：按 `current_fault_debounce_ms / update_period_ms` 派生去抖次数
    - 长期静止后重新 ARM
 5. **电池评估（带滞回去抖）：**
    - < 10.5V → 告警；> 11.0V → 清除告警
@@ -1532,12 +1532,11 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
    - > 9.6V 连续 2s → 自动清除临界故障（不清除其他锁存）
 6. **编码器有效性：** 检查 speed_valid_all
 7. **TIM Break 锁存：** 检测 MotorDriver 的 break_latched 标志
-8. **错误锁存与 Fault-Stop 触发：** 新故障出现时锁存并调用 ControlService_SetFaultStop
+8. **错误锁存与事件路由：** Safety 返回决策；App 应用 gate，并将 MotionEvent 路由回 Safety
 
 ### 6.3 CurrentGuard 三层电流保护
 
-**模块：** `App/current/current_guard.c`
-**头文件：** `App/current/current_guard.h`
+**模块：** `Service/motion_control/internal/motor_current_limiter.c`
 
 独立于 SafetyService 的实时电流保护层（在 ChassisService_Step 的 PID 输出后、PWM 输出前执行）。
 
@@ -1562,10 +1561,10 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 ### 6.4 IWDG 硬件看门狗
 
-- `.ioc` 启用 IWDG，预分频器 32，重载值 1000，超时 ~1.0s（LSI 40kHz）
-- `safetyTask`（High 优先级，20ms 周期）循环中条件喂狗：仅在 motorTask 心跳在 200ms 以内时喂狗
-- motorTask 卡死 → 停止喂狗 → IWDG 超时 → 硬件复位
-- 喂狗余量：50 个周期
+- `.ioc` 启用 IWDG，预分频器 32，重载值 1000；运行时门按名义 800ms 校验
+- Motor 20ms 与 Safety 40ms 年龄门必须同时满足，且两者 generation 均未被上次 feed 消费
+- 完整周期末才提交 completion；`Evaluate` 后未实际 feed 不得 Commit/消费
+- Safety permit 超过 40ms 时 Motor 先归零 PWM；任一任务卡死随后停止喂狗并由 IWDG 复位
 
 ### 6.5 TIM1/TIM8 Break 硬件保护
 
@@ -1590,7 +1589,7 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 
 **阶段一 — 启动前（PowerOnSelfTest_Run，调度器启动前）：**
 1. 探测 DRV nFAULT（所有 nFAULT 必须为高）
-2. 探测 IMU（BMI270 chip ID 必须为 0x24）
+2. 探测 IMU（BMI270 chip ID/质量异常记录为 degraded heading 能力）
 3. 输出结果到 USART1
 
 **阶段二 — 延迟检查（PowerOnSelfTest_UpdateRuntime，safetyTask 驱动）：**
@@ -1598,7 +1597,8 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 2. 等待编码器速度有效（超时 2000ms）
 3. 最终结果输出
 
-**错误标志：** `PowerOnSelfTest_ERROR_DRV_FAULT` / `PowerOnSelfTest_ERROR_ADC` / `PowerOnSelfTest_ERROR_IMU` / `PowerOnSelfTest_ERROR_ENCODER`
+POST 分别发布 fatal 与 degraded flags。参数/驱动/编码器等 fatal 项关闭 base motion；IMU 项进入
+degraded flags 并关闭 heading_assist/heading_macro。是否要求远程速度依赖 IMU 由只读产品配置决定。
 
 ### 6.7 Reset Trace v4 崩溃追踪
 
@@ -1767,23 +1767,23 @@ PC (USART1) ←→ [4096B 环缓冲] ←→ ESP8266 (USART2)
 | 运动学 | `max_angular_rps` | 10.0 |
 | 运动学 | `wheel_radius_m` | 0.035 |
 | 运动学 | `track_width_m` | 0.176 |
-| 斜坡 | `speed_ramp_mps2` | 0.5 |
-| 斜坡 | `angular_ramp_rps2` | 2.0 |
-| PID | `motor_pid_kp[4]` | 8.0/8.0/8.0/0.5 |
-| PID | `motor_pid_ki[4]` | 0.3/0.3/0.3/0.0 |
-| PID | `motor_pid_kd[4]` | 0.1/0.1/0.1/0.0 |
+| 斜坡 | `speed_ramp_mps2` | 1.0 |
+| 斜坡 | `angular_ramp_rps2` | 10.0 |
+| PID | `motor_pid_kp[4]` | 50.0/1000.0/1200.0/100.0 |
+| PID | `motor_pid_ki[4]` | 8.0/800.0/1000.0/0.0 |
+| PID | `motor_pid_kd[4]` | 0.0/0.0/0.0/0.0（旧 Flash 非零值只规范化 active model） |
 | PID | `pid_integral_limit` | 60.0 |
-| 方向 | `motor_dir[4]` | 1/1/1/1 |
-| 方向 | `encoder_dir[4]` | 1/1/1/1 |
+| 方向 | `motor_dir[4]` | -1/-1/1/1 |
+| 方向 | `encoder_dir[4]` | 1/1/-1/-1 |
 | 电流 | `current_observe_a[4]` | 运行时 |
 | 电流 | `current_soft_limit_a[4]` | 运行时 |
 | 电流 | `current_fault_a[4]` | 运行时 |
 | 电流 | `current_fault_debounce_ms` | 运行时 |
 | 巡线 | `line_threshold_raw[8]` | 500 |
-| 巡线 | `line_active_low` | 0 |
-| 巡线 | `line_kp` / `line_kd` | 2.5 / 0.1 |
+| 巡线 | `line_active_low` | 1 |
+| 巡线 | `line_kp` / `line_kd` | 0.6 / 0.05 |
 | 巡线 | `line_speed_mps` | 0.15 |
-| 巡线 | `line_slowdown_gain` | 0.0 |
+| 巡线 | `line_slowdown_gain` | 0.7 |
 | 直行 | `straight_wheel_coupling_gain` | 运行时 |
 | 直行 | `straight_heading_kp` | 运行时 |
 | 直行 | 四个 `straight_trim_*` | 运行时 |

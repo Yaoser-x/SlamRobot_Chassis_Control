@@ -4,6 +4,8 @@
 #include "wheel_encoder_config.h"
 #include "wheel_speed_estimator.h"
 
+#include <string.h>
+
 #define TWO_PI_F                   6.28318530718f
 #define WHEEL_REACQUIRING_FLAG     0x80U
 #define WHEEL_REACQUIRE_COUNT_MASK 0x7FU
@@ -13,15 +15,34 @@ static encoder_speed_window_t speed_window[STATE_ESTIMATION_MOTOR_COUNT];
 static uint32_t               last_update_ms;
 static uint8_t                has_last_update;
 static uint32_t               last_valid_ms[STATE_ESTIMATION_MOTOR_COUNT];
+static uint32_t               cumulative_count[STATE_ESTIMATION_MOTOR_COUNT];
+static uint8_t                previous_anomaly_mask;
 
 static float WheelEstimationPipeline_AbsF(float value)
 {
     return (value < 0.0f) ? -value : value;
 }
 
-static int32_t WheelEstimationPipeline_AbsI32(int32_t value)
+static int32_t WheelEstimationPipeline_CountBitsToI32(uint32_t bits)
 {
-    return (value < 0) ? -value : value;
+    int32_t value;
+
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+static uint32_t WheelEstimationPipeline_ModularCountDistance(int32_t first, int32_t second)
+{
+    uint32_t first_bits;
+    uint32_t second_bits;
+    uint32_t difference_bits;
+    int32_t  difference;
+
+    memcpy(&first_bits, &first, sizeof(first_bits));
+    memcpy(&second_bits, &second, sizeof(second_bits));
+    difference_bits = first_bits - second_bits;
+    memcpy(&difference, &difference_bits, sizeof(difference));
+    return (difference < 0) ? (uint32_t)(-(int64_t)difference) : (uint32_t)difference;
 }
 
 void WheelEstimationPipeline_Init(void)
@@ -30,10 +51,22 @@ void WheelEstimationPipeline_Init(void)
     {
         last_count[index] = 0U;
         WheelSpeedEstimator_SpeedWindowReset(&speed_window[index]);
-        last_valid_ms[index] = 0U;
+        last_valid_ms[index]    = 0U;
+        cumulative_count[index] = 0UL;
     }
-    last_update_ms  = 0U;
-    has_last_update = 0U;
+    last_update_ms        = 0U;
+    has_last_update       = 0U;
+    previous_anomaly_mask = 0U;
+}
+
+uint8_t WheelEstimationPipeline_AcknowledgeAnomalyDelivery(state_estimation_wheel_status_t *status, uint32_t generation)
+{
+    if (status == 0 || generation == 0UL || generation != status->anomaly_delivery_generation)
+    {
+        return 0U;
+    }
+    status->latched_for_host_mask = 0U;
+    return 1U;
 }
 
 void WheelEstimationPipeline_AggregateSideValidity(const uint8_t speed_valid[STATE_ESTIMATION_MOTOR_COUNT],
@@ -71,7 +104,7 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
     const float counts_per_rev = CHASSIS_ENCODER_BASE_PPR * CHASSIS_ENCODER_QUADRATURE_MULT * CHASSIS_MOTOR_GEAR_RATIO;
     const uint32_t dt_ms       = now_ms - last_update_ms;
     uint8_t        side_count[2]     = {0U, 0U};
-    int32_t        side_count_sum[2] = {0, 0};
+    int64_t        side_count_sum[2] = {0, 0};
     int32_t        side_delta_sum[2] = {0, 0};
     float          side_speed_sum[2] = {0.0f, 0.0f};
 
@@ -82,6 +115,7 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
     status->last_update_ms         = now_ms;
     status->speed_valid_all        = 1U;
     status->side_consistency_flags = 0UL;
+    status->current_anomaly_mask   = 0U;
 
     for (uint32_t index = 0U; index < STATE_ESTIMATION_MOTOR_COUNT; ++index)
     {
@@ -109,11 +143,12 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
             WheelSpeedEstimator_SpeedWindowReset(&speed_window[index]);
             continue;
         }
+        cumulative_count[index] += (uint32_t)delta;
+        status->count[index] = WheelEstimationPipeline_CountBitsToI32(cumulative_count[index]);
         if (has_last_update == 0U || dt_ms <= CHASSIS_MIN_ENCODER_DT_MS || dt_ms > CHASSIS_MAX_ENCODER_DT_MS
             || counts_per_rev <= 0.0f || wheel_radius_m <= 0.0f)
         {
-            status->delta[index] = delta;
-            status->count[index] += delta;
+            status->delta[index]         = delta;
             status->speed_mps[index]     = 0.0f;
             status->speed_valid[index]   = 0U;
             status->reject_streak[index] = 0U;
@@ -138,8 +173,7 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
                                                           &status->window_rebuild_count[index])
                  != 0U)
         {
-            status->delta[index] = delta;
-            status->count[index] += delta;
+            status->delta[index]                 = delta;
             status->consecutive_anomalies[index] = 0U;
             status->speed_mps[index]             = WheelSpeedEstimator_CountDeltaSpeedMps(speed_window[index].delta_sum,
                                                                               speed_window[index].dt_sum_ms,
@@ -178,6 +212,12 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
                     ? STATE_ESTIMATION_WHEEL_REJECT_PHYSICAL_RANGE
                     : STATE_ESTIMATION_WHEEL_REJECT_SPIKE;
         }
+        if (status->quality[index] == STATE_ESTIMATION_WHEEL_TRANSIENT_REJECT
+            || status->quality[index] == STATE_ESTIMATION_WHEEL_REACQUIRING
+            || status->quality[index] == STATE_ESTIMATION_WHEEL_FAULT)
+        {
+            status->current_anomaly_mask |= (uint8_t)(1U << index);
+        }
         status->sample_age_ms[index] = (last_valid_ms[index] == 0U) ? 0U : (uint32_t)(now_ms - last_valid_ms[index]);
         if (status->speed_valid[index] == 0U)
         {
@@ -192,10 +232,12 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
         }
     }
 
-    status->left_count =
-        (side_count[MOTOR_SIDE_LEFT] != 0U) ? side_count_sum[MOTOR_SIDE_LEFT] / side_count[MOTOR_SIDE_LEFT] : 0;
-    status->right_count =
-        (side_count[MOTOR_SIDE_RIGHT] != 0U) ? side_count_sum[MOTOR_SIDE_RIGHT] / side_count[MOTOR_SIDE_RIGHT] : 0;
+    status->left_count  = (side_count[MOTOR_SIDE_LEFT] != 0U)
+                              ? (int32_t)(side_count_sum[MOTOR_SIDE_LEFT] / side_count[MOTOR_SIDE_LEFT])
+                              : 0;
+    status->right_count = (side_count[MOTOR_SIDE_RIGHT] != 0U)
+                              ? (int32_t)(side_count_sum[MOTOR_SIDE_RIGHT] / side_count[MOTOR_SIDE_RIGHT])
+                              : 0;
     status->left_delta =
         (side_count[MOTOR_SIDE_LEFT] != 0U) ? side_delta_sum[MOTOR_SIDE_LEFT] / side_count[MOTOR_SIDE_LEFT] : 0;
     status->right_delta =
@@ -231,7 +273,7 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
             {
                 status->side_consistency_flags |= speed_flag;
             }
-            if (WheelEstimationPipeline_AbsI32(status->count[first] - status->count[second])
+            if (WheelEstimationPipeline_ModularCountDistance(status->count[first], status->count[second])
                 > CHASSIS_ENCODER_SIDE_COUNT_DIFF)
             {
                 status->side_consistency_flags |= count_flag;
@@ -243,6 +285,20 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
                 status->side_consistency_flags |= direction_flag;
             }
         }
+    }
+    {
+        uint8_t new_anomaly_mask = status->current_anomaly_mask & (uint8_t)~previous_anomaly_mask;
+
+        if (new_anomaly_mask != 0U)
+        {
+            status->latched_for_host_mask |= new_anomaly_mask;
+            status->anomaly_delivery_generation++;
+            if (status->anomaly_delivery_generation == 0UL)
+            {
+                status->anomaly_delivery_generation = 1UL;
+            }
+        }
+        previous_anomaly_mask = status->current_anomaly_mask;
     }
     last_update_ms  = now_ms;
     has_last_update = 1U;

@@ -49,6 +49,8 @@ extern "C"
     void     HostCommunication_OnDmaHalf(void);
     void     HostCommunication_OnDmaFull(void);
     void     HostCommunication_OnTxComplete(void);
+    /** Take the latest physically transmitted STATUS anomaly generation. */
+    uint8_t HostCommunication_TakeAnomalyDelivery(uint32_t *generation);
 
 #ifdef __cplusplus
 }

@@ -35,7 +35,8 @@ extern "C"
     uint8_t
     DifferentialDriveKinematics_ControlDt(uint32_t now_ms, uint32_t *last_step_ms, uint8_t *initialized, float *dt_s);
     control_timing_status_t DifferentialDriveKinematics_EvaluateControlTiming(control_timing_t *timing,
-                                                                              uint32_t          now_ms);
+                                                                              uint32_t          now_ms,
+                                                                              uint32_t          nominal_period_ms);
 
 #ifdef __cplusplus
 }

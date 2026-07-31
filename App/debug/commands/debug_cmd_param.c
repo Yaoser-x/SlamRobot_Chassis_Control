@@ -1,5 +1,6 @@
 #include "debug_cmd_param.h"
 
+#include "motion_maintenance_orchestrator.h"
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
 #include "debug_console_parser.h"
@@ -34,7 +35,7 @@ static uint8_t DebugCmdParam_SetDirection(const char *line, uint8_t encoder)
     {
         return 0U;
     }
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "direction change rejected: chassis not stationary");
         return 1U;
@@ -52,7 +53,7 @@ static uint8_t DebugCmdParam_SetDirection(const char *line, uint8_t encoder)
     {
         PARAM_LOG("INFO", "%s_dir %s=%d applied in RAM", encoder ? "encoder" : "motor", motor_name, direction);
     }
-    MotionControl_EndMaintenance();
+    AppMotionMaintenance_End();
     return 1U;
 }
 
@@ -93,7 +94,7 @@ static uint8_t DebugCmdParam_Save(const char *line)
     {
         return 0U;
     }
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "param save rejected: chassis not stationary");
         return 1U;
@@ -125,7 +126,7 @@ static uint8_t DebugCmdParam_Save(const char *line)
     {
         PARAM_LOG("ERR", "param save failed");
     }
-    MotionControl_EndMaintenance();
+    AppMotionMaintenance_End();
     return 1U;
 }
 
@@ -137,7 +138,7 @@ static uint8_t DebugCmdParam_Reset(const char *line)
     {
         return 0U;
     }
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "param reset rejected: chassis not stationary");
         return 1U;
@@ -154,7 +155,7 @@ static uint8_t DebugCmdParam_Reset(const char *line)
     {
         PARAM_LOG("ERR", "param reset failed");
     }
-    MotionControl_EndMaintenance();
+    AppMotionMaintenance_End();
     return 1U;
 }
 
@@ -168,7 +169,7 @@ static uint8_t DebugCmdParam_Set(const char *line)
     {
         return 0U;
     }
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
     {
         PARAM_LOG("WARN", "param set rejected: chassis not stationary");
         return 1U;
@@ -187,7 +188,7 @@ static uint8_t DebugCmdParam_Set(const char *line)
     {
         PARAM_LOG("ERR", "param set rejected");
     }
-    MotionControl_EndMaintenance();
+    AppMotionMaintenance_End();
     return 1U;
 }
 

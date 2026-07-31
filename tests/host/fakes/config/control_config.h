@@ -94,13 +94,13 @@ extern "C"
 
 #define CHASSIS_PID_KP_M1                      50.0f
 #define CHASSIS_PID_KI_M1                      8.0f
-#define CHASSIS_PID_KD_M1                      0.05f
+#define CHASSIS_PID_KD_M1                      0.0f
 #define CHASSIS_PID_KP_M2                      1000.0f
 #define CHASSIS_PID_KI_M2                      800.0f
-#define CHASSIS_PID_KD_M2                      0.15f
+#define CHASSIS_PID_KD_M2                      0.0f
 #define CHASSIS_PID_KP_M3                      1200.0f
 #define CHASSIS_PID_KI_M3                      1000.0f
-#define CHASSIS_PID_KD_M3                      0.18f
+#define CHASSIS_PID_KD_M3                      0.0f
 #define CHASSIS_PID_KP_M4                      100.0f
 #define CHASSIS_PID_KI_M4                      0.0f
 #define CHASSIS_PID_KD_M4                      0.0f

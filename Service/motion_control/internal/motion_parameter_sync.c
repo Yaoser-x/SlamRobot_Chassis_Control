@@ -11,31 +11,30 @@ void MotionParameterSync_Init(motion_parameter_sync_t *sync, const motion_contro
     }
 }
 
-uint8_t MotionParameterSync_Refresh(motion_parameter_sync_t *sync, pid_state_t pid_motor[MOTOR_ID_COUNT])
+uint8_t MotionParameterSync_Apply(motion_parameter_sync_t *sync,
+                                  const param_model_t     *params,
+                                  uint32_t                 generation,
+                                  pid_state_t              pid_motor[MOTOR_ID_COUNT])
 {
-    param_model_t params;
-    uint32_t      generation;
-
-    if (sync == 0 || pid_motor == 0)
+    if (sync == 0 || params == 0 || pid_motor == 0 || generation == 0UL)
     {
         return 0U;
     }
-    generation = ParameterManagement_GetSnapshot(&params);
     if (generation == sync->generation)
     {
         return 0U;
     }
 
-    sync->params     = params;
+    sync->params     = *params;
     sync->generation = generation;
-    MotorDriver_SetDirectionConfig(params.motor_dir);
+    MotorDriver_SetDirectionConfig(params->motor_dir);
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
         pid_params_t pid_params = {
-            params.pid_kp[index],
-            params.pid_ki[index],
-            params.pid_kd[index],
-            params.pid_integral_limit,
+            params->pid_kp[index],
+            params->pid_ki[index],
+            params->pid_kd[index],
+            params->pid_integral_limit,
             sync->pid_correction_limit,
         };
 

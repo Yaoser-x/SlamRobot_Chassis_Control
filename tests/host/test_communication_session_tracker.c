@@ -32,6 +32,11 @@ int main(void)
     communication_wire_target_t      target;
     communication_session_snapshot_t host;
     communication_session_snapshot_t esp;
+    command_refresh_token_t          token = {.source              = COMMAND_SOURCE_HOST,
+                                              .slot_generation     = 2UL,
+                                              .accepted_command_id = 1UL,
+                                              .mode                = 2U};
+    command_refresh_token_t          token_snapshot;
 
     CommunicationSessionTracker_Init();
     target = Target(11ULL, 0xFFFFFFFFUL, 0U);
@@ -42,6 +47,11 @@ int main(void)
     target = Target(11ULL, 0U, 1U);
     assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 2U)
            == COMMUNICATION_SESSION_NEW_COMMAND);
+    assert(CommunicationSessionTracker_SetRefreshToken(COMMUNICATION_LINK_UPPER, target.sequence, &token) != 0U);
+    assert(CommunicationSessionTracker_GetRefreshToken(COMMUNICATION_LINK_UPPER, target.sequence, &token_snapshot)
+           != 0U);
+    assert(token_snapshot.slot_generation == token.slot_generation
+           && token_snapshot.accepted_command_id == token.accepted_command_id);
     CommunicationSessionTracker_Complete(COMMUNICATION_LINK_UPPER, target.sequence, 1U, COMMUNICATION_REJECT_NONE);
     assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 3U)
            == COMMUNICATION_SESSION_DUPLICATE_KEEPALIVE);
@@ -58,6 +68,8 @@ int main(void)
     target.angular_z = 0.0f;
     assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 6U)
            == COMMUNICATION_SESSION_DISABLE);
+    assert(CommunicationSessionTracker_GetRefreshToken(COMMUNICATION_LINK_UPPER, target.sequence, &token_snapshot)
+           == 0U);
 
     target = Target(11ULL, 1U, 0U);
     assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 7U)

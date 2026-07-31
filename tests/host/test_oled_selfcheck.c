@@ -1,13 +1,14 @@
 #include "oled_selfcheck.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 static void require_int(int condition, const char *message)
 {
     if (!condition)
     {
         (void)printf("FAIL: %s\n", message);
-        __builtin_exit(1);
+        exit(1);
     }
 }
 

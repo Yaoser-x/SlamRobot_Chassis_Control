@@ -40,6 +40,8 @@ static uint32_t                      fake_primask;
 static uint32_t                      estop_set_count;
 static uint8_t                       estop_last_value;
 static communication_publish_model_t fake_publish_model;
+static uint8_t                       fake_encoder_anomaly_mask;
+static uint32_t                      fake_encoder_anomaly_generation;
 static const communication_config_t  fake_communication_config = {
      .host_status_period_ms     = 50U,
      .host_imu_status_period_ms = 20U,
@@ -169,11 +171,55 @@ command_result_t CommandManagement_DisableRemoteSource(command_source_t source)
     return COMMAND_RESULT_ACCEPTED;
 }
 
-uint8_t CommandManagement_RefreshSource(command_source_t source, uint32_t now_ms)
+uint8_t CommandManagement_GetRefreshToken(command_source_t         source,
+                                          uint32_t                 expected_slot_generation,
+                                          command_refresh_token_t *token)
 {
-    (void)source;
+    *token = (command_refresh_token_t){
+        .source              = source,
+        .slot_generation     = expected_slot_generation,
+        .accepted_command_id = 1UL,
+        .revoke_generation   = 1UL,
+        .mode                = 2U,
+    };
+    return 1U;
+}
+
+uint8_t CommandManagement_RefreshAccepted(const command_refresh_token_t *token, uint32_t now_ms)
+{
+    (void)token;
     (void)now_ms;
     return 1U;
+}
+
+uint32_t CommandManagement_GetMotionRevokeGeneration(void)
+{
+    return 1UL;
+}
+
+command_apply_result_t CommandManagement_ApplyIntent(const command_intent_t *intent)
+{
+    command_apply_result_t result = {COMMAND_OUTCOME_INVALID, 0U, 1UL};
+
+    if (intent->kind == COMMAND_INTENT_REMOTE_DISABLE)
+    {
+        result.outcome = (CommandManagement_DisableRemoteSource(intent->source) == COMMAND_RESULT_ACCEPTED)
+                             ? COMMAND_OUTCOME_RELEASE_ACCEPTED
+                             : COMMAND_OUTCOME_GATE_CLOSED;
+    }
+    else if (intent->kind == COMMAND_INTENT_ACTIVE)
+    {
+        command_velocity_t command = {
+            .linear_x     = intent->linear_x,
+            .angular_z    = intent->angular_z,
+            .enable       = 1U,
+            .source       = intent->source,
+            .timestamp_ms = intent->sample_time_ms,
+        };
+        result.outcome = (CommandManagement_Set(&command) == COMMAND_RESULT_ACCEPTED) ? COMMAND_OUTCOME_ACTIVE_ACCEPTED
+                                                                                      : COMMAND_OUTCOME_INVALID;
+    }
+    return result;
 }
 
 uint8_t CommandManagement_IsMotionGateOpen(void)
@@ -218,9 +264,10 @@ line_following_result_t LineFollowing_Enable(uint8_t enable)
     return LINE_FOLLOWING_RESULT_APPLIED;
 }
 
-safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
+safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask, const safety_clear_input_t *input)
 {
     (void)mask;
+    (void)input;
     return (safety_clear_result_t){.code = SAFETY_CLEAR_RESULT_APPLIED};
 }
 
@@ -261,6 +308,8 @@ static void RefreshFakePublishModel(void)
     fake_publish_model.post.done                    = fake_post_result.done;
     fake_publish_model.post.error_flags             = fake_post_result.error_flags;
     fake_publish_model.current.invalid_reason_flags = fake_adc_state.invalid_reason_flags;
+    fake_publish_model.encoder.anomaly_mask         = fake_encoder_anomaly_mask;
+    fake_publish_model.encoder.anomaly_generation   = fake_encoder_anomaly_generation;
     fake_publish_model.control.reset_reason_flags   = 0xA1B2C3D4UL;
     fake_publish_model.imu.online                   = fake_imu_state.online;
     fake_publish_model.imu.calibrated               = fake_imu_state.gyro_calibrated;
@@ -293,24 +342,26 @@ static void RefreshFakePublishModel(void)
 
 static void reset_host_uart_state(void)
 {
-    rx_buffer        = 0;
-    rx_size          = 0U;
-    rx_start_count   = 0U;
-    dma_stop_count   = 0U;
-    tx_dma_count     = 0U;
-    tx_it_count      = 0U;
-    tx_last_size     = 0U;
-    tx_last_uart     = 0;
-    fake_tick        = 0U;
-    fake_imu_state   = (state_estimation_imu_status_t){0};
-    fake_adc_state   = (power_adc_driver_state_t){0};
-    fake_post_result = (power_on_self_test_result_t){0};
-    fake_primask     = 0U;
-    estop_set_count  = 0UL;
-    estop_last_value = 0U;
-    usart3_instance  = (USART_TypeDef){0};
-    usart3_rx_stream = (DMA_Stream_TypeDef){0};
-    hdma_usart3_rx   = (DMA_HandleTypeDef){.Instance = &usart3_rx_stream};
+    rx_buffer                       = 0;
+    rx_size                         = 0U;
+    rx_start_count                  = 0U;
+    dma_stop_count                  = 0U;
+    tx_dma_count                    = 0U;
+    tx_it_count                     = 0U;
+    tx_last_size                    = 0U;
+    tx_last_uart                    = 0;
+    fake_tick                       = 0U;
+    fake_imu_state                  = (state_estimation_imu_status_t){0};
+    fake_adc_state                  = (power_adc_driver_state_t){0};
+    fake_post_result                = (power_on_self_test_result_t){0};
+    fake_primask                    = 0U;
+    estop_set_count                 = 0UL;
+    estop_last_value                = 0U;
+    fake_encoder_anomaly_mask       = 0U;
+    fake_encoder_anomaly_generation = 0UL;
+    usart3_instance                 = (USART_TypeDef){0};
+    usart3_rx_stream                = (DMA_Stream_TypeDef){0};
+    hdma_usart3_rx                  = (DMA_HandleTypeDef){.Instance = &usart3_rx_stream};
     huart3 =
         (UART_HandleTypeDef){.Instance = &usart3_instance, .hdmarx = &hdma_usart3_rx, .gState = HAL_UART_STATE_READY};
     for (uint16_t i = 0U; i < (uint16_t)sizeof(tx_last_frame); ++i)
@@ -436,6 +487,26 @@ static void test_status_uses_interrupt_tx_without_usart3_tx_dma(void)
     require_int(state.tx_frames == 1U, "status completion counted in callback");
 }
 
+static void test_anomaly_delivery_requires_physical_status_completion(void)
+{
+    uint32_t generation = 0UL;
+
+    reset_host_uart_state();
+    fake_tick                       = 1000U;
+    fake_encoder_anomaly_mask       = 0x02U;
+    fake_encoder_anomaly_generation = 17UL;
+    huart3.gState                   = HAL_UART_STATE_READY;
+    HostCommunication_Init();
+    HostCommunication_Update();
+    require_int(HostCommunication_TakeAnomalyDelivery(&generation) == 0U,
+                "queued STATUS does not acknowledge anomaly delivery");
+    huart3.gState = HAL_UART_STATE_READY;
+    HostCommunication_OnTxComplete();
+    require_int(HostCommunication_TakeAnomalyDelivery(&generation) != 0U && generation == 17UL,
+                "physical STATUS completion publishes its anomaly generation");
+    require_int(HostCommunication_TakeAnomalyDelivery(&generation) == 0U, "anomaly delivery event is consumed once");
+}
+
 static void test_status_and_imu_share_async_priority_queue(void)
 {
     host_communication_state_t state;
@@ -530,6 +601,7 @@ static void test_full_queue_drops_imu_for_status_priority(void)
 int main(void)
 {
     test_status_uses_interrupt_tx_without_usart3_tx_dma();
+    test_anomaly_delivery_requires_physical_status_completion();
     test_status_and_imu_share_async_priority_queue();
     test_uart_error_releases_active_tx_and_continues_queue();
     test_full_queue_drops_imu_for_status_priority();

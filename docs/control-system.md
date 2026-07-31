@@ -1,9 +1,14 @@
 
 # 控制体系
 
-> rc1 远程速度由 Upper Protocol v3 dispatcher 协调，业务操作经固定 mailbox 交给 App 编排。Communication 负责 wire/session/ACK/请求阶段；CommandManagement 唯一负责五来源租约、rearm 与仲裁；SafetyManagement 唯一决定运动许可；MotionControl 唯一写电机输出。
+> rc2 远程速度由 Upper Protocol v3 dispatcher 协调，业务操作经固定 mailbox 交给 App 编排。
+> Communication 负责 wire/session/ACK；CommandManagement 唯一负责五来源槽、租约、rearm、mode mask 与仲裁；
+> SafetyManagement 只决定能力和许可租约；MotionControl 只消费 App DTO、写电机并返回事件。
 
-rc2 控制周期按实测时间分为 FIRST、EARLY（0--4 ms）、NORMAL（5--15 ms）、LATE（16--20 ms）和 MISSED（不少于 21 ms）。EARLY 保持上一输出且不更新 PID；FIRST/MISSED 归零并复位控制状态。轮速连续拒绝三次进入 REACQUIRING，拒绝样本不作为基线，连续三个物理有效样本后恢复。
+rc2 控制周期以 nominal period `P` 和 `uint64_t` 整数比较派生边界：`2dt<P` 为 EARLY，
+`2dt<=3P` 为 NORMAL，`dt<=2P` 为 LATE，其余为 MISSED。EARLY 不更新 accepted baseline；
+NORMAL/LATE 使用真实 dt；FIRST/MISSED 归零并复位 PI 与目标整形。轮速连续拒绝三次进入
+REACQUIRING，异常原始计数仍累计；连续三个稳定样本只重建 baseline，不补算异常区间。
 
 ## 1. 控制链数据流
 
@@ -46,7 +51,18 @@ rc2 控制周期按实测时间分为 FIRST、EARLY（0--4 ms）、NORMAL（5--1
 
 ### 2.2 源过期机制
 
-每个控制源需在各自超时窗口内刷新命令（更新 `timestamp_ms`）。超时未刷新的命令槽自动失效，仲裁循环跳过该源。
+本地 PS2/Line 每次采样提交新 intent。Host/ESP duplicate 只有通过 Communication 的 session/sequence/payload
+校验，并匹配 CommandManagement 的 slot/command/mode/revoke token 时才能刷新；超时或超过原始 2000 ms
+最大寿命的槽不能复活。
+
+### 2.3 五模式与 PS2 接管
+
+模式为 `DISABLED / MANUAL / AUTO / LINE / MAINTENANCE`，App `ControlModeCoordinator` 发布只读快照。
+PS2 摇杆超过 0.15 且连续 3 个有效样本进入 MANUAL，低于 0.10 才退出接管判定；D-pad 与定角宏按边沿触发。
+进入 MANUAL 会清除 AUTO/LINE 已应用命令并要求来源 rearm。全部摇杆回中且无 D-pad/宏持续 2 s 后只恢复
+AUTO/LINE 模式，机器人仍为 STANDBY；远程或巡线重新完成 neutral→active 后才能运动。接管期间 PS2 断联进入 DISABLED。
+LINE 恢复事件只提交 neutral；必须等待之后独立的显式 LINE enable 操作，不能在同一恢复事件中自动 active。
+每个 Safety 周期先把 capability source mask 与 mode mask 求交并原子应用，再执行命令选择；能力恢复仍保留 rearm。
 
 ---
 
@@ -61,6 +77,10 @@ rc2 控制周期按实测时间分为 FIRST、EARLY（0--4 ms）、NORMAL（5--1
 | **DRV 故障锁存** | DRV8874 nFAULT 拉低 | 触发 fault-stop，锁存 error flag。ADC 电流当前只用于日志诊断，`MOTOR_ADC_OVERCURRENT_FAULT_ENABLED=0U` 表示不使用 ADC 峰值触发 fault-stop |
 | **硬件 Break** | 共享 nFAULT 网络拉低 PE15/TIM1_BKIN 与 PA6/TIM8_BKIN | TIM1 立即清 MOE/CCR，Automatic Output 禁用并软件锁存；只有 BKIN/nFAULT 释放且 PWM 全零时才可清除。TIM8 只记录同网冗余 BIF/count/last_ms，不重复锁存 |
 | **RTOS 异常** | `configASSERT` / 栈溢出 / malloc 失败 / 任务创建失败 | 拉低 `DRV_SLEEP_ALL`，进入 fatal loop（不自动复位，保留故障现场） |
+
+Safety 每 20 ms 发布有效期 40 ms 的 permit。Motor 每 10 ms 检查 generation 与无符号年龄；
+generation 变化时先复位控制状态，`age > 40 ms` 时立即安全停车。该机制保证 Safety task stall 后
+PWM 在 IWDG 复位前归零。
 
 ### 3.2 命令拒绝规则
 
@@ -97,8 +117,8 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 | 任务 | 入口函数 | 优先级 | 周期 | 调度方式 | 栈大小 | 核心职责 |
 | --- | --- | --- | --- | --- | --- | --- |
-| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | Platform 周期延时 | 4096B | 更新传感器、`SafetyService_Update`、ResetTrace 心跳与看门狗门控 |
-| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | Platform 周期延时 | 512W (2048B) | `EncoderService_Update` + `ChassisService_Step` |
+| **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | Platform 周期延时 | 4096B | App 收集事实、Safety Evaluate/permit、快照发布、提交 Safety completion 与看门狗门控 |
+| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | Platform 周期延时 | 512W (2048B) | 状态估计、电源静止更新、Motion DTO/事件、提交 Motor completion |
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `HostCommunication_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
 | **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |

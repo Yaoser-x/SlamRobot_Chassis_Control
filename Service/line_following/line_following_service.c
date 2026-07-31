@@ -59,14 +59,29 @@ static uint8_t LineFollowing_SafetyActive(void)
 
 static void LineFollowing_SubmitCommand(float linear_x, float angular_z, uint32_t input_generation)
 {
-    command_velocity_t cmd = {
-        .linear_x     = linear_x,
-        .angular_z    = angular_z,
-        .enable       = 1U,
-        .source       = COMMAND_SOURCE_LINE,
-        .timestamp_ms = PlatformTime_TaskNowMs(),
+    command_intent_t intent = {
+        .kind                       = COMMAND_INTENT_ACTIVE,
+        .source                     = COMMAND_SOURCE_LINE,
+        .linear_x                   = linear_x,
+        .angular_z                  = angular_z,
+        .sample_time_ms             = PlatformTime_TaskNowMs(),
+        .producer_generation        = g_line_state.generation,
+        .expected_revoke_generation = input_generation,
     };
-    (void)CommandManagement_SetForGeneration(&cmd, input_generation);
+    (void)CommandManagement_ApplyIntent(&intent);
+}
+
+static void LineFollowing_ApplySlotIntent(command_intent_kind_t kind, uint32_t input_generation)
+{
+    command_intent_t intent = {
+        .kind                       = kind,
+        .source                     = COMMAND_SOURCE_LINE,
+        .sample_time_ms             = PlatformTime_TaskNowMs(),
+        .producer_generation        = g_line_state.generation,
+        .expected_revoke_generation = input_generation,
+    };
+
+    (void)CommandManagement_ApplyIntent(&intent);
 }
 
 static float LineFollowing_ClampFloat(float value, float limit)
@@ -209,7 +224,7 @@ void LineFollowing_Update(void)
         next_state.lost_reason     = LINE_LOST_STALE;
         if (sensor.timestamp_ms > 0U)
         {
-            CommandManagement_ClearSource(COMMAND_SOURCE_LINE);
+            LineFollowing_ApplySlotIntent(COMMAND_INTENT_RELEASE, input_generation);
         }
         (void)LineFollowing_Publish(&next_state, control_generation);
         return;
@@ -247,7 +262,7 @@ void LineFollowing_Update(void)
         next_state.lost_reason     = LINE_LOST_NO_CHANNEL;
         if (g_lost_streak >= params.line_lost_debounce_frames)
         {
-            CommandManagement_ClearSource(COMMAND_SOURCE_LINE);
+            LineFollowing_ApplySlotIntent(COMMAND_INTENT_RELEASE, input_generation);
         }
         (void)LineFollowing_Publish(&next_state, control_generation);
         return;
@@ -544,11 +559,11 @@ line_following_result_t LineFollowing_Enable(uint8_t enable)
     {
         if (enable == 0U && result == LINE_FOLLOWING_RESULT_APPLIED)
         {
-            (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_LINE);
+            LineFollowing_ApplySlotIntent(COMMAND_INTENT_REARM, input_generation);
         }
         else
         {
-            CommandManagement_ClearSource(COMMAND_SOURCE_LINE);
+            LineFollowing_ApplySlotIntent(COMMAND_INTENT_RELEASE, input_generation);
         }
     }
     return result;

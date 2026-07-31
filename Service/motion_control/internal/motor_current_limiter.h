@@ -5,6 +5,7 @@
 
 #include "motor_driver.h"
 #include "motion_control_config.h"
+#include "parameter_management_types.h"
 #include "power_management_status.h"
 
 #ifdef __cplusplus
@@ -28,6 +29,7 @@ extern "C"
     int16_t MotorCurrentLimiter_ApplyMotorLimit(motor_id_t                       motor,
                                                 int16_t                          requested_permille,
                                                 const power_management_status_t *power_status,
+                                                const param_model_t             *params,
                                                 uint32_t                         now_ms,
                                                 uint8_t                         *limited);
     void    MotorCurrentLimiter_GetState(motor_current_limiter_state_t *state);

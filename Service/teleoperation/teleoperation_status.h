@@ -25,12 +25,16 @@ typedef struct
     uint8_t  heading_active;
     uint8_t  heading_end_reason;
     uint8_t  pressed_btn2;
+    uint8_t  sample_valid;
+    uint8_t  dpad_active;
+    uint8_t  macro_edge;
     uint32_t heading_gate_flags;
     uint32_t imu_age_ms;
     float    heading_target_deg;
     float    heading_accumulated_deg;
     float    linear_x;
     float    angular_z;
+    float    stick_max_normalized;
     uint32_t rx_ok_count;
     uint32_t rx_fail_count;
     uint8_t  line_tracking_enabled;

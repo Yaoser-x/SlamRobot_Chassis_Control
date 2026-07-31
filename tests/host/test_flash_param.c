@@ -4,6 +4,7 @@
 #include "parameter_imu_calibration_types.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 _Static_assert(sizeof(flash_param_bundle_t) == 340U, "Beta4 bundle layout changed");
@@ -31,7 +32,7 @@ static void require_int(int condition, const char *message)
     if (!condition)
     {
         (void)printf("FAIL: %s\n", message);
-        __builtin_exit(1);
+        exit(1);
     }
 }
 
@@ -66,6 +67,9 @@ static void test_schema4_matches_beta4_golden(const char *fixture_path)
     uint32_t             sequence = 0U;
 
     make_bundle(&bundle, 0.375f);
+    bundle.params.pid_kd[MOTOR_ID_M1] = 0.05f;
+    bundle.params.pid_kd[MOTOR_ID_M2] = 0.15f;
+    bundle.params.pid_kd[MOTOR_ID_M3] = 0.18f;
     require_int(FlashParam_EncodeBundle(&bundle, 0x10203040UL, encoded, sizeof(encoded)) == FLASH_PARAM_STATUS_OK,
                 "schema4 fixed-sequence image encodes");
     load_hex_fixture(fixture_path, golden, sizeof(golden));

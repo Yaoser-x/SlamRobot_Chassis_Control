@@ -1,6 +1,7 @@
 #include "esp12f_flash_bridge.h"
 
 #include "command_management_service.h"
+#include "motion_maintenance_orchestrator.h"
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
 #include "esp12f_boot_control.h"
@@ -21,7 +22,7 @@ static void Esp12fFlashBridge_ReleaseMaintenance(void)
     if (bridge_maintenance_lock_held != 0U)
     {
         bridge_maintenance_lock_held = 0U;
-        MotionControl_EndMaintenance();
+        AppMotionMaintenance_End();
     }
 }
 
@@ -49,7 +50,7 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
     {
         return 1U;
     }
-    if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
     {
         return 0U;
     }

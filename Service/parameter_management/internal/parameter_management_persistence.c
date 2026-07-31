@@ -20,7 +20,12 @@ uint8_t ParameterManagement_Save(void)
     flash_param_bundle_t bundle;
 
     ParameterManagementInternal_BuildBundle(&bundle);
-    return (ParamPersistence_Save(&bundle) == FLASH_PARAM_STATUS_OK) ? 1U : 0U;
+    if (ParamPersistence_Save(&bundle) != FLASH_PARAM_STATUS_OK)
+    {
+        return 0U;
+    }
+    ParameterManagementInternal_CommitPersisted(&bundle.params);
+    return 1U;
 }
 
 uint8_t ParameterManagement_ResetAndSaveDefaults(void)
@@ -35,5 +40,6 @@ uint8_t ParameterManagement_ResetAndSaveDefaults(void)
     }
     ParameterManagement_ResetToDefaults();
     ParameterManagement_SetImuCalibration(&bundle.imu_calibration);
+    ParameterManagementInternal_CommitPersisted(&bundle.params);
     return 1U;
 }

@@ -19,6 +19,8 @@ typedef struct
     uint32_t overcurrent_startup_rearm_ms;
     uint8_t  battery_low_monitor_enabled;
     uint8_t  overcurrent_fault_enabled;
+    uint8_t  remote_velocity_requires_imu;
+    uint32_t motion_permit_valid_ms;
     float    current_observe_a[SAFETY_MANAGEMENT_MOTOR_COUNT];
     float    current_fault_a[SAFETY_MANAGEMENT_MOTOR_COUNT];
     uint16_t current_fault_debounce_ms;

@@ -1,25 +1,19 @@
 #include "safety_management_service.h"
 
 #include "battery_voltage_monitor.h"
-#include "motor_hardware_layout.h"
-#include "command_management_service.h"
-#include "motor_driver.h"
 #include "platform_critical.h"
-#include "platform_time.h"
-#include "power_management_service.h"
 #include "fault_stop_policy.h"
-#include "state_estimation_service.h"
-#include "system_monitoring_service.h"
+#include "safety_capability_policy.h"
 
 static safety_management_config_t safety_config;
 static safety_management_status_t monitor_state;
-static uint16_t                   overcurrent_count[MOTOR_ID_COUNT];
-static uint32_t                   current_observe_over_limit_count[MOTOR_ID_COUNT];
-static uint32_t                   current_fault_would_latch_count[MOTOR_ID_COUNT];
-static uint8_t                    motor_output_active[MOTOR_ID_COUNT];
-static uint8_t                    startup_blank_armed[MOTOR_ID_COUNT];
-static uint32_t                   overcurrent_blank_until_ms[MOTOR_ID_COUNT];
-static uint32_t                   inactive_since_ms[MOTOR_ID_COUNT];
+static uint16_t                   overcurrent_count[SAFETY_MANAGEMENT_MOTOR_COUNT];
+static uint32_t                   current_observe_over_limit_count[SAFETY_MANAGEMENT_MOTOR_COUNT];
+static uint32_t                   current_fault_would_latch_count[SAFETY_MANAGEMENT_MOTOR_COUNT];
+static uint8_t                    motor_output_active[SAFETY_MANAGEMENT_MOTOR_COUNT];
+static uint8_t                    startup_blank_armed[SAFETY_MANAGEMENT_MOTOR_COUNT];
+static uint32_t                   overcurrent_blank_until_ms[SAFETY_MANAGEMENT_MOTOR_COUNT];
+static uint32_t                   inactive_since_ms[SAFETY_MANAGEMENT_MOTOR_COUNT];
 static battery_voltage_monitor_t  battery_voltage_monitor;
 static uint8_t                    emergency_stop;
 static uint8_t                    fault_stop;
@@ -28,8 +22,10 @@ static uint8_t                    safety_initialized;
 static uint8_t                    normal_runtime_permit;
 static uint8_t                    diagnostic_runtime_permit;
 static uint32_t                   gate_decision_generation;
+static safety_capability_permit_t current_capabilities;
+static safety_motion_permit_t     current_motion_permit;
 
-static const uint32_t overcurrent_flags[MOTOR_ID_COUNT] = {
+static const uint32_t overcurrent_flags[SAFETY_MANAGEMENT_MOTOR_COUNT] = {
     SYSTEM_ERROR_M1_OVERCURRENT,
     SYSTEM_ERROR_M2_OVERCURRENT,
     SYSTEM_ERROR_M3_OVERCURRENT,
@@ -58,10 +54,11 @@ static uint8_t SafetyManagement_TimeReached(uint32_t now_ms, uint32_t deadline_m
 }
 
 static void SafetyManagement_UpdateOvercurrentCounters(const power_management_status_t *adc_state,
-                                                       const uint8_t                    blanked[MOTOR_ID_COUNT],
-                                                       const uint16_t                   previous_count[MOTOR_ID_COUNT],
-                                                       uint16_t                         next_count[MOTOR_ID_COUNT],
-                                                       uint32_t                        *new_latched_flags)
+                                                       const uint8_t  blanked[SAFETY_MANAGEMENT_MOTOR_COUNT],
+                                                       const uint16_t previous_count[SAFETY_MANAGEMENT_MOTOR_COUNT],
+                                                       uint16_t       next_count[SAFETY_MANAGEMENT_MOTOR_COUNT],
+                                                       uint8_t        enabled_mask,
+                                                       uint32_t      *new_latched_flags)
 {
     uint16_t debounce_count;
 
@@ -73,7 +70,7 @@ static void SafetyManagement_UpdateOvercurrentCounters(const power_management_st
     }
     if (safety_config.overcurrent_fault_enabled == 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+        for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
         {
             next_count[i] = 0U;
         }
@@ -82,17 +79,17 @@ static void SafetyManagement_UpdateOvercurrentCounters(const power_management_st
 
     if (adc_state->current_control_valid == 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+        for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
         {
             next_count[i] = 0U;
         }
         return;
     }
 
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
         next_count[i] = previous_count[i];
-        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) == 0U)
+        if ((enabled_mask & (uint8_t)(1U << i)) == 0U)
         {
             next_count[i] = 0U;
             continue;
@@ -121,7 +118,8 @@ static void SafetyManagement_UpdateOvercurrentCounters(const power_management_st
 }
 
 static void SafetyManagement_UpdateCurrentDryRun(const power_management_status_t *adc_state,
-                                                 const uint8_t                    blanked[MOTOR_ID_COUNT])
+                                                 const uint8_t blanked[SAFETY_MANAGEMENT_MOTOR_COUNT],
+                                                 uint8_t       enabled_mask)
 {
     uint16_t debounce_count;
     (void)blanked;
@@ -137,11 +135,11 @@ static void SafetyManagement_UpdateCurrentDryRun(const power_management_status_t
     {
         return;
     }
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
         uint8_t mask = (uint8_t)(1U << i);
-        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) == 0U
-            || (adc_state->current_control_valid_mask & mask) == 0U || motor_output_active[i] == 0U)
+        if ((enabled_mask & mask) == 0U || (adc_state->current_control_valid_mask & mask) == 0U
+            || motor_output_active[i] == 0U)
         {
             continue;
         }
@@ -164,7 +162,9 @@ uint8_t SafetyManagement_ValidateConfig(const safety_management_config_t *config
             && config->battery_recover_debounce_ms > 0UL && config->update_period_ms > 0UL
             && config->overcurrent_startup_blank_ms > 0UL && config->overcurrent_startup_rearm_ms > 0UL
             && config->current_fault_debounce_ms > 0U && config->battery_low_monitor_enabled <= 1U
-            && config->overcurrent_fault_enabled <= 1U)
+            && config->overcurrent_fault_enabled <= 1U && config->remote_velocity_requires_imu <= 1U
+            && config->motion_permit_valid_ms >= config->update_period_ms
+            && config->motion_permit_valid_ms <= config->update_period_ms * 2UL)
                ? 1U
                : 0U;
 }
@@ -191,18 +191,26 @@ uint8_t SafetyManagement_Init(const safety_management_config_t *config)
     maintenance_lock          = 0U;
     normal_runtime_permit     = 0U;
     diagnostic_runtime_permit = 0U;
+    current_capabilities      = (safety_capability_permit_t){0};
+    current_motion_permit     = (safety_motion_permit_t){
+            .generation   = 1UL,
+            .valid_for_ms = config->motion_permit_valid_ms,
+    };
     gate_decision_generation++;
     if (gate_decision_generation == 0UL)
     {
         gate_decision_generation = 1UL;
     }
-    monitor_state.motion_allowed = 0U;
-    monitor_state.runtime_state  = SAFETY_STATE_BOOT_SAFE;
-    monitor_state.generation     = 1UL;
-    safety_initialized           = 1U;
+    monitor_state.motion_allowed           = 0U;
+    monitor_state.runtime_state            = SAFETY_STATE_BOOT_SAFE;
+    monitor_state.capabilities             = current_capabilities;
+    monitor_state.motion_permit            = current_motion_permit;
+    monitor_state.gate_decision_generation = gate_decision_generation;
+    monitor_state.generation               = 1UL;
+    safety_initialized                     = 1U;
     PlatformCritical_Exit(critical);
     BatteryVoltageMonitor_Init(&battery_voltage_monitor);
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
         overcurrent_count[i]                = 0U;
         current_observe_over_limit_count[i] = 0UL;
@@ -212,7 +220,6 @@ uint8_t SafetyManagement_Init(const safety_management_config_t *config)
         overcurrent_blank_until_ms[i]       = 0U;
         inactive_since_ms[i]                = 0U;
     }
-    CommandManagement_SetMotionGate(0U, gate_decision_generation);
     return 1U;
 }
 
@@ -241,50 +248,49 @@ uint8_t SafetyManagement_IsInitialized(void)
     return safety_initialized;
 }
 
-void SafetyManagement_Update(void)
+void SafetyManagement_UpdateWithInput(const safety_management_input_t *input)
 {
-    power_management_status_t        adc_state;
-    state_estimation_wheel_status_t  encoder_state;
-    motor_driver_state_t             motor_state;
-    uint8_t                          active_source;
-    system_monitoring_task_health_t  task_health;
-    safety_management_status_t       next_state;
-    uint16_t                         previous_overcurrent_count[MOTOR_ID_COUNT];
-    uint16_t                         next_overcurrent_count[MOTOR_ID_COUNT];
-    uint8_t                          overcurrent_blanked[MOTOR_ID_COUNT];
-    uint32_t                         new_latched_flags = 0U;
-    uint32_t                         latched_after_commit;
-    uint8_t                          request_fault_stop = 0U;
-    uint8_t                          release_fault_stop = 0U;
-    uint8_t                          battery_sample_valid;
-    uint8_t                          battery_critical_latched;
-    battery_voltage_monitor_result_t battery_result;
-    uint32_t                         auto_clear_latched_flags = 0UL;
-    uint32_t                         now_ms;
-    uint32_t                         primask;
+    const power_management_status_t       *adc_state;
+    const state_estimation_wheel_status_t *encoder_state;
+    const safety_motor_value_t            *motor_state;
+    const system_monitoring_task_health_t *task_health;
+    safety_management_status_t             next_state;
+    uint16_t                               previous_overcurrent_count[SAFETY_MANAGEMENT_MOTOR_COUNT];
+    uint16_t                               next_overcurrent_count[SAFETY_MANAGEMENT_MOTOR_COUNT];
+    uint8_t                                overcurrent_blanked[SAFETY_MANAGEMENT_MOTOR_COUNT];
+    uint32_t                               new_latched_flags = 0U;
+    uint32_t                               latched_after_commit;
+    uint8_t                                request_fault_stop = 0U;
+    uint8_t                                release_fault_stop = 0U;
+    uint8_t                                battery_sample_valid;
+    uint8_t                                battery_critical_latched;
+    battery_voltage_monitor_result_t       battery_result;
+    uint32_t                               auto_clear_latched_flags = 0UL;
+    uint32_t                               now_ms;
+    uint32_t                               primask;
 
-    now_ms = PlatformTime_TaskNowMs();
-    SystemMonitoring_UpdateTimeouts(now_ms);
-    PowerManagement_Update();
-    MotorDriver_UpdateFaults();
-    (void)PowerManagement_GetStatus(&adc_state);
-    (void)StateEstimation_GetWheel(&encoder_state);
-    MotorDriver_GetState(&motor_state);
-    active_source = (uint8_t)CommandManagement_GetActiveSource(now_ms);
-    (void)SystemMonitoring_GetTaskHealth(&task_health);
+    if (input == 0)
+    {
+        return;
+    }
+    now_ms        = input->now_ms;
+    adc_state     = &input->power.value;
+    encoder_state = &input->wheel.value;
+    motor_state   = &input->motor.value;
+    task_health   = &input->system.value.task_health;
 
     primask                  = PlatformCritical_Enter();
     battery_critical_latched = ((monitor_state.latched_error_flags & SYSTEM_ERROR_BATTERY_CRITICAL) != 0U) ? 1U : 0U;
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
         previous_overcurrent_count[i] = overcurrent_count[i];
     }
     PlatformCritical_Exit(primask);
 
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
         uint8_t active =
-            (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.effective_pwm[i] != 0) ? 1U : 0U;
+            ((motor_state->enabled_mask & (uint8_t)(1U << i)) != 0U && motor_state->effective_pwm[i] != 0) ? 1U : 0U;
         if (active != 0U)
         {
             inactive_since_ms[i] = now_ms;
@@ -315,39 +321,44 @@ void SafetyManagement_Update(void)
                 : 0U;
     }
 
-    SafetyManagement_UpdateCurrentDryRun(&adc_state, overcurrent_blanked);
+    SafetyManagement_UpdateCurrentDryRun(adc_state, overcurrent_blanked, motor_state->enabled_mask);
 
     next_state                            = (safety_management_status_t){0};
-    next_state.battery_voltage            = adc_state.battery_voltage;
-    next_state.left_current_a             = adc_state.left_current_a;
-    next_state.right_current_a            = adc_state.right_current_a;
-    next_state.current_control_valid      = adc_state.current_control_valid;
-    next_state.current_control_valid_mask = adc_state.current_control_valid_mask;
-    next_state.control_mode               = active_source;
-    next_state.task_timeout_mask          = SystemMonitoring_GetTimeoutMask();
+    next_state.battery_voltage            = adc_state->battery_voltage;
+    next_state.left_current_a             = adc_state->left_current_a;
+    next_state.right_current_a            = adc_state->right_current_a;
+    next_state.current_control_valid      = adc_state->current_control_valid;
+    next_state.current_control_valid_mask = adc_state->current_control_valid_mask;
+    next_state.active_source              = (uint8_t)input->command.value.active_source;
+    next_state.task_timeout_mask          = 0U;
     for (uint8_t i = 0U; i < (uint8_t)SYSTEM_MONITORING_TASK_COUNT; ++i)
     {
-        next_state.task_last_heartbeat_ms[i] = task_health.last_heartbeat_ms[i];
-        next_state.task_timeout_count[i]     = task_health.timeout_count[i];
-        next_state.task_timed_out[i]         = task_health.timed_out[i];
+        next_state.task_last_heartbeat_ms[i] = task_health->last_heartbeat_ms[i];
+        next_state.task_timeout_count[i]     = task_health->timeout_count[i];
+        next_state.task_timed_out[i]         = task_health->timed_out[i];
+        if (task_health->timed_out[i] != 0U)
+        {
+            next_state.task_timeout_mask |= (uint16_t)(1U << i);
+        }
     }
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
-        next_state.motor_current_a[i]                  = adc_state.current_a[i];
+        next_state.motor_current_a[i]                  = adc_state->current_a[i];
         next_state.current_observe_over_limit_count[i] = current_observe_over_limit_count[i];
         next_state.current_fault_would_latch_count[i]  = current_fault_would_latch_count[i];
-        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+        if ((motor_state->enabled_mask & (uint8_t)(1U << i)) != 0U && motor_state->fault_active[i] != 0U)
         {
             next_state.motor_fault_mask |= (uint8_t)(1U << i);
         }
     }
 
-    SafetyManagement_UpdateOvercurrentCounters(&adc_state,
+    SafetyManagement_UpdateOvercurrentCounters(adc_state,
                                                overcurrent_blanked,
                                                previous_overcurrent_count,
                                                next_overcurrent_count,
+                                               motor_state->enabled_mask,
                                                &new_latched_flags);
-    battery_sample_valid = SafetyManagement_BatterySampleValid(&adc_state);
+    battery_sample_valid = SafetyManagement_BatterySampleValid(adc_state);
     BatteryVoltageMonitor_Update(&battery_voltage_monitor,
                                  &safety_config,
                                  next_state.battery_voltage,
@@ -367,25 +378,25 @@ void SafetyManagement_Update(void)
     {
         auto_clear_latched_flags |= SYSTEM_ERROR_BATTERY_CRITICAL;
     }
-    if (encoder_state.speed_valid_all == 0U)
+    if (encoder_state->speed_valid_all == 0U)
     {
         next_state.error_flags |= SYSTEM_ERROR_ENCODER_INVALID;
     }
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
-        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+        if ((motor_state->enabled_mask & (uint8_t)(1U << i)) != 0U && motor_state->fault_active[i] != 0U)
         {
             new_latched_flags |= SYSTEM_ERROR_DRV_FAULT;
         }
     }
-    if (motor_state.tim1_break_latched != 0U)
+    if (motor_state->tim1_break_latched != 0U)
     {
         new_latched_flags |= SYSTEM_ERROR_TIM_BREAK;
     }
 
     primask                      = PlatformCritical_Enter();
     next_state.last_clear_result = monitor_state.last_clear_result;
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
         overcurrent_count[i] = next_overcurrent_count[i];
     }
@@ -410,13 +421,14 @@ void SafetyManagement_Update(void)
     {
         release_fault_stop = 1U;
     }
-    next_state.emergency_stop   = emergency_stop;
-    next_state.fault_stop       = fault_stop;
-    next_state.maintenance_lock = maintenance_lock;
-    next_state.motion_allowed   = SafetyManagement_MotionAllowed();
-    next_state.runtime_state    = monitor_state.runtime_state;
-    next_state.generation       = monitor_state.generation + 1UL;
-    monitor_state               = next_state;
+    next_state.emergency_stop           = emergency_stop;
+    next_state.fault_stop               = fault_stop;
+    next_state.maintenance_lock         = maintenance_lock;
+    next_state.motion_allowed           = SafetyManagement_MotionAllowed();
+    next_state.runtime_state            = monitor_state.runtime_state;
+    next_state.gate_decision_generation = gate_decision_generation;
+    next_state.generation               = monitor_state.generation + 1UL;
+    monitor_state                       = next_state;
     PlatformCritical_Exit(primask);
 
     if (request_fault_stop != 0U)
@@ -450,7 +462,6 @@ void SafetyManagement_ApplyRuntimePermit(uint8_t permit, safety_runtime_state_t 
 {
     safety_management_status_t next;
     uint8_t                    decision;
-    uint32_t                   decision_generation;
     uint32_t                   primask = PlatformCritical_Enter();
 
     normal_runtime_permit = (permit != 0U) ? 1U : 0U;
@@ -468,29 +479,110 @@ void SafetyManagement_ApplyRuntimePermit(uint8_t permit, safety_runtime_state_t 
     }
     decision = SafetyManagement_MotionAllowed();
     gate_decision_generation++;
-    next                = monitor_state;
-    next.motion_allowed = decision;
-    next.runtime_state  = runtime_state;
+    next                          = monitor_state;
+    next.motion_allowed           = decision;
+    next.runtime_state            = runtime_state;
+    next.gate_decision_generation = gate_decision_generation;
     next.generation++;
-    monitor_state       = next;
-    decision_generation = gate_decision_generation;
+    monitor_state = next;
     PlatformCritical_Exit(primask);
-    CommandManagement_SetMotionGate(decision, decision_generation);
 }
 
-safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
+void SafetyManagement_ApplyCapabilityDecision(const safety_capability_permit_t *capabilities,
+                                              uint8_t                           normal_motion_permit,
+                                              uint32_t                          now_ms,
+                                              safety_runtime_state_t            runtime_state)
 {
-    uint32_t                        clearable = FaultStopPolicy_ManualClearMask(mask);
-    safety_management_status_t      snapshot;
-    motor_driver_state_t            motor_state;
-    state_estimation_wheel_status_t encoder_state;
-    uint8_t                         clear_fault_stop = 0U;
-    uint32_t                        latched_after_clear;
-    safety_management_status_t      next;
-    uint32_t                        primask;
-    safety_clear_result_t           result = {
-                  .code           = SAFETY_CLEAR_RESULT_REJECTED,
-                  .requested_mask = mask,
+    safety_management_status_t next;
+    uint8_t                    decision;
+    uint8_t                    permit_changed;
+    uint32_t                   primask;
+
+    if (capabilities == 0)
+    {
+        return;
+    }
+    primask                           = PlatformCritical_Enter();
+    permit_changed                    = (current_motion_permit.base_motion != ((normal_motion_permit != 0U) ? 1U : 0U)
+                      || current_motion_permit.heading_assist != capabilities->heading_assist
+                      || current_motion_permit.maintenance_motion != capabilities->maintenance_motion)
+                                            ? 1U
+                                            : 0U;
+    current_capabilities              = *capabilities;
+    normal_runtime_permit             = (normal_motion_permit != 0U) ? 1U : 0U;
+    current_motion_permit.base_motion = normal_runtime_permit;
+    current_motion_permit.heading_assist     = capabilities->heading_assist;
+    current_motion_permit.maintenance_motion = capabilities->maintenance_motion;
+    current_motion_permit.issued_at_ms       = now_ms;
+    current_motion_permit.valid_for_ms       = safety_config.motion_permit_valid_ms;
+    if (permit_changed != 0U)
+    {
+        current_motion_permit.generation++;
+        if (current_motion_permit.generation == 0UL)
+        {
+            current_motion_permit.generation = 1UL;
+        }
+        gate_decision_generation++;
+    }
+    if (emergency_stop != 0U)
+    {
+        runtime_state = SAFETY_STATE_ESTOP;
+    }
+    else if (fault_stop != 0U || monitor_state.latched_error_flags != 0UL)
+    {
+        runtime_state = SAFETY_STATE_FAULT_LATCHED;
+    }
+    else if (maintenance_lock != 0U)
+    {
+        runtime_state = SAFETY_STATE_MAINTENANCE;
+    }
+    decision                      = SafetyManagement_MotionAllowed();
+    next                          = monitor_state;
+    next.motion_allowed           = decision;
+    next.runtime_state            = runtime_state;
+    next.capabilities             = current_capabilities;
+    next.motion_permit            = current_motion_permit;
+    next.gate_decision_generation = gate_decision_generation;
+    next.generation++;
+    monitor_state = next;
+    PlatformCritical_Exit(primask);
+}
+
+void SafetyManagement_EvaluateCapabilities(const safety_capability_input_t *input,
+                                           safety_capability_permit_t      *capabilities)
+{
+    SafetyCapabilityPolicy_Evaluate(input, &safety_config, capabilities);
+}
+
+uint32_t SafetyManagement_GetMotionPermit(safety_motion_permit_t *permit)
+{
+    uint32_t generation;
+    uint32_t primask;
+
+    if (permit == 0)
+    {
+        return 0UL;
+    }
+    primask    = PlatformCritical_Enter();
+    *permit    = current_motion_permit;
+    generation = current_motion_permit.generation;
+    PlatformCritical_Exit(primask);
+    return generation;
+}
+
+safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask, const safety_clear_input_t *input)
+{
+    uint32_t                               clearable = FaultStopPolicy_ManualClearMask(mask);
+    safety_management_status_t             snapshot;
+    const safety_motor_value_t            *motor_state;
+    const state_estimation_wheel_status_t *encoder_state;
+    uint8_t                                clear_fault_stop = 0U;
+    uint32_t                               latched_after_clear;
+    safety_management_status_t             next;
+    uint32_t                               primask;
+    safety_clear_result_t                  result = {
+                         .code           = SAFETY_CLEAR_RESULT_REJECTED,
+                         .requested_mask = mask,
     };
 
     primask = PlatformCritical_Enter();
@@ -505,16 +597,21 @@ safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
     }
     PlatformCritical_Exit(primask);
 
-    MotorDriver_GetState(&motor_state);
-    (void)StateEstimation_GetWheel(&encoder_state);
+    if (input == 0 || input->motor.validity == 0U || input->wheel.validity == 0U)
+    {
+        clearable = 0U;
+    }
+    motor_state   = (input != 0) ? &input->motor.value : 0;
+    encoder_state = (input != 0) ? &input->wheel.value : 0;
 
     primask  = PlatformCritical_Enter();
     snapshot = monitor_state;
     PlatformCritical_Exit(primask);
 
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
     {
-        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && (mask & overcurrent_flags[i]) != 0U
+        if (motor_state != 0 && (motor_state->enabled_mask & (uint8_t)(1U << i)) != 0U
+            && (mask & overcurrent_flags[i]) != 0U
             && (((snapshot.current_control_valid_mask & (uint8_t)(1U << i)) == 0U)
                 || SafetyManagement_CurrentBelowFaultThreshold(i, snapshot.motor_current_a[i]) == 0U))
         {
@@ -523,25 +620,27 @@ safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
     }
     if ((mask & SYSTEM_ERROR_DRV_FAULT) != 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+        for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
         {
-            if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U && motor_state.fault_active[i] != 0U)
+            if (motor_state == 0
+                || ((motor_state->enabled_mask & (uint8_t)(1U << i)) != 0U && motor_state->fault_active[i] != 0U))
             {
                 clearable &= ~SYSTEM_ERROR_DRV_FAULT;
             }
         }
     }
-    if ((mask & SYSTEM_ERROR_TIM_BREAK) != 0U && MotorDriver_ClearBreakLatch() == 0U)
+    if ((mask & SYSTEM_ERROR_TIM_BREAK) != 0U && (input == 0 || input->tim_break_clear_succeeded == 0U))
     {
         clearable &= ~SYSTEM_ERROR_TIM_BREAK;
     }
     if ((mask & SYSTEM_ERROR_ENCODER_FEEDBACK_LOST) != 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+        for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
         {
-            if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U
-                && (encoder_state.speed_valid[i] == 0U || motor_state.requested_pwm[i] != 0
-                    || motor_state.applied_pwm[i] != 0 || motor_state.effective_pwm[i] != 0))
+            if (motor_state == 0 || encoder_state == 0
+                || ((motor_state->enabled_mask & (uint8_t)(1U << i)) != 0U
+                    && (encoder_state->speed_valid[i] == 0U || motor_state->requested_pwm[i] != 0
+                        || motor_state->applied_pwm[i] != 0 || motor_state->effective_pwm[i] != 0)))
             {
                 clearable &= ~SYSTEM_ERROR_ENCODER_FEEDBACK_LOST;
             }
@@ -563,7 +662,7 @@ safety_clear_result_t SafetyManagement_ClearLatchedFaults(uint32_t mask)
     latched_after_clear = next.latched_error_flags;
     if (FaultStopPolicy_RequiresFaultStop(latched_after_clear) == 0U)
     {
-        for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+        for (uint8_t i = 0U; i < SAFETY_MANAGEMENT_MOTOR_COUNT; ++i)
         {
             overcurrent_count[i] = 0U;
         }
@@ -613,8 +712,7 @@ void SafetyManagement_SetEmergencyStop(uint8_t enabled)
 {
     safety_management_status_t next;
     uint8_t                    decision;
-    uint8_t                    value = (enabled != 0U) ? 1U : 0U;
-    uint32_t                   decision_generation;
+    uint8_t                    value   = (enabled != 0U) ? 1U : 0U;
     uint32_t                   primask = PlatformCritical_Enter();
 
     if (emergency_stop == value)
@@ -634,21 +732,19 @@ void SafetyManagement_SetEmergencyStop(uint8_t enabled)
     {
         next.error_flags &= ~SYSTEM_ERROR_ESTOP;
     }
-    decision            = SafetyManagement_MotionAllowed();
-    next.motion_allowed = decision;
+    decision                      = SafetyManagement_MotionAllowed();
+    next.motion_allowed           = decision;
+    next.gate_decision_generation = gate_decision_generation;
     next.generation++;
-    monitor_state       = next;
-    decision_generation = gate_decision_generation;
+    monitor_state = next;
     PlatformCritical_Exit(primask);
-    CommandManagement_SetMotionGate(decision, decision_generation);
 }
 
 void SafetyManagement_SetFaultStop(uint8_t enabled)
 {
     safety_management_status_t next;
     uint8_t                    decision;
-    uint8_t                    value = (enabled != 0U) ? 1U : 0U;
-    uint32_t                   decision_generation;
+    uint8_t                    value   = (enabled != 0U) ? 1U : 0U;
     uint32_t                   primask = PlatformCritical_Enter();
 
     if (fault_stop == value)
@@ -668,19 +764,17 @@ void SafetyManagement_SetFaultStop(uint8_t enabled)
     {
         next.error_flags &= ~SYSTEM_ERROR_FAULT_STOP;
     }
-    decision            = SafetyManagement_MotionAllowed();
-    next.motion_allowed = decision;
+    decision                      = SafetyManagement_MotionAllowed();
+    next.motion_allowed           = decision;
+    next.gate_decision_generation = gate_decision_generation;
     next.generation++;
-    monitor_state       = next;
-    decision_generation = gate_decision_generation;
+    monitor_state = next;
     PlatformCritical_Exit(primask);
-    CommandManagement_SetMotionGate(decision, decision_generation);
 }
 
 uint8_t SafetyManagement_BeginMaintenance(void)
 {
     safety_management_status_t next;
-    uint32_t                   decision_generation;
     uint32_t                   primask = PlatformCritical_Enter();
 
     if (maintenance_lock != 0U)
@@ -690,14 +784,13 @@ uint8_t SafetyManagement_BeginMaintenance(void)
     }
     maintenance_lock = 1U;
     gate_decision_generation++;
-    next                  = monitor_state;
-    next.maintenance_lock = 1U;
-    next.motion_allowed   = 0U;
+    next                          = monitor_state;
+    next.maintenance_lock         = 1U;
+    next.motion_allowed           = 0U;
+    next.gate_decision_generation = gate_decision_generation;
     next.generation++;
-    monitor_state       = next;
-    decision_generation = gate_decision_generation;
+    monitor_state = next;
     PlatformCritical_Exit(primask);
-    CommandManagement_SetMotionGate(0U, decision_generation);
     return 1U;
 }
 
@@ -705,7 +798,6 @@ void SafetyManagement_EndMaintenance(void)
 {
     safety_management_status_t next;
     uint8_t                    decision;
-    uint32_t                   decision_generation;
     uint32_t                   primask = PlatformCritical_Enter();
 
     if (maintenance_lock == 0U)
@@ -715,15 +807,14 @@ void SafetyManagement_EndMaintenance(void)
     }
     maintenance_lock = 0U;
     gate_decision_generation++;
-    decision              = SafetyManagement_MotionAllowed();
-    next                  = monitor_state;
-    next.maintenance_lock = 0U;
-    next.motion_allowed   = decision;
+    decision                      = SafetyManagement_MotionAllowed();
+    next                          = monitor_state;
+    next.maintenance_lock         = 0U;
+    next.motion_allowed           = decision;
+    next.gate_decision_generation = gate_decision_generation;
     next.generation++;
-    monitor_state       = next;
-    decision_generation = gate_decision_generation;
+    monitor_state = next;
     PlatformCritical_Exit(primask);
-    CommandManagement_SetMotionGate(decision, decision_generation);
 }
 
 uint8_t SafetyManagement_IsEmergencyStop(void)

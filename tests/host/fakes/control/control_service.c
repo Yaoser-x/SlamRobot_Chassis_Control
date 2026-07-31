@@ -17,6 +17,7 @@ static void ControlService_EnsureCommandInitialized(void)
             CONTROL_TIMEOUT_ESP12F_MS,
             CONTROL_TIMEOUT_LINE_MS,
             CONTROL_TIMEOUT_DEBUG_MS,
+            2000U,
         };
         (void)CommandManagement_Init(&config);
     }
@@ -38,6 +39,8 @@ static void ControlService_EnsureSafetyInitialized(void)
             .overcurrent_startup_rearm_ms = MOTOR_OVERCURRENT_STARTUP_REARM_MS,
             .battery_low_monitor_enabled  = BATTERY_LOW_MONITOR_ENABLED,
             .overcurrent_fault_enabled    = MOTOR_ADC_OVERCURRENT_FAULT_ENABLED,
+            .remote_velocity_requires_imu = 0U,
+            .motion_permit_valid_ms       = CHASSIS_ADC_PERIOD_MS * 2U,
             .current_observe_a            = {1.5f, 1.5f, 1.5f, 1.5f},
             .current_fault_a              = {2.5f, 2.5f, 2.5f, 2.5f},
             .current_fault_debounce_ms    = 100U,

@@ -1,7 +1,9 @@
 #include "remote_operation_orchestrator.h"
 
 #include "line_following_service.h"
+#include "control_mode_coordinator.h"
 #include "safety_management_service.h"
+#include "safety_workflow_coordinator.h"
 
 communication_operation_stage_t RemoteOperationOrchestrator_Dispatch(const communication_operation_request_t *request,
                                                                      uint32_t *detail_mask)
@@ -17,12 +19,12 @@ communication_operation_stage_t RemoteOperationOrchestrator_Dispatch(const commu
     switch (request->kind)
     {
         case COMMUNICATION_OPERATION_ESTOP:
-            SafetyManagement_SetEmergencyStop(1U);
+            AppSafetyWorkflow_SetEmergencyStop(1U);
             return (SafetyManagement_IsEmergencyStop() != 0U) ? COMMUNICATION_OPERATION_BUSINESS_APPLIED
                                                               : COMMUNICATION_OPERATION_BUSINESS_REJECTED;
         case COMMUNICATION_OPERATION_CLEAR_FAULT:
         {
-            safety_clear_result_t result = SafetyManagement_ClearLatchedFaults(0xFFFFFFFFUL);
+            safety_clear_result_t result = AppSafetyWorkflow_ClearLatchedFaults(0xFFFFFFFFUL);
 
             if (detail_mask != 0)
             {
@@ -39,7 +41,22 @@ communication_operation_stage_t RemoteOperationOrchestrator_Dispatch(const commu
             return COMMUNICATION_OPERATION_BUSINESS_REJECTED;
         }
         case COMMUNICATION_OPERATION_LINE_CTRL:
-            return (LineFollowing_Enable(request->value) == LINE_FOLLOWING_RESULT_APPLIED)
+            if (request->value != 0U)
+            {
+                if (ControlModeCoordinator_Request(CONTROL_MODE_LINE) == 0U)
+                {
+                    return COMMUNICATION_OPERATION_BUSINESS_REJECTED;
+                }
+                if (LineFollowing_Enable(0U) != LINE_FOLLOWING_RESULT_APPLIED)
+                {
+                    return COMMUNICATION_OPERATION_BUSINESS_REJECTED;
+                }
+                return (LineFollowing_Enable(1U) == LINE_FOLLOWING_RESULT_APPLIED)
+                           ? COMMUNICATION_OPERATION_BUSINESS_APPLIED
+                           : COMMUNICATION_OPERATION_BUSINESS_REJECTED;
+            }
+            (void)LineFollowing_Enable(0U);
+            return (ControlModeCoordinator_Request(CONTROL_MODE_AUTO) != 0U)
                        ? COMMUNICATION_OPERATION_BUSINESS_APPLIED
                        : COMMUNICATION_OPERATION_BUSINESS_REJECTED;
         default:

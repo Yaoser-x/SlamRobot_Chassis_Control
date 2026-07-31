@@ -1,7 +1,7 @@
 #include "line_calibration_orchestrator.h"
 
 #include "line_following_maintenance.h"
-#include "motion_control_maintenance.h"
+#include "motion_maintenance_orchestrator.h"
 #include "parameter_management_service.h"
 #include "platform_critical.h"
 #include "platform_time.h"
@@ -50,7 +50,7 @@ static void LineCalibrationOrchestrator_Finish(app_line_calibration_led_event_t 
     PlatformCritical_Exit(critical);
     if (release_maintenance != 0U)
     {
-        MotionControl_EndMaintenance();
+        AppMotionMaintenance_End();
     }
 }
 
@@ -110,7 +110,7 @@ app_line_calibration_result_t LineCalibrationOrchestrator_Request(app_line_calib
 
     if (new_session != 0U)
     {
-        if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+        if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
         {
             critical               = PlatformCritical_Enter();
             session.operation_busy = 0U;
@@ -175,7 +175,7 @@ app_line_calibration_result_t LineCalibrationOrchestrator_ApplyManual(void)
 
     if (acquired_here != 0U)
     {
-        if (MotionControl_BeginMaintenance() != MOTION_CONTROL_MAINTENANCE_OK)
+        if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
         {
             critical               = PlatformCritical_Enter();
             session.operation_busy = 0U;

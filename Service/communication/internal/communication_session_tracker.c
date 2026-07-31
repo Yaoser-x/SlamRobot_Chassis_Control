@@ -22,6 +22,8 @@ typedef struct
     uint8_t                     target_valid;
     uint8_t                     reject_reason;
     uint8_t                     ack_flags;
+    uint8_t                     refresh_token_valid;
+    command_refresh_token_t     refresh_token;
 } communication_session_slot_t;
 
 static communication_session_slot_t session_slots[COMMUNICATION_SESSION_SLOT_COUNT];
@@ -125,6 +127,7 @@ communication_session_decision_t CommunicationSessionTracker_Evaluate(communicat
             slot->received_sequence     = target->sequence;
             slot->last_target           = *target;
             slot->target_valid          = 1U;
+            slot->refresh_token_valid   = 0U;
             slot->last_valid_receive_ms = now_ms;
             slot->reject_reason         = COMMUNICATION_REJECT_NONE;
             slot->ack_flags             = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
@@ -158,6 +161,7 @@ communication_session_decision_t CommunicationSessionTracker_Evaluate(communicat
             slot->received_sequence     = target->sequence;
             slot->last_target           = *target;
             slot->target_valid          = 1U;
+            slot->refresh_token_valid   = 0U;
             slot->last_valid_receive_ms = now_ms;
             slot->reject_reason         = COMMUNICATION_REJECT_NONE;
             slot->ack_flags             = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
@@ -219,6 +223,54 @@ void CommunicationSessionTracker_RecordReject(communication_link_t link, uint8_t
     critical = PlatformCritical_Enter();
     CommunicationSessionTracker_Reject(&session_slots[(uint8_t)link], reject_reason);
     PlatformCritical_Exit(critical);
+}
+
+uint8_t CommunicationSessionTracker_SetRefreshToken(communication_link_t           link,
+                                                    uint32_t                       sequence,
+                                                    const command_refresh_token_t *token)
+{
+    communication_session_slot_t *slot;
+    platform_critical_state_t     critical;
+
+    if (CommunicationSessionTracker_LinkValid(link) == 0U || token == 0)
+    {
+        return 0U;
+    }
+    critical = PlatformCritical_Enter();
+    slot     = &session_slots[(uint8_t)link];
+    if (slot->active == 0U || slot->received_sequence != sequence)
+    {
+        PlatformCritical_Exit(critical);
+        return 0U;
+    }
+    slot->refresh_token       = *token;
+    slot->refresh_token_valid = 1U;
+    PlatformCritical_Exit(critical);
+    return 1U;
+}
+
+uint8_t CommunicationSessionTracker_GetRefreshToken(communication_link_t     link,
+                                                    uint32_t                 sequence,
+                                                    command_refresh_token_t *token)
+{
+    const communication_session_slot_t *slot;
+    platform_critical_state_t           critical;
+
+    if (CommunicationSessionTracker_LinkValid(link) == 0U || token == 0)
+    {
+        return 0U;
+    }
+    *token   = (command_refresh_token_t){0};
+    critical = PlatformCritical_Enter();
+    slot     = &session_slots[(uint8_t)link];
+    if (slot->active == 0U || slot->received_sequence != sequence || slot->refresh_token_valid == 0U)
+    {
+        PlatformCritical_Exit(critical);
+        return 0U;
+    }
+    *token = slot->refresh_token;
+    PlatformCritical_Exit(critical);
+    return 1U;
 }
 
 void CommunicationSessionTracker_GetSnapshot(communication_link_t link, communication_session_snapshot_t *snapshot)

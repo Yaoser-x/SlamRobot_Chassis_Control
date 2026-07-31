@@ -110,6 +110,9 @@ typedef struct
     uint8_t  left_speed_valid;
     uint8_t  right_speed_valid;
     uint8_t  speed_valid_all;
+    uint8_t  current_anomaly_mask;
+    uint8_t  latched_for_host_mask;
+    uint32_t anomaly_delivery_generation;
     uint32_t side_consistency_flags;
     uint32_t last_update_ms;
 } state_estimation_wheel_status_t;

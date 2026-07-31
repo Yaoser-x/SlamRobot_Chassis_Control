@@ -5,6 +5,7 @@
 
 #include "motion_control_config.h"
 #include "motion_control_status.h"
+#include "motion_control_types.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -15,8 +16,8 @@ extern "C"
     uint8_t MotionControl_ValidateConfig(const motion_control_config_t *config);
     /** Initialize the sole runtime motor-output owner with injected product configuration. */
     uint8_t MotionControl_Init(const motion_control_config_t *config);
-    /** Execute one motion-control cycle at the supplied monotonic timestamp. */
-    void MotionControl_Step(uint32_t now_ms);
+    /** Execute one cycle from an App-composed fact set and return cross-Service events. */
+    void MotionControl_StepWithInput(const motion_control_input_t *input, motion_control_event_t *event);
     /** Return whether a motion-control cycle is currently applying outputs. */
     uint8_t MotionControl_IsStepActive(void);
     /** Copy one complete published motion status and return its generation. */

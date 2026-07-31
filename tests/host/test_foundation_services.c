@@ -7,8 +7,10 @@
 #include "bmi270_driver.h"
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
+#include "motion_maintenance_orchestrator.h"
 #include "motor_driver.h"
 #include "parameter_management_service.h"
+#include "parameter_identity_crc.h"
 #include "parameter_persistence_backend.h"
 #include "power_management_service.h"
 #include "state_estimation_service.h"
@@ -19,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 static wheel_encoder_sample_t          fake_wheel_raw;
 static state_estimation_wheel_status_t fake_wheel;
@@ -38,6 +41,8 @@ static uint32_t                        external_call_in_critical_count;
 static uint32_t                        persistence_save_count;
 static flash_param_bundle_t            last_saved_bundle;
 static flash_param_status_t            fake_persistence_save_status;
+static flash_param_status_t            fake_persistence_load_status = FLASH_PARAM_STATUS_EMPTY;
+static flash_param_bundle_t            fake_persistence_load_bundle;
 
 static void require_int(int condition, const char *message)
 {
@@ -90,6 +95,13 @@ void WheelEstimationPipeline_Update(const wheel_encoder_sample_t    *sample,
         fake_wheel.count[index] = (int32_t)sample->count[index];
     }
     *status = fake_wheel;
+}
+
+uint8_t WheelEstimationPipeline_AcknowledgeAnomalyDelivery(state_estimation_wheel_status_t *status, uint32_t generation)
+{
+    (void)status;
+    (void)generation;
+    return 0U;
 }
 
 void Bmi270Driver_Init(void)
@@ -347,13 +359,13 @@ uint32_t MotionControl_GetStatus(motion_control_status_t *status)
     return status->generation;
 }
 
-motion_control_maintenance_result_t MotionControl_BeginMaintenance(void)
+app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
 {
     record_external_call();
-    return MOTION_CONTROL_MAINTENANCE_OK;
+    return APP_MOTION_MAINTENANCE_OK;
 }
 
-void MotionControl_EndMaintenance(void)
+void AppMotionMaintenance_End(void)
 {
     record_external_call();
 }
@@ -368,8 +380,12 @@ flash_param_status_t ParamPersistence_Save(const flash_param_bundle_t *bundle)
 
 flash_param_status_t ParamPersistence_Load(flash_param_bundle_t *bundle)
 {
-    (void)bundle;
-    return FLASH_PARAM_STATUS_EMPTY;
+    record_external_call();
+    if (fake_persistence_load_status == FLASH_PARAM_STATUS_OK)
+    {
+        *bundle = fake_persistence_load_bundle;
+    }
+    return fake_persistence_load_status;
 }
 
 static void test_parameter_owner_uses_injected_factory_and_monotonic_generation(void)
@@ -384,6 +400,10 @@ static void test_parameter_owner_uses_injected_factory_and_monotonic_generation(
     generation = ParameterManagement_GetStatus(&status);
     require_int(generation == 1UL && status.initialized != 0U, "parameter init publishes generation one");
     require_int(status.params.track_width_m == 0.176f, "injected Beta2 track width preserved");
+    for (uint8_t index = 0U; index < PARAM_MODEL_MOTOR_COUNT; ++index)
+    {
+        require_int(status.params.pid_kd[index] == 0.0f, "all active derivative gains default to zero");
+    }
 
     ram                = status.params;
     ram.max_linear_mps = 0.42f;
@@ -393,6 +413,69 @@ static void test_parameter_owner_uses_injected_factory_and_monotonic_generation(
     ParameterManagement_Defaults(&defaults);
     require_int(defaults.max_linear_mps == robot->parameter.factory_defaults.max_linear_mps,
                 "RAM override does not mutate factory defaults");
+}
+
+static void test_parameter_normalization_and_effective_identity(void)
+{
+    const robot_config_t         *robot = RobotConfig_GetDefault();
+    parameter_management_status_t status;
+    param_model_t                 invalid;
+    uint32_t                      raw_crc;
+    uint32_t                      persisted_before;
+
+    require_int(ParameterManagement_Init(&robot->parameter) != 0U, "parameter owner reinitializes for normalization");
+    (void)ParameterManagement_GetStatus(&status);
+    fake_persistence_load_bundle        = (flash_param_bundle_t){0};
+    fake_persistence_load_bundle.params = status.params;
+    ParameterImuCalibration_Default(&fake_persistence_load_bundle.imu_calibration);
+    fake_persistence_load_bundle.params.pid_kd[0] = 0.05f;
+    fake_persistence_load_bundle.params.pid_kd[1] = 0.15f;
+    fake_persistence_load_bundle.params.pid_kd[2] = 0.18f;
+    fake_persistence_load_bundle.params.pid_kd[3] = -0.0f;
+    raw_crc                      = ParameterIdentityCrc_Calculate(&fake_persistence_load_bundle.params);
+    fake_persistence_load_status = FLASH_PARAM_STATUS_OK;
+    persistence_save_count       = 0UL;
+
+    require_int(ParameterManagement_Load() != 0U, "valid schema-4 model loads");
+    require_int(persistence_save_count == 0UL, "load normalization does not write Flash");
+    (void)ParameterManagement_GetStatus(&status);
+    require_int(status.persisted_model_valid != 0U && status.persisted_parameter_crc32 == raw_crc,
+                "persisted CRC identifies the validated raw model");
+    require_int(status.effective_parameter_crc32 == ParameterManagement_GetIdentityCrc32(),
+                "HELLO identity API reports the effective model CRC");
+    require_int(status.effective_parameter_crc32 != status.persisted_parameter_crc32,
+                "normalization changes effective identity");
+    require_int((status.diagnostic_flags & PARAM_NORMALIZED_PID_KD) != 0UL,
+                "nonzero persisted derivative gain is observable");
+    require_int((status.diagnostic_flags & PARAM_PERSISTED_EFFECTIVE_MISMATCH) != 0UL,
+                "persisted and effective mismatch is observable");
+    for (uint8_t index = 0U; index < PARAM_MODEL_MOTOR_COUNT; ++index)
+    {
+        require_int(status.params.pid_kd[index] == 0.0f, "all four loaded derivative gains normalize to zero");
+    }
+
+    persisted_before             = status.persisted_parameter_crc32;
+    status.params.max_linear_mps = 0.41f;
+    require_int(ParameterManagement_Set(&status.params) != 0U, "effective runtime model can change after load");
+    (void)ParameterManagement_GetStatus(&status);
+    require_int(status.persisted_parameter_crc32 == persisted_before,
+                "runtime update does not rewrite persisted identity");
+    require_int(ParameterManagement_Save() != 0U, "explicit save persists the normalized model");
+    (void)ParameterManagement_GetStatus(&status);
+    require_int(status.persisted_parameter_crc32 == status.effective_parameter_crc32,
+                "explicit save makes persisted and effective identities equal");
+    require_int((status.diagnostic_flags & PARAM_PERSISTED_EFFECTIVE_MISMATCH) == 0UL,
+                "explicit save clears the mismatch fact");
+    for (uint8_t index = 0U; index < PARAM_MODEL_MOTOR_COUNT; ++index)
+    {
+        require_int(last_saved_bundle.params.pid_kd[index] == 0.0f,
+                    "explicit save writes zero derivative gain for every motor");
+    }
+
+    invalid           = status.params;
+    invalid.pid_kd[0] = NAN;
+    require_int(ParameterManagement_Set(&invalid) == 0U, "non-finite derivative gain is rejected before normalization");
+    fake_persistence_load_status = FLASH_PARAM_STATUS_EMPTY;
 }
 
 static void test_state_generations_and_freshness_are_independent(void)
@@ -603,6 +686,7 @@ static void test_factory_reset_persists_before_publishing_defaults(void)
 int main(void)
 {
     test_parameter_owner_uses_injected_factory_and_monotonic_generation();
+    test_parameter_normalization_and_effective_identity();
     test_state_generations_and_freshness_are_independent();
     test_state_estimation_owns_imu_lifecycle();
     test_power_owner_publishes_and_gates_zero_calibration();

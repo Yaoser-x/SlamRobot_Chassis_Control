@@ -171,7 +171,19 @@ log 0
 
 ## 数据分析
 
-### 静止漂移与 Allan 方差
+### 静止输出稳定性
+
+下面的 yaw 图与首尾漂移只描述 `yaw_output_stability`，不得作为 gyro ARW、BI 或 RRW 结论。
+正式陀螺噪声分析使用项目脚本和冻结方法：
+
+```powershell
+python scripts/analyze_imu.py lab05_static.csv --output-dir allan-out `
+  --firmware-sha <sha> --parameter-crc <effective-crc> `
+  --imu-odr 100Hz --imu-bandwidth-profile normal
+```
+
+默认读取 `imu_gyro_corr_x/y/z_dps`；无效质量样本会切断片段，不会删除后拼接。详见
+[RC2 陀螺噪声分析方法](../release/gyro-allan-method.md)。
 
 ```python
 import pandas as pd
@@ -184,25 +196,25 @@ t = df['t_ms'] / 1000.0
 fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
 
 # 加速度计
-axes[0].plot(t, df['imu_acc_x_mg'], label='X', alpha=0.7)
-axes[0].plot(t, df['imu_acc_y_mg'], label='Y', alpha=0.7)
-axes[0].plot(t, df['imu_acc_z_mg'], label='Z', alpha=0.7)
-axes[0].set_ylabel('Accel (mg)')
+axes[0].plot(t, df['imu_acc_x_g'], label='X', alpha=0.7)
+axes[0].plot(t, df['imu_acc_y_g'], label='Y', alpha=0.7)
+axes[0].plot(t, df['imu_acc_z_g'], label='Z', alpha=0.7)
+axes[0].set_ylabel('Accel (g)')
 axes[0].legend()
 axes[0].grid(alpha=0.3)
 
 # 陀螺仪（校正后）
-axes[1].plot(t, df['imu_gyro_corr_x_mdps']/1000, label='X corr', alpha=0.7)
-axes[1].plot(t, df['imu_gyro_corr_y_mdps']/1000, label='Y corr', alpha=0.7)
-axes[1].plot(t, df['imu_gyro_corr_z_mdps']/1000, label='Z corr', alpha=0.7)
+axes[1].plot(t, df['imu_gyro_corr_x_dps'], label='X corr', alpha=0.7)
+axes[1].plot(t, df['imu_gyro_corr_y_dps'], label='Y corr', alpha=0.7)
+axes[1].plot(t, df['imu_gyro_corr_z_dps'], label='Z corr', alpha=0.7)
 axes[1].set_ylabel('Gyro (dps)')
 axes[1].legend()
 axes[1].grid(alpha=0.3)
 
 # 欧拉角
-axes[2].plot(t, df['imu_roll_mdeg']/1000, label='Roll', alpha=0.7)
-axes[2].plot(t, df['imu_pitch_mdeg']/1000, label='Pitch', alpha=0.7)
-axes[2].plot(t, df['imu_yaw_mdeg']/1000, label='Yaw', alpha=0.7)
+axes[2].plot(t, df['imu_roll_deg'], label='Roll', alpha=0.7)
+axes[2].plot(t, df['imu_pitch_deg'], label='Pitch', alpha=0.7)
+axes[2].plot(t, df['imu_yaw_deg'], label='Yaw', alpha=0.7)
 axes[2].set_ylabel('Angle (deg)')
 axes[2].set_xlabel('Time (s)')
 axes[2].legend()
@@ -213,9 +225,9 @@ plt.tight_layout()
 plt.savefig('lab05_imu_static.png', dpi=150)
 
 # 漂移速率估算
-yaw_drift_rate = (df['imu_yaw_mdeg'].iloc[-1] - df['imu_yaw_mdeg'].iloc[0]) / (t.iloc[-1] - t.iloc[0])
-print(f'Yaw drift rate: {yaw_drift_rate:.2f} mdeg/s ({yaw_drift_rate/1000:.4f} deg/s)')
-print(f'Projected drift in 60s: {yaw_drift_rate * 60 / 1000:.2f} deg')
+yaw_drift_rate = (df['imu_yaw_deg'].iloc[-1] - df['imu_yaw_deg'].iloc[0]) / (t.iloc[-1] - t.iloc[0])
+print(f'Yaw drift rate: {yaw_drift_rate:.4f} deg/s')
+print(f'Projected drift in 60s: {yaw_drift_rate * 60:.2f} deg')
 ```
 
 ### 振动频谱分析

@@ -33,13 +33,16 @@ void Task_Safety(void *argument)
         ChassisRuntimeCoordinator_RunSafetyCycle(now_ms);
         AppSystemPublishSnapshot_Collect(now_ms, &publish_config, &publish_snapshot);
         SystemPublishSnapshot_Publish(&publish_snapshot);
+        now_ms = PlatformTime_TaskNowMs();
+        ChassisRuntimeCoordinator_CommitSafetyCycle(now_ms);
         PlatformResetTrace_UpdateControl((uint8_t)CommandManagement_GetActiveSource(now_ms),
                                          SafetyManagement_IsEmergencyStop(),
                                          SafetyManagement_IsFaultStop());
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_SAFETY, now_ms);
-        if (ChassisRuntimeCoordinator_ShouldFeedWatchdog() != 0U)
+        if (ChassisRuntimeCoordinator_WatchdogFeedAllowed(now_ms) != 0U)
         {
             PlatformWatchdog_Feed();
+            ChassisRuntimeCoordinator_CommitWatchdogFeed();
         }
         ImuCalibrationOrchestrator_ProcessPersistence(now_ms);
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_SAFETY,

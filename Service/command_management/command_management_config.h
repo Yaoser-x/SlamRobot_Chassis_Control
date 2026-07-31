@@ -11,6 +11,7 @@ typedef struct
     uint32_t esp12f_timeout_ms;
     uint32_t line_timeout_ms;
     uint32_t debug_timeout_ms;
+    uint32_t remote_max_lifetime_ms;
 } command_management_config_t;
 
 #endif

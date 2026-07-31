@@ -47,12 +47,13 @@ void PowerOnSelfTest_Evaluate(const post_inputs_t *inputs, power_on_self_test_re
 
     if (inputs->drv_fault_mask != 0U)
     {
-        result->error_flags |= PowerOnSelfTest_ERROR_DRV_FAULT;
+        result->fatal_error_flags |= PowerOnSelfTest_ERROR_DRV_FAULT;
     }
     if (inputs->imu_chip_id != 0x24U)
     {
-        result->error_flags |= PowerOnSelfTest_ERROR_IMU;
+        result->degraded_error_flags |= PowerOnSelfTest_ERROR_IMU;
     }
+    result->error_flags = result->fatal_error_flags | result->degraded_error_flags;
 
     if (inputs->runtime_checks_ready == 0U)
     {
@@ -67,12 +68,13 @@ void PowerOnSelfTest_Evaluate(const post_inputs_t *inputs, power_on_self_test_re
         (inputs->encoder_speed_valid_all != 0U) ? PowerOnSelfTest_ITEM_OK : PowerOnSelfTest_ITEM_FAIL;
     if (inputs->adc_current_valid == 0U)
     {
-        result->error_flags |= PowerOnSelfTest_ERROR_ADC;
+        result->fatal_error_flags |= PowerOnSelfTest_ERROR_ADC;
     }
     if (inputs->encoder_speed_valid_all == 0U)
     {
-        result->error_flags |= PowerOnSelfTest_ERROR_ENCODER;
+        result->fatal_error_flags |= PowerOnSelfTest_ERROR_ENCODER;
     }
+    result->error_flags = result->fatal_error_flags | result->degraded_error_flags;
 }
 
 void PowerOnSelfTest_GetResult(power_on_self_test_result_t *result)
@@ -115,7 +117,7 @@ void PostService_Run(void)
 
     PowerOnSelfTest_Evaluate(&inputs, &last_post_result);
     post_runtime_start_ms = PlatformTime_NowMs();
-    if (last_post_result.error_flags != 0UL)
+    if (last_post_result.fatal_error_flags != 0UL)
     {
         StatusLedDriver_SetMode(STATUS_LED_DRIVER_FAULT);
     }
@@ -148,7 +150,7 @@ void PostService_UpdateRuntime(uint32_t now_ms)
     inputs.encoder_speed_valid_all = wheel.speed_valid_all;
     inputs.runtime_checks_ready    = 1U;
     PowerOnSelfTest_Evaluate(&inputs, &last_post_result);
-    if (last_post_result.error_flags != 0UL)
+    if (last_post_result.fatal_error_flags != 0UL)
     {
         StatusLedDriver_SetMode(STATUS_LED_DRIVER_FAULT);
     }

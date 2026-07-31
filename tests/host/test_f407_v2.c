@@ -1019,25 +1019,71 @@ static void test_control_timing_classification_and_wrap(void)
 {
     control_timing_t timing = {0};
 
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 100U) == CONTROL_TIMING_FIRST,
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 100U, 10U) == CONTROL_TIMING_FIRST,
                 "first timing sample initializes without running control");
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 100U) == CONTROL_TIMING_EARLY,
-                "zero elapsed is early");
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 104U) == CONTROL_TIMING_EARLY,
-                "1-4ms is early");
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 105U) == CONTROL_TIMING_NORMAL,
-                "5ms is normal");
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 121U) == CONTROL_TIMING_LATE,
-                "16ms is late");
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 142U) == CONTROL_TIMING_MISSED,
-                "21ms is missed");
-    timing.last_step_ms = UINT32_MAX - 4U;
-    timing.initialized  = 1U;
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 5U) == CONTROL_TIMING_NORMAL,
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 104U, 10U) == CONTROL_TIMING_EARLY,
+                "below half period is early");
+    require_int(timing.last_step_ms == 100U, "early sample does not update the accepted baseline");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 105U, 10U) == CONTROL_TIMING_NORMAL,
+                "half period is normal");
+    require_close(timing.dt_s, 0.005f, 0.0001f, "normal timing uses measured dt");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 120U, 10U) == CONTROL_TIMING_NORMAL,
+                "one and a half periods is normal");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 140U, 10U) == CONTROL_TIMING_LATE,
+                "two periods is late");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 161U, 10U) == CONTROL_TIMING_MISSED,
+                "above two periods is missed");
+    require_int(timing.last_step_ms == 161U, "missed sample updates the accepted baseline");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 171U, 10U) == CONTROL_TIMING_NORMAL,
+                "first period after missed recovers normally");
+
+    timing = (control_timing_t){.last_step_ms = UINT32_MAX - 4U, .initialized = 1U};
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 5U, 10U) == CONTROL_TIMING_NORMAL,
                 "uint32 tick wrap is normal modular elapsed");
-    timing.last_step_ms = 100U;
-    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 90U) == CONTROL_TIMING_MISSED,
-                "backward time is missed");
+    timing = (control_timing_t){.last_step_ms = 100U, .initialized = 1U};
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 90U, 10U) == CONTROL_TIMING_MISSED,
+                "backward time is missed by modular age");
+}
+
+static void
+require_timing_boundary(uint32_t elapsed_ms, uint32_t period_ms, control_timing_status_t expected, const char *message)
+{
+    control_timing_t timing = {.last_step_ms = 1000U, .initialized = 1U};
+
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 1000U + elapsed_ms, period_ms) == expected,
+                message);
+}
+
+static void test_control_timing_period_boundaries(void)
+{
+    require_timing_boundary(2U, 5U, CONTROL_TIMING_EARLY, "P5 lower half boundary is early");
+    require_timing_boundary(3U, 5U, CONTROL_TIMING_NORMAL, "P5 upper half boundary is normal");
+    require_timing_boundary(7U, 5U, CONTROL_TIMING_NORMAL, "P5 lower 1.5 boundary is normal");
+    require_timing_boundary(8U, 5U, CONTROL_TIMING_LATE, "P5 upper 1.5 boundary is late");
+    require_timing_boundary(10U, 5U, CONTROL_TIMING_LATE, "P5 twice period is late");
+    require_timing_boundary(11U, 5U, CONTROL_TIMING_MISSED, "P5 above twice period is missed");
+
+    require_timing_boundary(4U, 10U, CONTROL_TIMING_EARLY, "P10 below half period is early");
+    require_timing_boundary(5U, 10U, CONTROL_TIMING_NORMAL, "P10 half period is normal");
+    require_timing_boundary(15U, 10U, CONTROL_TIMING_NORMAL, "P10 1.5 periods is normal");
+    require_timing_boundary(16U, 10U, CONTROL_TIMING_LATE, "P10 above 1.5 periods is late");
+    require_timing_boundary(20U, 10U, CONTROL_TIMING_LATE, "P10 twice period is late");
+    require_timing_boundary(21U, 10U, CONTROL_TIMING_MISSED, "P10 above twice period is missed");
+
+    require_timing_boundary(9U, 20U, CONTROL_TIMING_EARLY, "P20 below half period is early");
+    require_timing_boundary(10U, 20U, CONTROL_TIMING_NORMAL, "P20 half period is normal");
+    require_timing_boundary(30U, 20U, CONTROL_TIMING_NORMAL, "P20 1.5 periods is normal");
+    require_timing_boundary(31U, 20U, CONTROL_TIMING_LATE, "P20 above 1.5 periods is late");
+    require_timing_boundary(40U, 20U, CONTROL_TIMING_LATE, "P20 twice period is late");
+    require_timing_boundary(41U, 20U, CONTROL_TIMING_MISSED, "P20 above twice period is missed");
+
+    control_timing_t timing = {0};
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 100U, 10U) == CONTROL_TIMING_FIRST,
+                "continuous early fixture starts");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 103U, 10U) == CONTROL_TIMING_EARLY,
+                "first accumulated sample remains early");
+    require_int(DifferentialDriveKinematics_EvaluateControlTiming(&timing, 106U, 10U) == CONTROL_TIMING_NORMAL,
+                "early samples accumulate against the accepted baseline");
 }
 
 /* ────────── L2: differential-drive kinematics tests ────────── */
@@ -1096,6 +1142,7 @@ int main(void)
     test_pid_external_output_bounds();
     test_control_dt_uses_measured_period_and_rejects_long_gap();
     test_control_timing_classification_and_wrap();
+    test_control_timing_period_boundaries();
     test_chassis_math_differential();
     (void)printf("PASS: f407_v2 host tests\n");
     return 0;

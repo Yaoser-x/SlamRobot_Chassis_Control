@@ -19,6 +19,7 @@ void Task_MotorControl(void *argument)
 
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_MOTOR, now_ms);
         ChassisRuntimeCoordinator_RunMotorCycle(now_ms);
+        ChassisRuntimeCoordinator_CommitMotorCycle(PlatformTime_TaskNowMs());
         SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_MOTOR,
                                     &next_wake,
                                     RobotConfig_GetDefault()->tasks[APP_TASK_MOTOR].period_ms);

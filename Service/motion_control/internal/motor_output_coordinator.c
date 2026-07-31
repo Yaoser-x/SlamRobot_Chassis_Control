@@ -3,7 +3,6 @@
 #include "motor_hardware_layout.h"
 #include "motor_current_limiter.h"
 #include "motor_driver.h"
-#include "power_management_service.h"
 
 static float output_full_speed_mps;
 
@@ -48,20 +47,22 @@ int16_t MotorOutputCoordinator_MpsToPermille(float target_mps)
 int16_t MotorOutputCoordinator_ApplyCurrentLimit(motor_id_t                       motor,
                                                  int16_t                          permille,
                                                  const power_management_status_t *power_status,
+                                                 const param_model_t             *params,
                                                  uint8_t                         *limited)
 {
     return MotorOutputCoordinator_Clamp(
-        MotorCurrentLimiter_ApplyMotorLimit(motor, permille, power_status, 0U, limited));
+        MotorCurrentLimiter_ApplyMotorLimit(motor, permille, power_status, params, 0U, limited));
 }
 
 void MotorOutputCoordinator_SetMotorWithPower(motion_control_status_t         *snapshot,
                                               motor_id_t                       motor,
                                               int16_t                          permille,
-                                              const power_management_status_t *power_status)
+                                              const power_management_status_t *power_status,
+                                              const param_model_t             *params)
 {
     int16_t applied;
 
-    if (snapshot == 0 || power_status == 0 || (uint32_t)motor >= MOTOR_ID_COUNT)
+    if (snapshot == 0 || power_status == 0 || params == 0 || (uint32_t)motor >= MOTOR_ID_COUNT)
     {
         return;
     }
@@ -76,17 +77,21 @@ void MotorOutputCoordinator_SetMotorWithPower(motion_control_status_t         *s
     applied                                = MotorOutputCoordinator_ApplyCurrentLimit(motor,
                                                        MotorOutputCoordinator_Clamp(permille),
                                                        power_status,
+                                                       params,
                                                        &snapshot->motor_current_limited[motor]);
     snapshot->motor_output_permille[motor] = applied;
     MotorDriver_SetPermille(motor, applied);
 }
 
-void MotorOutputCoordinator_SetMotor(motion_control_status_t *snapshot, motor_id_t motor, int16_t permille)
+void MotorOutputCoordinator_StopMotor(motion_control_status_t *snapshot, motor_id_t motor)
 {
-    power_management_status_t power_status;
-
-    (void)PowerManagement_GetStatus(&power_status);
-    MotorOutputCoordinator_SetMotorWithPower(snapshot, motor, permille, &power_status);
+    if (snapshot == 0 || (uint32_t)motor >= MOTOR_ID_COUNT)
+    {
+        return;
+    }
+    snapshot->motor_current_limited[motor] = 0U;
+    snapshot->motor_output_permille[motor] = 0;
+    MotorDriver_SetPermille(motor, 0);
 }
 
 uint8_t MotorOutputCoordinator_AnyActive(const motion_control_status_t *snapshot)

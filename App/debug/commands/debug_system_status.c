@@ -118,7 +118,7 @@ void DebugSystemStatus_Print(void)
     wireless_communication_state_t  esp_state;
     motor_driver_state_t            motor_state;
     power_on_self_test_result_t     post_result;
-    param_model_t                   params;
+    parameter_management_status_t   parameter_status;
     uint32_t                        encoder_hw_count[MOTOR_ID_COUNT];
 
     PowerAdcDriver_GetState(&adc_state);
@@ -131,7 +131,7 @@ void DebugSystemStatus_Print(void)
     WirelessCommunication_GetState(&esp_state);
     MotorDriver_GetState(&motor_state);
     PowerOnSelfTest_GetResult(&post_result);
-    (void)ParameterManagement_GetSnapshot(&params);
+    (void)ParameterManagement_GetStatus(&parameter_status);
     WheelEncoderDriver_GetHardwareCounts(encoder_hw_count);
 
     (void)snprintf(tx,
@@ -276,13 +276,18 @@ void DebugSystemStatus_Print(void)
 
     (void)snprintf(tx,
                    sizeof(tx),
-                   "PARAM vmax=%ldmm/s wmax=%ldmrad/s ramp=%ldmm/s2 wr=%ldum track=%ldum gcal_valid=%u\r\n",
-                   (long)DebugConsole_Milli(params.max_linear_mps),
-                   (long)DebugConsole_Milli(params.max_angular_rps),
-                   (long)DebugConsole_Milli(params.speed_ramp_mps2),
-                   (long)(params.wheel_radius_m * 1000000.0f),
-                   (long)(params.track_width_m * 1000000.0f),
-                   params.imu_gyro_bias_valid);
+                   "PARAM vmax=%ldmm/s wmax=%ldmrad/s ramp=%ldmm/s2 wr=%ldum track=%ldum gcal_valid=%u "
+                   "pvalid=%u pcrc=%08lX ecrc=%08lX diag=%08lX\r\n",
+                   (long)DebugConsole_Milli(parameter_status.params.max_linear_mps),
+                   (long)DebugConsole_Milli(parameter_status.params.max_angular_rps),
+                   (long)DebugConsole_Milli(parameter_status.params.speed_ramp_mps2),
+                   (long)(parameter_status.params.wheel_radius_m * 1000000.0f),
+                   (long)(parameter_status.params.track_width_m * 1000000.0f),
+                   parameter_status.params.imu_gyro_bias_valid,
+                   parameter_status.persisted_model_valid,
+                   (unsigned long)parameter_status.persisted_parameter_crc32,
+                   (unsigned long)parameter_status.effective_parameter_crc32,
+                   (unsigned long)parameter_status.diagnostic_flags);
     DebugConsoleWriter_Write(tx);
 
     (void)snprintf(tx,
@@ -344,7 +349,7 @@ void DebugSystemStatus_Print(void)
                    sizeof(tx),
                    "SYS source=%u errors=0x%08lX latched=0x%08lX reset=0x%08lX bor=%u por=%u iwdg=%u sftr=%u "
                    "drv_fault=%u,%u,%u,%u line=%lu/%lu esp=%lu/%lu ps2=%u ok=%lu fail=%lu\r\n",
-                   monitor_state.control_mode,
+                   monitor_state.active_source,
                    (unsigned long)monitor_state.error_flags,
                    (unsigned long)monitor_state.latched_error_flags,
                    (unsigned long)SystemMonitoring_GetResetReason(),

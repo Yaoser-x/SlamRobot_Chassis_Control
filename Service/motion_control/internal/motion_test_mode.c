@@ -4,7 +4,6 @@
 #include "motor_output_coordinator.h"
 #include "platform_critical.h"
 #include "platform_time.h"
-#include "power_management_service.h"
 
 #define MOTION_TEST_MODE_MAX_PERMILLE 300
 
@@ -195,9 +194,11 @@ void MotionTestMode_SetRawMotor(motion_test_mode_t *mode,
 
 void MotionTestMode_ApplyOpenLoop(const motion_test_mode_snapshot_t *test,
                                   motion_control_status_t           *chassis,
-                                  wheel_speed_control_loop_t        *speed_loop)
+                                  wheel_speed_control_loop_t        *speed_loop,
+                                  const power_management_status_t   *power,
+                                  const param_model_t               *params)
 {
-    if (test == 0 || chassis == 0 || speed_loop == 0)
+    if (test == 0 || chassis == 0 || speed_loop == 0 || power == 0 || params == 0)
     {
         return;
     }
@@ -215,21 +216,20 @@ void MotionTestMode_ApplyOpenLoop(const motion_test_mode_snapshot_t *test,
             output = (MotorHardwareLayout_MotorSide(motor) == MOTOR_SIDE_LEFT) ? test->open_loop_side[MOTOR_SIDE_LEFT]
                                                                                : test->open_loop_side[MOTOR_SIDE_RIGHT];
         }
-        MotorOutputCoordinator_SetMotor(chassis, motor, output);
+        MotorOutputCoordinator_SetMotorWithPower(chassis, motor, output, power, params);
     }
 }
 
 void MotionTestMode_ApplyRaw(const motion_test_mode_snapshot_t *test,
                              motion_control_status_t           *chassis,
-                             wheel_speed_control_loop_t        *speed_loop)
+                             wheel_speed_control_loop_t        *speed_loop,
+                             const power_management_status_t   *power,
+                             const param_model_t               *params)
 {
-    power_management_status_t power;
-
-    if (test == 0 || chassis == 0 || speed_loop == 0)
+    if (test == 0 || chassis == 0 || speed_loop == 0 || power == 0 || params == 0)
     {
         return;
     }
-    PowerManagement_GetStatus(&power);
     WheelSpeedControlLoop_Reset(speed_loop);
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
@@ -241,7 +241,7 @@ void MotionTestMode_ApplyRaw(const motion_test_mode_snapshot_t *test,
             output =
                 MotorOutputCoordinator_Clamp((int32_t)test->raw_forward[index] - (int32_t)test->raw_reverse[index]);
         }
-        MotorOutputCoordinator_SetMotorWithPower(chassis, motor, output, &power);
+        MotorOutputCoordinator_SetMotorWithPower(chassis, motor, output, power, params);
         chassis->motor_pid_active[index]    = 0U;
         chassis->motor_feedback_lost[index] = 0U;
         chassis->motor_error_mps[index]     = 0.0f;

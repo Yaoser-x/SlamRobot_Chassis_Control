@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "system_monitoring_status.h"
+#include "safety_management_types.h"
 
 #define SYSTEM_ERROR_LOW_BATTERY           (1UL << 0)
 #define SYSTEM_ERROR_M1_OVERCURRENT        (1UL << 1)
@@ -48,29 +49,32 @@ typedef struct
 
 typedef struct
 {
-    float                  battery_voltage;
-    float                  motor_current_a[4];
-    float                  left_current_a;
-    float                  right_current_a;
-    uint32_t               current_observe_over_limit_count[4];
-    uint32_t               current_fault_would_latch_count[4];
-    uint32_t               error_flags;
-    uint32_t               latched_error_flags;
-    uint32_t               task_last_heartbeat_ms[SYSTEM_MONITORING_TASK_COUNT];
-    uint32_t               task_timeout_count[SYSTEM_MONITORING_TASK_COUNT];
-    uint8_t                task_timed_out[SYSTEM_MONITORING_TASK_COUNT];
-    uint16_t               task_timeout_mask;
-    uint8_t                control_mode;
-    uint8_t                current_control_valid;
-    uint8_t                current_control_valid_mask;
-    uint8_t                motor_fault_mask;
-    uint8_t                emergency_stop;
-    uint8_t                fault_stop;
-    uint8_t                maintenance_lock;
-    uint8_t                motion_allowed;
-    safety_runtime_state_t runtime_state;
-    safety_clear_result_t  last_clear_result;
-    uint32_t               generation;
+    float                      battery_voltage;
+    float                      motor_current_a[4];
+    float                      left_current_a;
+    float                      right_current_a;
+    uint32_t                   current_observe_over_limit_count[4];
+    uint32_t                   current_fault_would_latch_count[4];
+    uint32_t                   error_flags;
+    uint32_t                   latched_error_flags;
+    uint32_t                   task_last_heartbeat_ms[SYSTEM_MONITORING_TASK_COUNT];
+    uint32_t                   task_timeout_count[SYSTEM_MONITORING_TASK_COUNT];
+    uint8_t                    task_timed_out[SYSTEM_MONITORING_TASK_COUNT];
+    uint16_t                   task_timeout_mask;
+    uint8_t                    active_source;
+    uint8_t                    current_control_valid;
+    uint8_t                    current_control_valid_mask;
+    uint8_t                    motor_fault_mask;
+    uint8_t                    emergency_stop;
+    uint8_t                    fault_stop;
+    uint8_t                    maintenance_lock;
+    uint8_t                    motion_allowed;
+    safety_capability_permit_t capabilities;
+    safety_motion_permit_t     motion_permit;
+    safety_runtime_state_t     runtime_state;
+    safety_clear_result_t      last_clear_result;
+    uint32_t                   gate_decision_generation;
+    uint32_t                   generation;
 } safety_management_status_t;
 
 #endif /* SAFETY_MANAGEMENT_STATUS_H */

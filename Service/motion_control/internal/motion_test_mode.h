@@ -7,6 +7,8 @@
 #include "motor_types.h"
 #include "motion_control_config.h"
 #include "motion_control_status.h"
+#include "parameter_management_types.h"
+#include "power_management_status.h"
 
 typedef struct
 {
@@ -58,11 +60,15 @@ void MotionTestMode_SetRawMotor(motion_test_mode_t *mode,
 /** Apply one captured side open-loop test command. */
 void MotionTestMode_ApplyOpenLoop(const motion_test_mode_snapshot_t *test,
                                   motion_control_status_t           *chassis,
-                                  wheel_speed_control_loop_t        *speed_loop);
+                                  wheel_speed_control_loop_t        *speed_loop,
+                                  const power_management_status_t   *power,
+                                  const param_model_t               *params);
 
 /** Apply one captured per-motor raw input test command. */
 void MotionTestMode_ApplyRaw(const motion_test_mode_snapshot_t *test,
                              motion_control_status_t           *chassis,
-                             wheel_speed_control_loop_t        *speed_loop);
+                             wheel_speed_control_loop_t        *speed_loop,
+                             const power_management_status_t   *power,
+                             const param_model_t               *params);
 
 #endif

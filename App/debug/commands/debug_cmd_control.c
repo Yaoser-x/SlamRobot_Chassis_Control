@@ -7,6 +7,7 @@
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
 #include "safety_management_service.h"
+#include "safety_workflow_coordinator.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -171,12 +172,12 @@ uint8_t DebugCmdControl_TryHandle(const char *line, const debug_cmd_control_cont
         {
             context->revoke_maintenance();
         }
-        SafetyManagement_SetEmergencyStop((value != 0) ? 1U : 0U);
+        AppSafetyWorkflow_SetEmergencyStop((value != 0) ? 1U : 0U);
         CONTROL_LOG("INFO", "estop %s", (value != 0) ? "set" : "cleared");
     }
     else if (strcmp(line, "clearfault") == 0)
     {
-        SafetyManagement_ClearLatchedFaults(0xFFFFFFFFUL);
+        (void)AppSafetyWorkflow_ClearLatchedFaults(0xFFFFFFFFUL);
         CONTROL_LOG("INFO", "fault clear requested");
     }
     else

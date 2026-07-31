@@ -8,6 +8,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static TIM_TypeDef tim2_instance = {.ARR = 65535U};
 static TIM_TypeDef tim3_instance = {.ARR = 65535U};
@@ -219,6 +220,75 @@ static void test_side_validity_requires_every_enabled_encoder(void)
     enabled_mask = 0x0FU;
 }
 
+static uint32_t count_bits(int32_t count)
+{
+    uint32_t bits;
+
+    memcpy(&bits, &count, sizeof(bits));
+    return bits;
+}
+
+static void test_raw_cumulative_count_and_anomaly_delivery_latch(void)
+{
+    uint32_t first_generation;
+
+    ParamService_SetDefaults();
+    WheelEncoderDriverTest_Init();
+    set_all_counters(0U);
+    WheelEncoderDriverTest_Update(10U);
+    set_all_counters(10U);
+    WheelEncoderDriverTest_Update(20U);
+
+    tim2_instance.CNT = 30000U;
+    tim4_instance.CNT = 20U;
+    tim3_instance.CNT = 20U;
+    tim5_instance.CNT = 20U;
+    WheelEncoderDriverTest_Update(30U);
+    require_int(wheel_status.delta[MOTOR_ID_M1] == 0, "rejected spike does not enter wheel-speed delta");
+    require_int(count_bits(wheel_status.count[MOTOR_ID_M1]) == 30000U,
+                "rejected spike remains in the raw cumulative count");
+    require_int((wheel_status.current_anomaly_mask & (1U << MOTOR_ID_M1)) != 0U,
+                "current anomaly marks the rejected wheel");
+    require_int((wheel_status.latched_for_host_mask & (1U << MOTOR_ID_M1)) != 0U,
+                "anomaly remains latched for Host STATUS");
+    first_generation = wheel_status.anomaly_delivery_generation;
+    require_int(first_generation != 0UL, "new anomaly advances delivery generation");
+
+    tim2_instance.CNT = 30010U;
+    tim4_instance.CNT = 30U;
+    tim3_instance.CNT = 30U;
+    tim5_instance.CNT = 30U;
+    WheelEncoderDriverTest_Update(40U);
+    require_int((wheel_status.current_anomaly_mask & (1U << MOTOR_ID_M1)) == 0U,
+                "stable sample clears the current anomaly");
+    require_int((wheel_status.latched_for_host_mask & (1U << MOTOR_ID_M1)) != 0U,
+                "cleared current anomaly stays latched until delivery");
+    require_int(WheelEstimationPipeline_AcknowledgeAnomalyDelivery(&wheel_status, first_generation - 1UL) == 0U,
+                "stale delivery generation cannot clear the latch");
+    require_int(WheelEstimationPipeline_AcknowledgeAnomalyDelivery(&wheel_status, first_generation) != 0U,
+                "matching delivery generation clears the latch");
+    require_int(wheel_status.latched_for_host_mask == 0U, "matching delivery clears all included anomaly bits");
+
+    tim2_instance.CNT = 60000U;
+    WheelEncoderDriverTest_Update(50U);
+    require_int(wheel_status.anomaly_delivery_generation != first_generation,
+                "a later anomaly advances generation again");
+    require_int(WheelEstimationPipeline_AcknowledgeAnomalyDelivery(&wheel_status, first_generation) == 0U,
+                "old TX completion cannot clear a newer anomaly");
+}
+
+static void test_raw_cumulative_count_wraps_modulo_32_bits(void)
+{
+    ParamService_SetDefaults();
+    WheelEncoderDriverTest_Init();
+    set_all_counters(65530U);
+    WheelEncoderDriverTest_Update(10U);
+    set_all_counters(5U);
+    WheelEncoderDriverTest_Update(20U);
+    require_int(count_bits(wheel_status.count[MOTOR_ID_M1]) == 5U,
+                "raw cumulative count follows modular timer movement across wrap");
+}
+
 int main(void)
 {
     test_runtime_encoder_direction_reverses_delta();
@@ -226,6 +296,8 @@ int main(void)
     test_runtime_wheel_radius_changes_speed_generation();
     test_hardware_count_snapshot_uses_logical_motor_order();
     test_side_validity_requires_every_enabled_encoder();
+    test_raw_cumulative_count_and_anomaly_delivery_latch();
+    test_raw_cumulative_count_wraps_modulo_32_bits();
     (void)printf("PASS: encoder driver host tests\n");
     return 0;
 }

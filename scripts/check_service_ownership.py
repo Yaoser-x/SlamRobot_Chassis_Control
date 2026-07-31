@@ -19,6 +19,20 @@ IMU_LIFECYCLE_API = re.compile(
 )
 SERVICE_GETTER = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Management|Control|Estimation|Monitoring)_Get[A-Za-z0-9_]*\s*\(")
 APP_DECISION_API = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:_Set|_Clear|_Enable|_Disable)[A-Za-z0-9_]*\s*\(")
+SAFETY_EXTERNAL_SERVICE_CALL = re.compile(
+    r"\b(?:CommandManagement|PowerManagement|StateEstimation|SystemMonitoring|MotorDriver)_[A-Za-z0-9_]+\s*\("
+)
+MOTION_EXTERNAL_SERVICE_CALL = re.compile(
+    r"\b(?:SafetyManagement|CommandManagement|PowerManagement|StateEstimation|ParameterManagement)_[A-Za-z0-9_]+\s*\("
+)
+SAFETY_MUTATOR = re.compile(
+    r"\bSafetyManagement_(?:SetEmergencyStop|SetFaultStop|ClearLatchedFaults|"
+    r"LatchEncoderFeedbackFault|BeginMaintenance|EndMaintenance)\s*\("
+)
+REMOVED_RUNTIME_ENTRY = re.compile(
+    r"\b(?:SafetyManagement_Update|MotionControl_Step|MotionControl_StepWithPeriod|"
+    r"MotionControl_BeginMaintenance|MotionControl_EndMaintenance)\s*\("
+)
 
 
 def strip_comments(text: str) -> str:
@@ -67,7 +81,7 @@ def analyze(root: Path, final: bool = True) -> list[str]:
     dispatcher_path = communication / "internal" / "remote_command_dispatcher.c"
     if dispatcher_path.is_file():
         dispatcher_code = strip_comments(dispatcher_path.read_text(encoding="utf-8", errors="replace"))
-        if "CommandManagement_DisableRemoteSource" not in dispatcher_code:
+        if "COMMAND_INTENT_REMOTE_DISABLE" not in dispatcher_code or "CommandManagement_ApplyIntent" not in dispatcher_code:
             errors.append("Service/communication/internal/remote_command_dispatcher.c: remote disable must pass rearm owner")
 
     command_root = root / "Service" / "command_management"
@@ -83,6 +97,57 @@ def analyze(root: Path, final: bool = True) -> list[str]:
             code = strip_comments(path.read_text(encoding="utf-8", errors="replace")).lower()
             if "robot_link_protocol" in code or "_transport.h" in code:
                 errors.append(f"{path.relative_to(root).as_posix()}: Safety Management must not depend on protocol transport")
+
+    safety_service_path = safety_root / "safety_management_service.c"
+    if safety_service_path.is_file():
+        safety_service_code = strip_comments(safety_service_path.read_text(encoding="utf-8", errors="replace"))
+        for match in SAFETY_EXTERNAL_SERVICE_CALL.finditer(safety_service_code):
+            line = safety_service_code.count("\n", 0, match.start()) + 1
+            errors.append(
+                f"Service/safety_management/safety_management_service.c:{line}: "
+                "Safety must consume App-composed facts and return decisions"
+            )
+
+    motion_root = root / "Service" / "motion_control"
+    for path in motion_root.rglob("*.c"):
+        relative = path.relative_to(root).as_posix()
+        code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+        for match in MOTION_EXTERNAL_SERVICE_CALL.finditer(code):
+            line = code.count("\n", 0, match.start()) + 1
+            errors.append(f"{relative}:{line}: Motion must consume DTO facts and return events")
+
+    for scan_root in (root / "App", root / "Service"):
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*.c"):
+            relative = path.relative_to(root).as_posix()
+            code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+            for match in REMOVED_RUNTIME_ENTRY.finditer(code):
+                line = code.count("\n", 0, match.start()) + 1
+                errors.append(f"{relative}:{line}: removed pull-based runtime entrypoint is forbidden")
+            for match in SAFETY_MUTATOR.finditer(code):
+                if relative.startswith("Service/safety_management/") or relative == (
+                    "App/composition/safety_workflow_coordinator.c"
+                ):
+                    continue
+                line = code.count("\n", 0, match.start()) + 1
+                errors.append(f"{relative}:{line}: Safety mutations must be routed by AppSafetyWorkflow")
+
+    gate_writers: list[str] = []
+    for scan_root in (root / "App", root / "Service"):
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*.c"):
+            relative = path.relative_to(root).as_posix()
+            code = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+            if re.search(r"\bCommandManagement_SetMotionGate\s*\(", code):
+                gate_writers.append(relative)
+    allowed_gate_writers = {
+        "App/composition/safety_workflow_coordinator.c",
+        "Service/command_management/command_management_service.c",
+    }
+    for relative in sorted(set(gate_writers) - allowed_gate_writers):
+        errors.append(f"{relative}: Command motion gate may only be synchronized by AppSafetyWorkflow")
 
     for relative in (
         "Service/communication/internal/robot_link_protocol.c",
@@ -111,6 +176,29 @@ def analyze(root: Path, final: bool = True) -> list[str]:
         collector = strip_comments(collector_path.read_text(encoding="utf-8", errors="replace"))
         if APP_DECISION_API.search(collector):
             errors.append("App/composition/system_publish_snapshot_collector.c: collector must be read-only")
+
+    runtime_path = root / "App" / "composition" / "chassis_runtime_coordinator.c"
+    if runtime_path.is_file():
+        runtime = strip_comments(runtime_path.read_text(encoding="utf-8", errors="replace"))
+        capability_apply = runtime.find("ControlModeCoordinator_ApplyCapabilityMask(")
+        source_select = runtime.find("CommandManagement_GetActiveSource(", capability_apply + 1)
+        if capability_apply < 0 or source_select < 0 or capability_apply > source_select:
+            errors.append(
+                "App/composition/chassis_runtime_coordinator.c: Safety capability mask must be applied before source selection"
+            )
+
+    ps2_task_path = root / "App" / "tasks" / "task_ps2.c"
+    if ps2_task_path.is_file():
+        ps2_task = strip_comments(ps2_task_path.read_text(encoding="utf-8", errors="replace"))
+        restored_line = re.search(
+            r"CONTROL_MODE_EVENT_RESTORED_LINE\)(.*?)(?:else\s+if|OperatorActionRouter_Handle)",
+            ps2_task,
+            flags=re.DOTALL,
+        )
+        if restored_line is None or "LineFollowing_Enable(0U)" not in restored_line.group(1):
+            errors.append("App/tasks/task_ps2.c: LINE mode restoration must submit a neutral intent")
+        elif "LineFollowing_Enable(1U)" in restored_line.group(1):
+            errors.append("App/tasks/task_ps2.c: LINE mode restoration must not automatically resume motion")
     return sorted(set(errors))
 
 

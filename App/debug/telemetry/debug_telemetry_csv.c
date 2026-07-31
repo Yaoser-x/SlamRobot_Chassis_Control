@@ -52,7 +52,7 @@ void DebugTelemetryCsv_Print(uint32_t now_ms, const debug_full_log_snapshot_t *s
                                   imu_state.online,
                                   imu_state.chip_id,
                                   (unsigned long)monitor_state.error_flags,
-                                  monitor_state.control_mode,
+                                  monitor_state.active_source,
                                   (unsigned long)ps2_state.rx_ok_count,
                                   (unsigned long)ps2_state.rx_fail_count,
                                   (unsigned long)line_state.rx_bytes,

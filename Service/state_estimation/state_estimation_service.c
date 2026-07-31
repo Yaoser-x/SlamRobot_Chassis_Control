@@ -503,6 +503,21 @@ uint32_t StateEstimation_GetWheel(state_estimation_wheel_status_t *status)
     return generation;
 }
 
+uint8_t StateEstimation_AcknowledgeWheelAnomalyDelivery(uint32_t generation)
+{
+    platform_critical_state_t critical;
+    uint8_t                   acknowledged;
+
+    critical     = PlatformCritical_Enter();
+    acknowledged = WheelEstimationPipeline_AcknowledgeAnomalyDelivery(&wheel_status, generation);
+    if (acknowledged != 0U)
+    {
+        wheel_generation++;
+    }
+    PlatformCritical_Exit(critical);
+    return acknowledged;
+}
+
 uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *status)
 {
     platform_critical_state_t critical;

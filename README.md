@@ -29,7 +29,7 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | **链接脚本** | `STM32F407XX_FLASH.ld` |
 | **控制优先级** | `上位机(USART3) > PS2 > ESP12F > 巡线(UART4) > 调试台(USART1)` |
 | **底盘布局** | 默认两驱 M2+M3；支持 M1+M2 左侧 / M3+M4 右侧四驱及自定义布局 |
-| **构建验证** | CI 双 preset + 58 项 Host 行为测试 + 架构/所有权门禁 + CubeMX 安全检查 + ESP8266 Core 3.1.2 固定版本编译 |
+| **构建验证** | 本地软件门禁已通过：Debug/Release + 62 项 Host 测试 + ASan/UBSan + 静态分析 + 架构/所有权/CubeMX；ESP8266 Core 3.1.2 固定版本编译通过，实板状态仍为 `HIL_PENDING` |
 
 > V2.0 实板逻辑映射以 BSP 为准：M2 使用 EN/PWM=`PE11`、PH/GPIO=`PC7`、nFAULT=`PD14`、编码器=`TIM4 PD12/PD13`、电流采样=`PC1`；M3 使用 EN/PWM=`PE13`、PH/GPIO=`PC8`、nFAULT=`PA3`、编码器=`TIM3 PB4/PB5`、电流采样=`PC2`。CubeMX 生成文件中的 M2/M3 GPIO label 保留旧命名。
 

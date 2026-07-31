@@ -35,6 +35,7 @@ typedef struct
     uint8_t  priority;
     uint8_t  used;
     uint32_t enqueued_ms;
+    uint32_t anomaly_generation;
 } upper_tx_slot_t;
 
 static uint8_t                           upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE] __attribute__((aligned(4)));
@@ -56,6 +57,8 @@ static uint8_t                           upper_tx_queue_count;
 static uint8_t                           upper_tx_active_slot;
 static uint32_t                          upper_tx_sequence;
 static uint8_t                           upper_hello_pending;
+static uint8_t                           upper_anomaly_delivery_pending;
+static uint32_t                          upper_delivered_anomaly_generation;
 static communication_firmware_identity_t upper_identity;
 static uint8_t                           upper_hello_tx_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
 
@@ -163,7 +166,10 @@ static void HostCommunication_TryStartTxLocked(void)
     }
 }
 
-static uint8_t HostCommunication_EnqueueTx(const uint8_t *frame, uint16_t frame_len, upper_tx_priority_t priority)
+static uint8_t HostCommunication_EnqueueTx(const uint8_t      *frame,
+                                           uint16_t            frame_len,
+                                           upper_tx_priority_t priority,
+                                           uint32_t            anomaly_generation)
 {
     uint32_t primask;
     uint8_t  selected = UPPER_UART_TX_SLOT_INVALID;
@@ -203,11 +209,12 @@ static uint8_t HostCommunication_EnqueueTx(const uint8_t *frame, uint16_t frame_
         PlatformCritical_Exit(primask);
         return 0U;
     }
-    upper_tx_queue[selected].length      = frame_len;
-    upper_tx_queue[selected].priority    = (uint8_t)priority;
-    upper_tx_queue[selected].sequence    = upper_tx_sequence++;
-    upper_tx_queue[selected].enqueued_ms = PlatformTime_TaskNowMs();
-    upper_tx_queue[selected].used        = UPPER_TX_SLOT_RESERVED;
+    upper_tx_queue[selected].length             = frame_len;
+    upper_tx_queue[selected].priority           = (uint8_t)priority;
+    upper_tx_queue[selected].sequence           = upper_tx_sequence++;
+    upper_tx_queue[selected].enqueued_ms        = PlatformTime_TaskNowMs();
+    upper_tx_queue[selected].anomaly_generation = anomaly_generation;
+    upper_tx_queue[selected].used               = UPPER_TX_SLOT_RESERVED;
     upper_tx_queue_count++;
     if (upper_tx_queue_count > upper_state.tx_queue_high_watermark)
     {
@@ -323,7 +330,11 @@ static void HostCommunication_SendStatus(uint32_t now_ms, const communication_pu
         TelemetryEncoder_BuildStatus(snapshot, COMMUNICATION_LINK_UPPER, upper_tx_frame, sizeof(upper_tx_frame));
     if (frame_len > 0U)
     {
-        if (HostCommunication_EnqueueTx(upper_tx_frame, frame_len, UPPER_TX_PRIORITY_STATUS) != 0U)
+        if (HostCommunication_EnqueueTx(upper_tx_frame,
+                                        frame_len,
+                                        UPPER_TX_PRIORITY_STATUS,
+                                        snapshot->encoder.anomaly_generation)
+            != 0U)
         {
             upper_last_status_ms = now_ms;
         }
@@ -346,12 +357,14 @@ uint8_t HostCommunication_Init(const communication_config_t *config, const commu
     upper_last_diagnostic_ms = 0U;
     upper_state              = (host_communication_state_t){0};
     memset(upper_tx_queue, 0, sizeof(upper_tx_queue));
-    upper_tx_queue_count       = 0U;
-    upper_tx_active_slot       = UPPER_UART_TX_SLOT_INVALID;
-    upper_tx_sequence          = 0UL;
-    upper_hello_pending        = 0U;
-    upper_last_rx_timestamp_ms = 0U;
-    upper_last_byte_ms         = PlatformTime_TaskNowMs();
+    upper_tx_queue_count               = 0U;
+    upper_tx_active_slot               = UPPER_UART_TX_SLOT_INVALID;
+    upper_tx_sequence                  = 0UL;
+    upper_hello_pending                = 0U;
+    upper_anomaly_delivery_pending     = 0U;
+    upper_delivered_anomaly_generation = 0UL;
+    upper_last_rx_timestamp_ms         = 0U;
+    upper_last_byte_ms                 = PlatformTime_TaskNowMs();
     HostCommunication_ResetParser();
     CommunicationSessionTracker_Init();
     CommunicationOperationMailbox_ResetLink(COMMUNICATION_LINK_UPPER);
@@ -371,7 +384,8 @@ static void HostCommunication_SendHello(const communication_publish_model_t *sna
                                             snapshot->parameter_identity_crc32,
                                             upper_hello_tx_frame,
                                             sizeof(upper_hello_tx_frame));
-    if (frame_len > 0U && HostCommunication_EnqueueTx(upper_hello_tx_frame, frame_len, UPPER_TX_PRIORITY_HELLO) != 0U)
+    if (frame_len > 0U
+        && HostCommunication_EnqueueTx(upper_hello_tx_frame, frame_len, UPPER_TX_PRIORITY_HELLO, 0UL) != 0U)
     {
         upper_hello_pending = 0U;
     }
@@ -389,7 +403,7 @@ static void HostCommunication_SendDiagnostic(uint32_t now_ms, const communicatio
     frame_len =
         TelemetryEncoder_BuildDiagnostic(snapshot, upper_diagnostic_tx_frame, sizeof(upper_diagnostic_tx_frame));
     if (frame_len > 0U
-        && HostCommunication_EnqueueTx(upper_diagnostic_tx_frame, frame_len, UPPER_TX_PRIORITY_DIAGNOSTIC) != 0U)
+        && HostCommunication_EnqueueTx(upper_diagnostic_tx_frame, frame_len, UPPER_TX_PRIORITY_DIAGNOSTIC, 0UL) != 0U)
     {
         upper_last_diagnostic_ms = now_ms;
     }
@@ -407,7 +421,7 @@ static void HostCommunication_SendImuStatus(uint32_t now_ms, const communication
     frame_len = TelemetryEncoder_BuildImu(snapshot, upper_imu_tx_frame, sizeof(upper_imu_tx_frame));
     if (frame_len > 0U)
     {
-        if (HostCommunication_EnqueueTx(upper_imu_tx_frame, frame_len, UPPER_TX_PRIORITY_IMU) != 0U)
+        if (HostCommunication_EnqueueTx(upper_imu_tx_frame, frame_len, UPPER_TX_PRIORITY_IMU, 0UL) != 0U)
         {
             upper_last_imu_status_ms = now_ms;
         }
@@ -510,6 +524,12 @@ void HostCommunication_OnTxComplete(void)
         {
             upper_state.tx_max_send_latency_ms = latency_ms;
         }
+        if (upper_tx_queue[upper_tx_active_slot].data[3] == UPPER_CMD_STATUS
+            && upper_tx_queue[upper_tx_active_slot].anomaly_generation != 0UL)
+        {
+            upper_delivered_anomaly_generation = upper_tx_queue[upper_tx_active_slot].anomaly_generation;
+            upper_anomaly_delivery_pending     = 1U;
+        }
         upper_tx_queue[upper_tx_active_slot].used = 0U;
         upper_tx_queue_count--;
         upper_state.tx_frames++;
@@ -517,4 +537,24 @@ void HostCommunication_OnTxComplete(void)
     upper_tx_active_slot = UPPER_UART_TX_SLOT_INVALID;
     HostCommunication_TryStartTxLocked();
     PlatformCritical_Exit(primask);
+}
+
+uint8_t HostCommunication_TakeAnomalyDelivery(uint32_t *generation)
+{
+    uint32_t primask;
+
+    if (generation == 0)
+    {
+        return 0U;
+    }
+    primask = PlatformCritical_Enter();
+    if (upper_anomaly_delivery_pending == 0U)
+    {
+        PlatformCritical_Exit(primask);
+        return 0U;
+    }
+    *generation                    = upper_delivered_anomaly_generation;
+    upper_anomaly_delivery_pending = 0U;
+    PlatformCritical_Exit(primask);
+    return 1U;
 }

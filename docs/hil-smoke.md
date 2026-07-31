@@ -1,6 +1,9 @@
 # HIL 冒烟测试
 
-rc2 软件状态为 `HIL_PENDING`。创建 `v1.0.0-rc2` annotated tag 前必须归档冷/热启动各 20 次、五来源 rearm、断链停车、故障清除不恢复旧命令、编码器尖峰/冻结、UART 压力、Motor task 卡死看门狗以及 IMU Allan/温漂/六面数据报告。HIL 未完成不阻止本地软件 squash，但禁止创建 rc2 标签。
+rc2 软件状态为 `HIL_PENDING`。创建 `v1.0.0-rc2` annotated tag 前必须归档冷/热启动各 20 次、
+五来源 rearm、PS2 接管/断联、断链停车、故障清除不恢复旧命令、编码器尖峰/冻结、UART 压力、
+Motor/Safety task stall、Safety permit 先停车后 IWDG 复位，以及 IMU OADEV/温漂/六面数据报告。
+HIL 未完成不阻止本地软件 squash，但禁止创建 rc2 标签。
 
 HIL v1 只验证启动和只读诊断链路，不自动驱动电机，不切换继电器，不修改 Flash 参数。
 
@@ -49,7 +52,18 @@ python scripts/hil_imu_calibration.py --port COMx --baud 115200
 - 每条命令都有响应，脚本未超时。
 - JSON 中保存 ISO 8601 UTC 时间、设备/端口、固件身份、命令摘要、逐项断言和最终 pass/fail；文本 transcript 保留供人工审计。
 
-原始 CSV 可用 `scripts/analyze_roadmap_data.py` 的 `current|encoder|line|geometry` 子命令分析；IMU 数据使用 `scripts/analyze_imu.py`。分析器不会自动回写阈值，也不会把软件完成标成 HIL 通过。
+原始 CSV 可用 `scripts/analyze_roadmap_data.py` 的 `current|encoder|line|geometry` 子命令分析；
+IMU 姿态稳定性与 gyro OADEV 使用 `scripts/analyze_imu.py`。分析器不会自动回写阈值，也不会把软件完成标成 HIL 通过。
+
+```powershell
+python scripts/analyze_imu.py imu.csv --output-dir allan-out `
+  --firmware-sha <final-squash-sha> --parameter-crc <effective-crc> `
+  --imu-odr 100Hz --imu-bandwidth-profile normal
+```
+
+必须归档 `allan_result.json`、`allan_curve.csv` 和 `summary.md`。默认输入是
+`imu_gyro_corr_*_dps`，质量缺口不得拼接；具体算法、单位与 BI plateau 规则见
+[RC2 陀螺噪声分析方法](release/gyro-allan-method.md)。
 
 双向直行使用监督式分析器（脚本不连接车辆）：
 
@@ -70,6 +84,14 @@ python scripts/analyze_straight_hil.py straight.jsonl measurements.csv \
 按 [电流链与 ADC 采样相位 HIL 验收](current-chain-hil.md) 单独留存示波器证据。
 
 ## P0 专项 HIL（需人工执行）
+
+任务 stall 不使用 Release 运行时命令。Host Test 使用 fake scheduler；实板使用调试器/J-Link
+挂起指定 RTOS 任务，或使用不进入发布产物的 HIL-only 构建目标。每次记录：Release/HIL 构建类型、
+宏、注入方法和时刻、最后喂狗时刻、PWM 归零时刻、IWDG 复位时刻、复位原因和电机输出。
+
+- 挂起 Safety task：要求 permit 超过 40 ms 后 PWM 先归零，随后 IWDG 才复位。
+- 分别挂起 Motor 和 Safety task：确认任一 completion 不前进都停止喂狗，旧 generation 不能复用。
+- 启动后首次合法喂狗必须在 100 ms 内；实测仍须满足 `Motor timeout < Safety timeout < IWDG timeout`。
 
 - GPIO 包围 Encoder 最终发布临界区，确认 <20µs。
 - raw/open-loop 单次发送后断开 USART1，500ms 内 PWM 归零；编码器断开后 200ms 内整车停车并需 `clearfault`。

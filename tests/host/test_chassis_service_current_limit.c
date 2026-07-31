@@ -8,6 +8,7 @@
 #include "control_config.h"
 #include "bsp_config.h"
 #include "chassis_service.h"
+#include "motion_control_service.h"
 #include "command_management_service.h"
 #include "control_service.h"
 #include "wheel_encoder_driver.h"
@@ -31,6 +32,7 @@ static motor_driver_state_t            fake_motor_state;
 static uint32_t                        fake_encoder_fault_latch_count;
 static state_estimation_imu_status_t   fake_imu_state;
 static uint32_t                        fake_motion_generation;
+static safety_motion_permit_t          fake_motion_permit;
 
 uint32_t __get_PRIMASK(void)
 {
@@ -61,6 +63,18 @@ uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
 {
     *state = fake_imu_state;
     return 1U;
+}
+
+uint32_t StateEstimation_GetStatus(uint32_t now_ms, state_estimation_status_t *state)
+{
+    (void)now_ms;
+    *state = (state_estimation_status_t){
+        .wheel                 = fake_encoder_state,
+        .imu                   = fake_imu_state,
+        .wheel_generation      = 1UL,
+        .imu_sample_generation = 1UL,
+    };
+    return 2UL;
 }
 
 void MotorDriver_Init(void)
@@ -154,6 +168,22 @@ uint8_t SafetyManagement_IsDiagnosticMotionAllowed(void)
     return (fake_fault_stop == 0U && fake_maintenance_lock == 0U) ? 1U : 0U;
 }
 
+uint32_t SafetyManagement_GetMotionPermit(safety_motion_permit_t *permit)
+{
+    *permit = fake_motion_permit;
+    return fake_motion_permit.generation;
+}
+
+uint32_t SafetyManagement_GetStatus(safety_management_status_t *status)
+{
+    *status = (safety_management_status_t){
+        .motion_permit  = fake_motion_permit,
+        .motion_allowed = SafetyManagement_IsMotionAllowed(),
+        .generation     = 1UL,
+    };
+    return status->generation;
+}
+
 uint8_t SafetyManagement_BeginMaintenance(void)
 {
     if (fake_maintenance_lock != 0U)
@@ -206,6 +236,20 @@ uint8_t CommandManagement_GetActive(command_velocity_t *command, uint32_t now_ms
         .timestamp_ms = legacy.timestamp_ms,
     };
     return 1U;
+}
+
+uint8_t
+CommandManagement_GetActiveSnapshot(uint32_t now_ms, command_velocity_t *command, command_management_status_t *status)
+{
+    uint8_t valid = CommandManagement_GetActive(command, now_ms);
+
+    *status = (command_management_status_t){
+        .active_source            = (valid != 0U) ? command->source : COMMAND_SOURCE_NONE,
+        .motion_allowed           = SafetyManagement_IsMotionAllowed(),
+        .motion_revoke_generation = fake_motion_generation,
+        .generation               = 1UL,
+    };
+    return valid;
 }
 
 uint32_t ControlService_GetMotionRevokeGeneration(void)
@@ -274,6 +318,8 @@ static void reset_fake_chassis(void)
     fake_encoder_fault_latch_count = 0UL;
     fake_imu_state                 = (state_estimation_imu_status_t){0};
     fake_motion_generation         = 0UL;
+    fake_motion_permit =
+        (safety_motion_permit_t){.base_motion = 1U, .generation = 1UL, .issued_at_ms = 0UL, .valid_for_ms = UINT32_MAX};
     for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
     {
         fake_signed_pwm[i]                = 0;
@@ -300,6 +346,44 @@ static void set_closed_loop_command(float linear_mps)
     fake_command_valid = 1U;
 }
 
+static motion_control_input_t make_motion_input(uint32_t now_ms)
+{
+    motion_control_input_t input = {0};
+
+    input.now_ms                = now_ms;
+    input.nominal_period_ms     = 10U;
+    input.parameters.generation = ParamService_GetSnapshot(&input.parameters.value);
+    input.parameters.validity   = 1UL;
+    input.wheel.value           = fake_encoder_state;
+    input.wheel.generation      = 1UL;
+    input.wheel.validity        = 1UL;
+    input.imu.value             = fake_imu_state;
+    input.imu.generation        = 1UL;
+    input.imu.validity          = 1UL;
+    memcpy(&input.power.value, &fake_adc_state, sizeof(input.power.value));
+    input.power.generation          = 1UL;
+    input.power.validity            = 1UL;
+    input.safety_permit.value       = fake_motion_permit;
+    input.safety_permit.generation  = fake_motion_permit.generation;
+    input.safety_permit.validity    = 1UL;
+    input.normal_motion_allowed     = 1U;
+    input.diagnostic_motion_allowed = 1U;
+    if (fake_command_valid != 0U)
+    {
+        input.command.value = (command_velocity_t){
+            .linear_x     = fake_command.linear_x,
+            .angular_z    = fake_command.angular_z,
+            .enable       = fake_command.enable,
+            .source       = (command_source_t)fake_command.source,
+            .timestamp_ms = fake_command.timestamp_ms,
+        };
+        input.command.validity = 1UL;
+    }
+    input.command.generation        = 1UL;
+    input.command.revoke_generation = fake_motion_generation;
+    return input;
+}
+
 static void test_high_adc_current_does_not_throttle_pwm_output(void)
 {
     chassis_service_snapshot_t state;
@@ -315,6 +399,55 @@ static void test_high_adc_current_does_not_throttle_pwm_output(void)
     require_int(fake_signed_pwm[MOTOR_ID_M2] == 50, "M2 high ADC current forwards signed raw PWM target");
     require_int(state.motor_output_permille[MOTOR_ID_M2] == 50, "M2 high ADC current state reports applied output");
     require_int(state.motor_current_limited[MOTOR_ID_M2] == 0U, "M2 high ADC current does not report dynamic limit");
+}
+
+static void test_stale_safety_permit_stops_output_before_watchdog_reset(void)
+{
+    reset_fake_chassis();
+    fake_tick_ms = 1000U;
+    ChassisService_RawMotorInputTest(MOTOR_ID_M2, 50, 0);
+    ChassisService_Step(1000U);
+    ChassisService_Step(1010U);
+    require_int(fake_signed_pwm[MOTOR_ID_M2] == 50, "output active with fresh safety permit");
+
+    fake_motion_permit.issued_at_ms = 1000U;
+    fake_motion_permit.valid_for_ms = 40U;
+    ChassisService_Step(1041U);
+    require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "stale safety permit immediately zeros motor output");
+}
+
+static void test_input_dto_returns_event_without_cross_service_write(void)
+{
+    motion_control_input_t input;
+    motion_control_event_t event;
+
+    reset_fake_chassis();
+    set_closed_loop_command(0.2f);
+    fake_encoder_state.speed_valid[MOTOR_ID_M2] = 0U;
+    input                                       = make_motion_input(1000U);
+    MotionControl_StepWithInput(&input, &event);
+    require_int((event.flags & MOTION_EVENT_ENCODER_FEEDBACK_LOST) != 0UL,
+                "DTO entry reports encoder feedback loss as a motion event");
+    require_int(fake_encoder_fault_latch_count == 0UL,
+                "DTO entry leaves cross-Service fault routing to App composition");
+    require_int(fake_signed_pwm[MOTOR_ID_M2] == 0, "event path stops output before returning to App");
+
+    reset_fake_chassis();
+    input                                  = make_motion_input(1041U);
+    input.safety_permit.value.issued_at_ms = 1000U;
+    input.safety_permit.value.valid_for_ms = 40U;
+    MotionControl_StepWithInput(&input, &event);
+    require_int((event.flags & MOTION_EVENT_SAFETY_PERMIT_STALE) != 0UL, "DTO entry reports an expired Safety lease");
+    require_int(fake_fault_stop == 0U, "stale lease event does not directly mutate Safety state");
+
+    reset_fake_chassis();
+    input                                = make_motion_input(1000U);
+    input.safety_permit.value.generation = 2UL;
+    MotionControl_StepWithInput(&input, &event);
+    require_int((event.flags & MOTION_EVENT_SAFETY_PERMIT_CHANGED) != 0UL,
+                "permit generation change is distinguished from a stale Safety task");
+    require_int((event.flags & MOTION_EVENT_SAFETY_PERMIT_STALE) == 0UL,
+                "expected capability transition does not report a stale permit");
 }
 
 static void test_invalid_current_zero_blocks_test_outputs(void)
@@ -612,6 +745,8 @@ static void test_straight_reset_paths_clear_observable_state(void)
 int main(void)
 {
     test_high_adc_current_does_not_throttle_pwm_output();
+    test_stale_safety_permit_stops_output_before_watchdog_reset();
+    test_input_dto_returns_event_without_cross_service_write();
     test_invalid_current_zero_blocks_test_outputs();
     test_raw_test_mode_has_400ms_deadman();
     test_diagnostic_outputs_are_capped_at_300_permille();
