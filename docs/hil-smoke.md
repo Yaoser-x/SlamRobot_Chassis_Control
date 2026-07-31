@@ -1,9 +1,10 @@
 # HIL 冒烟测试
 
-rc2 软件状态为 `HIL_PENDING`。创建 `v1.0.0-rc2` annotated tag 前必须归档冷/热启动各 20 次、
+rc2 软件状态为 `FEATURE_FROZEN / HIL_PENDING`。发布 `v1.0.0` 正式版前必须归档冷/热启动各 20 次、
 五来源 rearm、PS2 接管/断联、断链停车、故障清除不恢复旧命令、编码器尖峰/冻结、UART 压力、
 Motor/Safety task stall、Safety permit 先停车后 IWDG 复位，以及 IMU OADEV/温漂/六面数据报告。
-HIL 未完成不阻止本地软件 squash，但禁止创建 rc2 标签。
+HIL 未完成不阻止 `v1.0.0-rc2` 作为软件候选创建 annotated tag 和 GitHub Pre-release；
+此时 Release Notes、manifest 和兼容状态必须保持 `HIL_PENDING / release_compatible=false`。
 
 HIL v1 只验证启动和只读诊断链路，不自动驱动电机，不切换继电器，不修改 Flash 参数。
 

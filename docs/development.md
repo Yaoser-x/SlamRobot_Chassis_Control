@@ -74,15 +74,16 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 | --- | --- |
 | Debug | `build/Debug/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
 | Release | `build/Release/F407_V2.0.elf`, `.map`, `.hex`, `.bin` |
-| Host 测试 | 34 个 CTest target，覆盖控制逻辑、ADC/电流保护、UART 协议、OLED/IMU 管线、POST、参数存储与 Flash 参数镜像 |
+| Host 测试 | 62 个 CTest case，覆盖安全/模式、控制、通信、传感器、参数、显示和分析工具；数量以 `ctest -N` 为准 |
 
 ### 2.4 当前构建验证
 
 ```
-Debug:   text 226052 B, data 560 B, bss 86032 B
-Release: text 145996 B, data 528 B, bss 86000 B
-Host 测试 34/34 通过（本地 Ninja/CTest）
-五层架构依赖检查通过
+Debug:   text 189212 B, data 532 B, bss 90264 B
+Release: text 168876 B, data 528 B, bss 90248 B
+Host 测试 62/62 通过（本地 fresh Ninja/CTest）
+ASan/UBSan 61/61 通过；静态栈预算由普通 Host 构建覆盖
+五层架构、命名、Service ownership 与 CubeMX 安全检查通过
 ```
 
 ---
@@ -101,10 +102,11 @@ Host 测试 34/34 通过（本地 Ninja/CTest）
 | 依赖 | 固件构建: `cmake`、`ninja-build`、`gcc-arm-none-eabi`；Host 测试: `cmake`、`ninja-build`、`gcc`；静态检查: `clang-format`、`cppcheck` |
 | 构建 | 矩阵构建 Debug + Release preset |
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
-| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（34 个 target），通过后输出测试摘要 |
-| 架构检查 | `python scripts/check_architecture_dependencies.py` 检查五层 include 方向及 Domain/Service 禁用 API |
-| 格式检查 | `clang-format --dry-run --Werror` 检查五层与 tests 的 C/H 文件 |
-| 静态分析 | `cppcheck --enable=warning --error-exitcode=1` 检查五层与 tests 的 C/H 文件 |
+| Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（当前 62 个 case）→ CubeMX 安全检查 |
+| 架构检查 | `--final` 运行架构、命名和 Service ownership 三项门禁 |
+| 格式检查 | `clang-format --dry-run --Werror` 检查 Algorithm/App/BSP/Platform/Service 与 Host Test C/H |
+| 静态分析 | `cppcheck --enable=warning --error-exitcode=1` 检查同一项目自有 C/H 范围 |
+| ESP 固件 | Arduino CLI 固定 ESP8266 Core 3.1.2 与 WebSockets 2.7.2，并运行 AP/安全策略检查 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
 
 ---
@@ -195,8 +197,8 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 
 - **不修改硬件引脚定义**：业务代码只消费 `Core/Inc/main.h` 和 `.ioc` 中已有标签
 - **不手动修改第三方库**：`Drivers/`（CMSIS + HAL/LL）、`Middlewares/`（FreeRTOS）保持原样
-- **配置按职责管理**：控制策略默认值在 `Domain/config/control_config.h`，板级常量在 `BSP/bsp_config.h`，运行时值由 `ParamService` 独占
-- **业务代码按五层放置**：App/Service/Domain/BSP/Platform 单向依赖；生成区 `Core/` 只保留入口与包装
+- **配置按职责管理**：产品/任务/模式默认值在 `App/config/` 聚合，能力配置由各 Service 接收，板级常量位于 `BSP/`，运行时参数由 `ParameterManagement` 独占
+- **业务代码按五层放置**：App/Service/Algorithm/BSP/Platform 单向依赖；生产树不允许恢复已删除的 `Domain/`，生成区 `Core/` 只保留入口与包装
 
 ### 6.2 CubeMX 生成区规则
 
@@ -222,7 +224,7 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | 模块 | 状态 | 说明 |
 | --- | --- | --- |
 | 底盘控制链 | ✅ 完成 | 差速模型 + PID + PWM |
-| 控制源仲裁 | ✅ 完成 | 五级优先级 + 超时 + ESTOP/fault-stop |
+| 控制模式与来源仲裁 | ✅ 完成 | 五模式 + capability/mode mask + 租约/rearm + ESTOP/fault-stop |
 | 编码器 | ✅ 完成 | 四路计数/差分/速度 |
 | ADC/电流/电压 | ✅ 完成 | 五通道 DMA 采样 |
 | BMI270 IMU | ✅ 完成 | 配置表/校准/姿态估计/诊断 |
@@ -230,11 +232,11 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | ESP12F 协议 | ✅ 完成 | robot_link_protocol 帧协议通信 + 烧录透传桥 |
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
-| POST/参数持久化 | ✅ 基础完成 | 上电 POST、ParamService、Flash 镜像、`get/set/set save/set reset` |
+| POST/参数持久化 | ✅ 基础完成 | 上电 POST、Parameter Management、Flash 镜像、`get/set/set save/set reset` |
 | ESP12F 网页固件 | 🟡 代码完成 / HIL 待验 | 首配 EEPROM+CRC、owner/heartbeat 租约、只读遥测广播、远程 ESTOP set-only；待 Arduino IDE 编译与多客户板测 |
 | OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 真实链路自检/模块在线状态 |
 | HIL 冒烟 | ✅ 基础完成 | USART1 只读 smoke 脚本，不自动驱动电机 |
-| 上位机 (RPI) 对接 | 🔲 待对接 | 协议已就绪 |
+| 上位机 (RPI) 对接 | 🟡 fixture 通过 / HIL 待验 | ARM@c472bc6 的 Upper v3 联合 fixture 40/40；真实 UART/车辆未验 |
 
 ---
 

@@ -51,7 +51,8 @@ TIM1/TIM8 均启用 `AutomaticOutput`。TIM1_BKIN 拉低时硬件立即清除 TI
 | M3 | TIM3 | PB4 CH1, PB5 CH2 | Encoder TI12 | IC filter `15` | `65535` |
 | M4 | TIM5 | PA0 CH1, PA1 CH2 | Encoder TI12 | IC filter `15` | `0xFFFFFFFF` |
 
-**配置参数**（`Domain/config/control_config.h` 与 `BSP/bsp_config.h`）：
+**配置参数**（`BSP/encoder/wheel_encoder_config.h`；轮径与方向的 factory defaults 位于
+`App/config/robot_config.c`，运行时由 Parameter Management 发布）：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -118,7 +119,7 @@ ADC1 配置为 12-bit 分辨率、5 通道扫描、TIM8 TRGO 上升沿触发、D
 | USART3 | PD8 TX, PD9 RX | RPI | DMA1 Stream1 Circular | 是 | 上位机 (Raspberry Pi) 帧协议 |
 | UART4 | PC10 TX, PC11 RX | LINE | DMA1 Stream2 Circular | 是 | HiWonder 八路巡线传感器 |
 
-USART3 / ESP12F 共用同一上位机帧协议（`Domain/protocol/robot_link_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
+USART3 / ESP12F 共用 Upper Protocol v3（`Service/communication/internal/robot_link_protocol.h`）。两者均支持 `UPPER_CMD_LINE_CTRL (0x03)` 指令远程启停巡线。
 
 ---
 
@@ -187,8 +188,8 @@ I2C1 总线上挂载 SSD1306 128×64 单色 OLED 显示屏（7-bit 地址 `0x3C`
 | TEST_LED | PE6 | Output | — | 状态指示灯 |
 
 **控制语义**：
-- 手柄在线时提交 `CONTROL_SOURCE_PS2` 运动命令
-- 离线连续 3 次读取失败后 `ClearSource(PS2)`
+- 手柄在线时提交 `COMMAND_SOURCE_PS2` intent
+- 离线连续 3 次读取失败后 release PS2 source；MANUAL 期间断联由 App 切换到 DISABLED
 - 零速命令仍有效（不用旧速度"滑过去"）
 - **三角键 (btn2 mask 0x10)** 上升沿触发巡线模式切换
 
@@ -239,30 +240,34 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 | 文件 | 层级 | 职责 |
 | --- | --- | --- |
 | `BSP/line/line_sensor_driver.c` | BSP 驱动 | DMA 循环缓冲管理、二进制帧状态机解析（帧头检测、校验和验证、8 通道模拟量与状态位提取）、传感器初始化与周期查询 |
-| `Service/control/line_control_service.c` | Service 控制 | 加权平均线位置计算 → PD 控制器 → 通过 `ControlService_SetCommand` 提交至 `CONTROL_SOURCE_LINE` |
+| `Service/line_following/line_following_service.c` | Service 控制 | 加权平均线位置计算 → PD 控制器 → 构造 `command_intent_t` 并通过 `CommandManagement_ApplyIntent` 提交至 `COMMAND_SOURCE_LINE` |
 
 ### 8.4 控制参数
 
-算法默认值位于 `Domain/config/control_config.h`，运行时值由 `ParamService` 发布：
+算法 factory defaults 位于 `App/config/robot_config.c`，运行时由 Parameter Management 发布：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `LINE_DEFAULT_ENABLED` | `0U` | 上电后巡线默认关闭 |
 | `LINE_SPEED_MPS` | `0.15f` | 巡线前进速度 (m/s) |
-| `LINE_KP` | `2.5f` | 角速度比例增益 |
+| `line_active_low` | `1U` | 低值视为黑线 |
+| `line_kp` | `0.6f` | 角速度比例增益 |
+| `line_kd` | `0.05f` | 角速度微分增益 |
+| `line_slowdown_gain` | `0.7f` | 转向时前进速度衰减系数 |
 | `LINE_ANGULAR_MAX_RPS` | `2.0f` | 角速度输出钳位 (rad/s) |
 | `LINE_SENSOR_TIMEOUT_MS` | `50U` | 传感器数据超时（超时清源） |
-| `LINE_DETECT_THRESHOLD_COUNT` | `1U` | 最少检测通道数（低于此值视为丢线） |
-| `LINE_ANALOG_THRESHOLD` | `500U` | 黑线判定模拟量阈值（在 `line_sensor_driver.h`） |
+| `line_detect_debounce_frames` | `2U` | 连续检出防抖帧数 |
+| `line_lost_debounce_frames` | `2U` | 连续丢线防抖帧数 |
+| `line_threshold_raw[8]` | 全部 `500U` | 八路模拟量阈值 |
 | `CHASSIS_LINE_PERIOD_MS` | `5U` | 巡线任务周期 |
 
 ### 8.5 控制行为
 
 - **默认关闭**：`g_line_enabled = 0U`，上电后巡线不参与仲裁
-- **启用方式**：PS2 三角键 / `line on` 命令 / ESP12F `UPPER_CMD_LINE_CTRL (0x03)`
+- **启用方式**：PS2 三角键或远程 `UPPER_CMD_LINE_CTRL (0x03)` 由 App 同时编排 LINE 模式与 enable；`line on` 只改变 Service enable，不绕过 mode mask
 - **跟踪中**：加权平均线位置（CH1=0 … CH8=7）→ 偏差 = 位置 − 3.5（中心）→ `angular_z = LINE_KP × 偏差`
-- **丢线处理**：8 路全白或传感器超时 → `ClearSource(CONTROL_SOURCE_LINE)` → 控制权自动回退到下一优先级源
-- **手动覆盖**：PS2 摇杆操作时优先级高于巡线，自动盖过
+- **丢线处理**：8 路全白或传感器超时 → release `COMMAND_SOURCE_LINE` → 停止
+- **手动覆盖**：PS2 满足接管条件时 App 进入 MANUAL 并撤销 LINE；中立恢复后不自动复驶
 
 ### 8.6 调试命令
 
@@ -314,7 +319,7 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | 7 | UART4 Line | 暂不检测（直接通过） | `OLED_SC_ERROR_UART4_LINE` (bit 15) |
 | 8 | ESP12F | 暂不检测（直接通过） | `OLED_SC_ERROR_ESP12F` (bit 16) |
 
-> 自检错误 bit 位于 bit 9–16，与 `SafetyService` 的 motor/battery 错误 bit（bit 0–8）不冲突。正常运行阶段错误码 hex 为两者 OR 合并显示。
+> 自检错误 bit 位于 bit 9–16，与 Safety Management 的 motor/battery 错误 bit（bit 0–8）不冲突。正常运行阶段错误码 hex 为两者 OR 合并显示。
 
 ### 9.5 模块在线检测（正常运行阶段）
 
@@ -326,14 +331,15 @@ SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPrio
 | PS2 | PS2 手柄 | `Ps2Control_GetState().online` |
 | IMU | BMI270 | `Bmi270Driver_GetState().online` |
 | Line | 巡线传感器 | 传感器数据时间戳 < `OLED_MODULE_TIMEOUT_LINE_MS`（50ms） |
-| Enc | 编码器 | `WheelEncoderDriver_GetState().speed_valid_all` |
+| Enc | 编码器 | publish model 中的 `modules.encoder_online` |
 | ESP | ESP12F | `WirelessCommunication_GetState().rx_frames > 0` |
-| Motr | 电机驱动 | `SafetyService_GetState().error_flags` 无 `DRV_FAULT` |
+| Motr | 电机驱动 | publish model 中的 `motor_fault_mask == 0` |
 | ADC | 模数采样 | `PowerAdcDriver_GetState().current_valid`；保护/控制另看 `current_control_valid` |
 
 ### 9.6 配置参数
 
-所有参数集中在 `Domain/config/control_config.h / BSP/bsp_config.h`：
+I2C 地址位于 `BSP/oled/oled_config.h`；任务周期和 UI 产品参数位于
+`App/config/robot_config.c`，由 App 注入 OLED UI：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |

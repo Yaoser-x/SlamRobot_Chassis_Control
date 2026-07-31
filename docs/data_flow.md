@@ -41,7 +41,7 @@ App 为 Safety 收集 Power、State、System 和 Motor 事实；Safety 不主动
 - App 读取 Motion、State、Power、Safety、Command、System、Host、ESP 和 Parameter identity CRC，组装 Communication/OLED/Debug 所需读模型。
 - Communication 只接收自己的发布 DTO；链路状态和发送事实由 App 回注 System。
 
-Beta5 不创建 odometry、x/y、pose 或位姿融合数据流。
+RC2 下位机不创建 odometry、x/y、pose 或位姿融合数据流。
 
 ## 发布规则
 

@@ -2,7 +2,7 @@
 
 基于 STM32F407VET6 的四轮左右差速底盘控制固件。构建系统采用 STM32CubeMX + FreeRTOS + CMake + Ninja + GNU Arm Embedded Toolchain。
 
-> **当前状态**：`1.0.0-rc2` 软件候选 / `HIL_PENDING` / Upper Protocol v3。历史候选 `v1.0.0-rc1` 已存在并指向 `bc472cc`，本批次不移动该标签。默认两驱启用 M2（左侧）和 M3（右侧）。
+> **当前状态**：`1.0.0-rc2` / `Pre-release` / `FEATURE_FROZEN` / `HIL_PENDING` / Upper Protocol v3。RC2 可作为软件候选预发布，但尚未完成真实 UART HIL、车辆标定和正式兼容验收。历史标签 `v1.0.0-rc1` 指向 `bc472cc`，不得移动或重建。默认两驱启用 M2（左侧）和 M3（右侧）。
 
 ## 快速开始
 
@@ -67,11 +67,14 @@ ctest --test-dir build/host-tests-ninja --output-on-failure
 | 文档 | 内容 |
 | --- | --- |
 | [五层架构](docs/architecture.md) | 层职责、依赖方向、状态所有权、CubeMX 边界与验收命令 |
-| [Beta5 行为契约](docs/beta5-behavior-contract.md) | Beta1/Beta2 行为仲裁、兼容边界、固定测试向量与实板证据入口 |
-| [Beta5 能力所有权](docs/service_ownership.md) | 十项 Service 能力、唯一决策所有者、依赖 DAG 与电机输出边界 |
-| [Beta5 数据流](docs/data_flow.md) | 控制/状态流、generation、一致快照与临界区规则 |
-| [Beta5 配置边界](docs/configuration.md) | App 聚合、Service 配置、调度/BSP 配置和参数优先级 |
-| [Beta5 命名规范](docs/naming_conventions.md) | 最终能力目录、公开契约、internal 和兼容包装命名 |
+| [发布路线图](docs/ROADMAP.md) | RC2 软件冻结、HIL/标定/实车到 v1.0.0，以及后续版本边界 |
+| [发布检查表](docs/release-checklist.md) | 软件候选门、硬件正式门、产物和证据状态 |
+| [变更记录](docs/CHANGELOG.md) | RC2/RC1 已完成改动 |
+| [历史行为契约](docs/beta5-behavior-contract.md) | Beta1/Beta2 行为仲裁及 v3 迁移的历史兼容边界 |
+| [Service 能力所有权](docs/service_ownership.md) | 十项 Service 能力、唯一决策所有者、依赖 DAG 与电机输出边界 |
+| [RC2 数据流](docs/data_flow.md) | 控制/状态流、generation、一致快照与临界区规则 |
+| [配置边界](docs/configuration.md) | App 聚合、Service 配置、调度/BSP 配置和参数优先级 |
+| [命名规范](docs/naming_conventions.md) | 最终能力目录、公开契约、internal 和兼容包装命名 |
 | [外设资源](docs/peripherals.md) | 电机 PWM/编码器/ADC/通信接口/BMI270/ESP12F GPIO/PS2/巡线传感器 — 完整硬件规格 |
 | [控制体系](docs/control-system.md) | 控制链数据流、五级优先级仲裁、安全语义、FreeRTOS 十任务模型、调度监控、底盘布局配置 |
 | [Upper Protocol v3](docs/upper-protocol-v3.md) | 双链路 session/sequence/ACK、HELLO 构建身份、coherent STATUS/IMU 与黄金向量 |

@@ -1,205 +1,138 @@
-# Lab 10: 控制源仲裁与优先级抢占
+# Lab 10：控制模式、来源仲裁与安全撤销
 
 ## 实验目标
 
-1. **知识**：理解多源控制仲裁的设计模式（优先级链、超时退让、reject-and-stop），掌握 `chassis_cmd_t` 的 timestamp 机制
-2. **技能**：能通过 `status` 的 `source` 字段和 CSV 日志追踪控制源切换事件，验证每个源的超时和抢占行为
-3. **素养**：理解"多源并存必须仲裁"的架构原则——没有仲裁的多源系统是不安全的
+1. 理解 RC2 的两级决策：App 先选择产品模式，Command Management 再在该模式允许的来源中仲裁。
+2. 验证命令租约、PS2 接管、rearm 和 Safety motion gate 的 fail-closed 行为。
+3. 能从 `status`、Upper v3 ACK/DIAGNOSTIC 和 Host fixture 记录中还原一次来源切换。
 
-## 实验原理
+## 当前控制模型
 
-### 1. 控制源优先级
+RC2 不再让五个来源无条件同时竞争。`App/composition/control_mode_coordinator.c` 持有模式，
+`Service/command_management/command_management_service.c` 持有来源槽和命令生命周期：
 
-```
-UPPER (USART3/RPI)  >  PS2 手柄  >  ESP12F (WiFi)  >  LINE (巡线)  >  DEBUG (USART1)
-   优先级 1                2              3                 5               4
-```
+| 模式 | 允许来源 | 进入方式 |
+| --- | --- | --- |
+| `DISABLED` | 无 | 安全降级或 PS2 接管期间断联 |
+| `AUTO` | Host、ESP12F | 上电恢复模式；远程控制默认模式 |
+| `MANUAL` | PS2 | 摇杆接管确认或 D-pad/定角宏边沿 |
+| `LINE` | LINE | PS2 三角键或远程 `LINE_CTRL` 编排 |
+| `MAINTENANCE` | DEBUG 诊断 | App 维护编排器持锁期间 |
 
-> LINE(5) 的枚举值比 DEBUG(4) 大，但优先级在 Code 层面通过遍历数组 `{UPPER, PS2, ESP12F, LINE, DEBUG}` 确定，与枚举值无关。
+同一模式内仍按固定数组 `{HOST, PS2, ESP12F, LINE, DEBUG}` 选择第一个有效槽。
+实际会出现并行竞争的是 `AUTO` 中的 Host 与 ESP12F，Host 优先。
 
-### 2. 仲裁算法
+### 命令租约
 
-`ControlService_GetCommand()` 按优先级数组顺序遍历各源命令槽：
+| 来源 | 单次租约 |
+| --- | ---: |
+| Host | 200 ms |
+| PS2 | 500 ms |
+| ESP12F | 500 ms |
+| LINE | 50 ms |
+| DEBUG | 2000 ms |
 
-```
-for each source in [UPPER, PS2, ESP12F, LINE, DEBUG]:
-    cmd = slot[source]
-    if cmd.enable == 1:
-        if (now_ms - cmd.timestamp_ms) <= timeout[source]:
-            return cmd                             ← 命中，忽略更低优先级
-return empty_cmd                                   ← 全部未命中 → 停止
-```
+Host/ESP12F duplicate 不能直接延长任意旧命令。只有 session、sequence、payload、slot generation、
+mode generation 和 motion-revoke generation 全部匹配时，`CommandManagement_RefreshAccepted()`
+才刷新已接受命令；远程槽自首次接受起最多存活 2000 ms。
 
-### 3. 超时退让
+### rearm 与撤销
 
-每个控制源的命令携带 `timestamp_ms`（发送时刻的 tick）。代码按源使用独立超时：UPPER 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms。命令超过对应窗口后自动失效，仲裁跳过此源，不会永久锁死。
+以下事件都会清槽或提升 motion-revoke generation：
 
-```
-场景: PS2 手柄突然断开
-  PS2 最后一次命令的 timestamp = T_0
-  500ms 后: T_now - T_0 > 500ms
-  → PS2 命令槽失效 → 仲裁跳过 PS2 → 落到更低优先级源或停止
-```
+- Safety motion gate 关闭；
+- ESTOP、fault-stop 或维护锁首次生效；
+- 产品模式切换；
+- capability mask 收紧。
 
-### 4. reject-and-stop 语义
+恢复安全条件只会重新开放能力，不会恢复旧运动。每个来源必须先完成自己的 release/neutral
+条件，再提交新的 active intent。NaN/Inf、非法来源、旧 generation 和当前模式不允许的来源均被拒绝；
+危险输入不会靠静默钳位继续运动。
 
-`ControlService_SetCommand()` 在以下情况拒绝命令：
-
-| 条件 | 返回值 | 行为 |
-|------|--------|------|
-| ESTOP 激活 | REJECTED | 拒绝 |
-| fault-stop 激活 | REJECTED | 拒绝 |
-| 源 ID 非法 | REJECTED | 拒绝 |
-| 速度值为 NaN/Inf | REJECTED_AND_STOPPED | 拒绝 + **清空该源槽位** |
-| enable=0 | (特殊) | 清空该源槽位 |
-| 运动学无效（ω≠0 且轮半径/轴距≤0） | ACCEPTED (clamp) | 拒绝角速度分量 |
-
-### 5. 普通命令的持续刷新
-
-`vel` 命令（DEBUG 源）不会自动持续——`debugTask` 每 10ms 周期调用 `ControlService_SetCommand()` 重新刷新 timestamp。这就是为什么输入一次 `vel 100` 后底盘持续运动：debugTask 在不断续期。
-
-## 实验设备
+## 实验设备与边界
 
 | 类别 | 项目 |
-|------|------|
-| 硬件 | F407_V2.0 底盘（**架空**）、12V 电池、USB-TTL 串口模块、PS2 手柄（可选） |
-| 软件 | 串口终端 |
+| --- | --- |
+| 硬件 | F407_V2.0 底盘、12 V 电池、USART1 串口、PS2；Host/ESP12F 至少一个 |
+| 软件 | Upper Protocol v3 发送端或匹配 fixture、串口终端 |
+
+首次实验应架空驱动轮，限低速并保留物理断电手段。该实验是 HIL 项，不由 Host 测试替代。
 
 ## 实验步骤
 
-### 步骤 1：单源命令超时观察
+### 1. 验证 AUTO 远程来源
 
-```bash
-# 使用 vel 命令创建 DEBUG 源命令
-vel 100             # 底盘前进，source=4 (DEBUG)
-s                   # 确认 source=4
-# 记录当前 tick 和 speed
+1. 上电后用 `status` 确认无 ESTOP/fault-stop，Safety permit 有效。
+2. Host 先发送 release/neutral，再发送低速 `SET_VELOCITY`，确认 active source 为 Host。
+3. 保持 Host 有效时让 ESP12F 发送同类命令，确认仍选择 Host。
+4. 停止 Host 刷新并等待超过 200 ms；若 ESP12F 槽仍有效，应退让到 ESP12F，否则停止。
+5. 停止 ESP12F 刷新并等待超过 500 ms，确认 active source 回到 NONE 且 PWM 为零。
+
+记录 ACK outcome、source、slot generation、mode generation 和 motion-revoke generation。
+
+### 2. 验证 PS2 接管与中立恢复
+
+1. 在 AUTO 低速运动时，将 PS2 摇杆推过 `0.15`，保持连续 3 个有效样本。
+2. 确认模式进入 MANUAL、远程槽被撤销，active source 变为 PS2。
+3. 摇杆回到 `0.10` 以下，并保持无 D-pad/宏输入 2000 ms。
+4. 确认模式恢复 AUTO，但旧 Host/ESP 命令没有自动运动。
+5. Host 重新执行 release/neutral，再提交新 active 命令，确认运动才恢复。
+
+如果 MANUAL 期间 PS2 断联，预期模式进入 DISABLED，而不是回放接管前命令。
+
+### 3. 验证 LINE 模式边界
+
+1. 通过 PS2 三角键或远程 `LINE_CTRL` 请求 LINE 模式并显式启用巡线。
+2. 放置有效黑线，确认 LINE intent 生效。
+3. 移走黑线或停止 UART4 有效帧，确认 debounce/50 ms 新鲜度门使 LINE 退让并停车。
+4. 用 PS2 触发 MANUAL 接管；中立 2000 ms 后即使恢复 LINE 模式，也必须再次显式 enable，
+   不得在同一恢复事件中自动运动。
+
+USART1 的 `line on` 只控制 Line Following enable，不绕过 App mode mask；教学实验应通过上述产品入口切换模式。
+
+### 4. 验证 Safety gate
+
+```text
+远程低速运动
+  → USART1: estop 1
+  → active source = NONE，PWM = 0
+  → USART1: estop 0
+  → 旧远程命令仍不可恢复
+  → 远程重新 release/neutral + active 后才可运动
 ```
 
-由于 debugTask 每 10ms 自动刷新 DEBUG 命令，`vel` 不会自然超时。要观察超时行为，需用 `stop` 清除自动刷新：
+若 `nFAULT` 仍为低或硬件 Break 仍锁存，不应通过重复 `clearfault` 强行继续实验。
 
-```bash
-stop                # 清除 DEBUG 命令槽，停止自动刷新
-s                   # source 回退为 NONE(0)，底盘停止
-```
+## 记录表
 
-### 步骤 2：低优先级被高优先级抢占
+| 时间 | 模式 | capability mask | active source | revoke generation | 事件 | 结果 |
+| --- | --- | --- | --- | --- | --- | --- |
+| | AUTO | | HOST | | Host active | |
+| | AUTO | | ESP12F/NONE | | Host timeout | |
+| | MANUAL | | PS2 | | takeover | |
+| | AUTO | | NONE | | neutral restore | |
+| | AUTO | | NONE | | ESTOP clear | |
 
-需两个控制源同时在线。用串口 `vel` 作为 DEBUG (低优先级) + PS2 手柄 (高优先级)：
+## 判定标准
 
-```bash
-vel 100             # DEBUG 源: 前进 100mm/s
-s                   # source=4 (DEBUG)
-# 推 PS2 手柄左摇杆 → source 变为 2 (PS2)
-s                   # 确认 source=2，速度变为 PS2 的值
-# 释放 PS2 摇杆 (归中死区内) → source 回退为 4 (DEBUG)
-s                   # 确认 source=4，恢复 vel 100
-stop
-```
-
-### 步骤 3：巡线与 PS2 的优先级关系
-
-```bash
-line on             # 启用巡线
-# 将黑线放在传感器下方
-s                   # source=5 (LINE)（若有黑线）
-# 推 PS2 摇杆 → source=2 (PS2), 巡线被抢占
-# 释放摇杆 → source=5 (LINE)（若仍有黑线）
-line off
-```
-
-**体会**：PS2 优先级高于 LINE → 操作员随时可以用摇杆"接管"巡线，释放后 LINE 自动恢复。这是安全设计：人 > 自动。
-
-### 步骤 4：ESTOP 拒绝所有源
-
-```bash
-vel 100             # DEBUG 源
-estop 1             # 紧急停止 → 所有源被清除
-s                   # source=0, estop=1
-# 推 PS2 摇杆 → 被 ESTOP 拒绝，底盘不动
-estop 0             # 清除 ESTOP
-# 重新推 PS2 摇杆 → 恢复
-```
-
-### 步骤 5：控制源切换时序追踪
-
-```bash
-log 1 source        # 仅追踪控制源切换
-vel 200             # DEBUG
-# 等待 5 秒
-vel 200 500         # DEBUG + 角速度
-# 等待 5 秒
-stop                # 清除
-log 0
-```
-
-从 CSV 中读出 `source` 列的值序列，验证 source 按预期变化。
-
-## 数据分析
-
-### 控制源切换事件检测
-
-```python
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = pd.read_csv('lab10_source.csv')
-t = df['t_ms'] / 1000.0
-
-source_names = {0: 'NONE', 1: 'UPPER', 2: 'PS2', 3: 'ESP12F', 4: 'DEBUG', 5: 'LINE'}
-colors = {0: 'gray', 1: 'red', 2: 'blue', 3: 'orange', 4: 'green', 5: 'purple'}
-
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-
-# Source timeline
-source_color = [colors.get(s, 'black') for s in df['source']]
-ax1.scatter(t, df['source'], c=source_color, s=10, alpha=0.7)
-ax1.set_yticks(range(6))
-ax1.set_yticklabels([source_names[i] for i in range(6)])
-ax1.set_ylabel('Control Source')
-ax1.grid(alpha=0.3)
-
-# Source switch events
-transitions = df['source'].diff().fillna(0) != 0
-switch_times = t[transitions]
-switch_from = df['source'].shift(1)[transitions].astype(int)
-switch_to = df['source'][transitions].astype(int)
-
-for i, (st, fr, to) in enumerate(zip(switch_times, switch_from, switch_to)):
-    ax2.annotate(f'{source_names[fr]}→{source_names[to]}',
-                 (st, 1), rotation=45, fontsize=8, ha='left')
-ax2.set_ylim(0, 2)
-ax2.set_xlabel('Time (s)')
-ax2.set_ylabel('Switch Event')
-ax2.grid(alpha=0.3)
-
-plt.suptitle('Lab 10: Control Source Arbitration Timeline')
-plt.tight_layout()
-plt.savefig('lab10_arbitration.png', dpi=150)
-
-# Statistics
-print(f'Total source switches: {transitions.sum()}')
-for src in range(6):
-    total_ms = (df['source'] == src).sum() * 0.5  # 500ms log period
-    print(f'{source_names[src]}: {total_ms:.1f}s ({total_ms/(len(df)*0.5)*100:.1f}%)')
-```
+- 模式之外的来源不能形成运动输出。
+- Host 优先于 ESP12F；各来源在自身租约过期后退让。
+- PS2 接管和 Safety 撤销均清除旧来源；恢复后必须 rearm。
+- 任意安全门关闭时，同周期命令选择归零，Motor 周期不接受过期 permit。
+- 观察到的 source、mode、ACK outcome 与上述状态转换一致。
 
 ## 思考题
 
-1. 为什么通信控制源使用 500ms、LINE 使用 50ms、DEBUG 使用 2000ms？如果所有源统一设为 50ms 或 5s，分别会出现什么问题？
+1. 为什么 RC2 同时保留 mode mask、capability mask 和来源优先级，而不是只保留一个优先级数组？
+2. 为什么重复帧刷新还要绑定 slot/mode/revoke generation？
+3. PS2 回中后先恢复模式、但不恢复运动，避免了哪类现场风险？
+4. 若新增蓝牙来源，应归入现有模式还是新增模式？它的 release 条件和租约应由谁持有？
 
-2. 上位机 (UPPER) 优先级最高。假设上位机崩溃并持续发送 `vel 500 0`，操作员能否用手柄或 `estop` 命令阻止底盘？如果可以，是通过什么机制？
+## 相关代码
 
-3. `reject-and-stop` 在检测到 NaN/Inf 时不仅拒绝还清空该源槽位。为什么不能只拒绝不清空？（提示：考虑命令槽是持久的——该源下次再 SetCommand 之前，旧命令会残留吗？）
-
-4. 巡线源 `LINE(5)` 的丢线退让（无黑线 → ClearSource）和超时退让（50ms 无有效帧 → ClearSource）是双重安全网。两者是否重叠？是否可能发生一个触发而另一个不触发的情况？
-
-5. 如果未来要加入"语音控制源"（通过 Bluetooth 传输），你会把它放在优先级链的什么位置？需要什么额外的安全机制？
-
-## 常见问题
-
-| 现象 | 可能原因 | 处理 |
-|------|----------|------|
-| `vel` 命令后底盘立刻停止 | DEBUG 源被更高优先级源抢占 | `s` 查看 source 是否为更高优先级 |
-| PS2 摇杆释放后底盘不停 | 另一源持续发送命令 | `s` 确认 source；`stop` 清除所有 |
-| `source` 在 2 个值之间快速切换 | 两源交替刷新 | 检查高频源（RPI 50ms/ESP 100ms）的命令间隔 |
+- `App/composition/control_mode_coordinator.c`
+- `App/composition/chassis_runtime_coordinator.c`
+- `Service/command_management/command_management_service.c`
+- `Service/communication/internal/remote_command_dispatcher.c`
+- `Service/teleoperation/teleoperation_service.c`
+- `Service/line_following/line_following_service.c`

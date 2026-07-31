@@ -1,4 +1,4 @@
-# Beta5 配置边界
+# RC2 配置边界
 
 ## 运行参数
 
@@ -20,7 +20,7 @@ rc2 新增的安全与模式策略仍属于非持久化产品配置：`remote_ve
 `motion_permit_valid_ms=40`、PS2 takeover enter/exit 为 `0.15/0.10`、连续 3 个有效样本、
 neutral restore 为 2000 ms。启动时只接受合法范围，运行期没有 Debug 修改入口，也不占用 schema 4 reserved 字段。
 
-启动参数合并顺序已经由 App 明确执行：先用注入 factory defaults 初始化唯一 RAM owner，再按 `load_flash_on_boot` 加载兼容 Flash bundle，之后运行期整包 RAM 更新只递增 generation，不会隐式保存。`persist_imu_calibration` 和 `persist_current_zero` 分别控制首次 IMU 自动标定保存以及保存 bundle 时是否携带电流零点；Beta5 默认值均为 1，与 Beta2 行为一致。
+启动参数合并顺序已经由 App 明确执行：先用注入 factory defaults 初始化唯一 RAM owner，再按 `load_flash_on_boot` 加载兼容 Flash bundle，之后运行期整包 RAM 更新只递增 generation，不会隐式保存。`persist_imu_calibration` 和 `persist_current_zero` 分别控制首次 IMU 自动标定保存以及保存 bundle 时是否携带电流零点；RC2 默认值均为 1。
 
 旧 schema 4 中非零 `pid_kd` 通过完整性校验后，只在 active model 中规范化为四轮零值，不自动写 Flash。
 HELLO 的 `parameter_crc32` 是 effective model CRC；诊断另报 persisted CRC 和 mismatch 标志。
@@ -43,10 +43,14 @@ HELLO 的 `parameter_crc32` 是 effective model CRC；诊断另报 persisted CRC
 | OLED | 100 ms | Low |
 | Debug | 现有周期 | BelowNormal |
 
-Beta5 不修改这些值，只把业务代码中重复的调度常量收口到 App 配置。
+RC2 不修改这些值；业务调度常量统一由 App 配置持有。
 
 ## BSP 配置
 
 GPIO/TIM/UART/ADC 映射、电气换算、硬件 PWM 上限、Break/nFAULT 和设备地址属于 BSP。Service 只能接收换算后的事实或通过 BSP API 操作设备，不能包含 HAL handle、引脚宏或寄存器类型。
 
-迁移期间 `Domain/config/control_config.h` 与 `BSP/bsp_config.h` 是只读兼容映射：现有引用登记在架构检查器中，只允许减少，禁止新增；Beta5 最终模式要求全部删除。
+生产代码中的旧 `Domain/` 配置层已经删除，架构与命名门禁禁止重新引入。`BSP/bsp_config.h`
+仅保留硬件常量的兼容聚合；新增消费者应直接依赖对应 BSP capability 配置，例如
+`BSP/encoder/wheel_encoder_config.h`、`BSP/motor/internal/motor_hardware_layout_config.h` 和
+`BSP/oled/oled_config.h`。运行参数的 factory defaults 位于 `App/config/robot_config.c`，由
+Parameter Management 以 generation 快照发布。

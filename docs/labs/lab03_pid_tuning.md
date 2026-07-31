@@ -11,7 +11,7 @@
 
 ### 1. PID 控制器离散形式
 
-本平台实现的是位置式 PID（`BSP/pid/pid_controller.c`）：
+本平台实现的是位置式 PID（`Algorithm/control/pid_controller.c`）：
 
 ```
 e(k) = target(k) − actual(k)
@@ -32,7 +32,7 @@ u(k) = P(k) + I(k) + D(k)
 ### 2. 控制链全貌
 
 ```
-vel V [W]  ──→  ControlService  ──→  ChassisService_Step (10ms)
+command intent ──→ CommandManagement ──→ App Motion DTO ──→ MotionControl (10ms)
                   ├─ 差速模型: linear_x/angular_z → left_mps/right_mps
                   ├─ 速度斜坡: 1.0 m/s² 平滑过渡
                   ├─ PID 速度环: 独立四路 PI(D)

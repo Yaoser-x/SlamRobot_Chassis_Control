@@ -18,7 +18,9 @@ def main() -> int:
     esp = json.loads(args.esp_report.read_text(encoding="utf-8"))
     host_status = host.get("frames", {}).get("STATUS", [])
     esp_status = esp.get("status_after", {})
-    esp_session = int(esp_status.get("session_low", 0)) | (int(esp_status.get("session_high", 0)) << 32)
+    esp_session = int(esp_status.get("session_low", 0)) | (
+        int(esp_status.get("session_high", 0)) << 32
+    )
     assertions = {
         "host_report_passed": all(host.get("assertions", {}).values()),
         "esp_report_passed": all(esp.get("assertions", {}).values()),
@@ -32,10 +34,16 @@ def main() -> int:
         "assertions": assertions,
         "host_report": str(args.host_report),
         "esp_report": str(args.esp_report),
-        "manual_pending": ["simultaneous command arbitration Host > PS2 > ESP > Line > Debug"]
+        "manual_pending": [
+            "AUTO Host-over-ESP arbitration",
+            "PS2 MANUAL takeover and neutral rearm",
+            "LINE explicit re-enable after mode recovery",
+        ],
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+    args.report.write_text(
+        json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return 0 if all(assertions.values()) else 1
 
 

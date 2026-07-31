@@ -59,6 +59,7 @@
 
 **命令**：
 ```
+maint arm     # Release 构建先获取 60s 本地诊断授权；Debug 构建可省略
 m1 200 0     # M1 以 200‰ 占空比正转（前进方向）
 m1 0 0       # 停止 M1
 m1 0 200     # M1 以 200‰ 占空比反转（后退方向）
@@ -67,7 +68,7 @@ m1 0 0
 
 依次测试需要启用的电机；默认两驱重点测试 M2、M3。**确认项**：
 - 每路电机正转/反转方向与预期一致
-- 若某路方向相反，修改 `CHASSIS_Mx_MOTOR_DIR = -1`
+- 若某路方向相反，在完全停止后用 `set motor_dir m2 -1|1` 修改 RAM 参数；复验通过后才执行 `set save`
 - 若某路不转，检查 DRV8874 `nSLEEP`/`nFAULT` 和接线
 - `status` 中对应 `drv_fault` 保持 0
 
@@ -99,7 +100,7 @@ motor 0 0
 
 **确认项**：
 - 已启用电机的编码器 `speed_mm/s` 均为正值（前进时）
-- 若某路为负值，修改 `CHASSIS_Mx_ENCODER_DIR = -1`
+- 若某路为负值，在完全停止后用 `set encoder_dir m2 -1|1` 修改 RAM 参数；复验通过后才执行 `set save`
 - `count` 值随轮转动递增
 - 停止后 `speed_mm/s` 回零（在 `CHASSIS_MAX_ENCODER_DT_MS` 内）
 
@@ -125,12 +126,12 @@ ADC1 由 TIM8 TRGO 以 2kHz 触发五通道 DMA 扫描（20kHz PWM / 10），saf
 
 **前置条件**：步骤 3–6 全部确认通过，ESTOP 未激活。
 
-**命令**：
-```
-vel 50        # 以 50mm/s 直线前进
-vel 0         # 停止
-vel 50 100    # 前进 50mm/s + 角速度 100mrad/s
-vel 0
+**命令入口**：使用 Upper Protocol v3 Host/ESP 在 AUTO 模式完成 release/neutral→active，
+或在架空轮条件下运行 `hil_upper_v3.py --arm-motion` 的 0.05m/s 场景。USART1 `vel` 属于
+`COMMAND_SOURCE_DEBUG`，不能绕过 RC2 的 mode/capability/rearm 门控，不作为 AUTO 闭环验收入口。
+
+```bash
+python scripts/hil_upper_v3.py --port COMx --report evidence/host-motion.json --arm-motion
 ```
 
 **确认项**：
@@ -216,16 +217,17 @@ log 1 line    # 可选：持续观察收帧统计
 - `an` 模拟量在黑线上 < `LINE_ANALOG_THRESHOLD`（默认 500），白色上 > 阈值
 
 **阶段 C — 控制验证**：
-- 架空轮，输入 `line on` 启用巡线
+- 架空轮，通过 PS2 三角键或远程 `LINE_CTRL` 让 App 切入 LINE 模式并显式 enable
 - 手动在传感器下方移动黑线
 - `status` 中 `source` 显示 `LINE(5)`，底盘随黑线位置转向
 - 黑线居中时底盘直行，黑线偏左时左转，偏右时右转
-- 移除黑线（丢线），底盘停止（`ClearSource`），`source` 回退为 `NONE` 或更低优先级源
-- `line off` 或 PS2 三角键关闭巡线
+- 移除黑线（丢线），LINE source release，底盘停止且 `source` 回到 `NONE`
+- PS2 接管后回中 2s 只恢复模式，不恢复旧运动；必须再次显式 enable
+- USART1 `line on` 只修改 Service enable，不绕过 App mode mask，不能单独作为 LINE 模式入口
 
 **阶段 D — 实际巡线**：
 - 将底盘放在铺有黑线的浅色地面上
-- `line on` 启用巡线，默认速度 `LINE_SPEED_MPS = 0.15 m/s`
+- 通过 PS2 三角键或远程 `LINE_CTRL` 启用巡线，factory default `line_speed_mps = 0.15 m/s`
 - 底盘应沿黑线前进，转弯平滑
-- 若转弯过猛，减小 `LINE_KP`；若跟踪慢/脱线，增大 `LINE_KP`
-- 若前进过快，减小 `LINE_SPEED_MPS`
+- 若转弯过猛，减小 `line_kp`；若跟踪慢/脱线，增大 `line_kp`
+- 若前进过快，减小 `line_speed_mps`

@@ -54,8 +54,9 @@ TIM1 低有效 BKIN 是权威硬切断，Automatic Output 禁用；触发后清 
 ```
 DRV8874 nFAULT 拉低 → SYSTEM_ERROR_DRV_FAULT
     → latched → SYSTEM_ERROR_FAULT_STOP
-    → ControlService_SetFaultStop(1)
-    → 清空全部控制源 + EN=0 停止输出
+    → SafetyManagement 锁存 fault-stop
+    → AppSafetyWorkflow_SynchronizeCommandGate()
+    → CommandManagement 清源/撤销 + MotionControl EN=0 停止输出
     → 全部电机进入 PH/EN 低侧慢衰减制动
 ```
 

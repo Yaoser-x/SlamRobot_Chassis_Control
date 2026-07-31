@@ -1,8 +1,8 @@
 # RC2 审计整改冻结
 
-本轮以 `1667971022d7d32b87cba0020e638c0da8914ef9` 为唯一基线，版本保持
-`1.0.0-rc2`。软件整改不改变 `.ioc`、Upper Protocol v3 payload 或 Flash schema 4；
-实板验收完成前发布状态保持 `HIL_PENDING`。
+本轮以 `1667971022d7d32b87cba0020e638c0da8914ef9` 为整改起点，最终软件冻结基线为
+`bc715ff9860fd98a459ec750654b9c00687ece3e`，版本保持 `1.0.0-rc2`。软件整改不改变
+`.ioc`、Upper Protocol v3 payload 或 Flash schema 4；实板验收完成前硬件状态保持 `HIL_PENDING`。
 
 ## 运行时安全契约
 
@@ -66,3 +66,5 @@ C/H 文件）和 clang-format 18.1.8 通过。arduino-cli 1.5.1 使用 ESP8266 C
 WebSockets 2.7.2 完成编译和安全检查；Upper 固定提交 `c472bc6` 的联合 fixture 40/40 通过。
 Debug size 为 `text=189212, data=532, bss=90264`，Release 为
 `text=168876, data=528, bss=90248`。HIL 项始终未据软件测试提前勾选。
+
+该证据足以把 RC2 定义为软件功能冻结 Pre-release，但不构成 UART HIL、车辆验收或正式兼容。

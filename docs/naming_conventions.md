@@ -1,4 +1,4 @@
-# Beta5 命名规范
+# RC2 命名规范
 
 - 顶层用户代码目录固定为 `App / Service / BSP / Algorithm / Platform`。
 - C/H 文件和子目录统一 `lower_snake_case`。

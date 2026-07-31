@@ -2,7 +2,7 @@
 
 本检查表只记录可追溯的验证结果。未附固件 SHA、日志或测量记录的项目不得勾选。
 
-## v1.0.0-rc2 / HIL_PENDING
+## v1.0.0-rc2 软件候选门 / Pre-release / HIL_PENDING
 
 - [x] `VERSION` 为 `1.0.0-rc2`
 - [x] 看门狗双 completion、年龄门和 Evaluate/Feed/Commit Host 覆盖
@@ -19,13 +19,22 @@
 - [x] cppcheck 2.21.0 检查 416 个 C/H 文件通过；clang-format 18.1.8 通过
 - [x] arduino-cli 1.5.1、ESP8266 Core 3.1.2、WebSockets 2.7.2 编译与安全策略检查通过
 - [x] Lower STATUS → Upper v3 decoder → WheelObservation → formal odometry 联合 fixture 40/40（Upper `c472bc6`）
-- [ ] rc2 HIL 项目全部归档
-- [ ] 创建本地 annotated tag `v1.0.0-rc2`（HIL 全绿后）
+- [x] Roadmap、当前技术文档和发布打包元数据完成同步
+- [ ] 文档同步后的 clean commit 重跑软件门禁并固定证据
+- [ ] 创建本地 annotated tag `v1.0.0-rc2`（软件候选门完成后；不要求提前伪造 HIL PASS）
+- [ ] 创建 GitHub Pre-release，且不设为 latest
 
 历史 `v1.0.0-rc1` 已存在并指向 `bc472cc`，不得移动或重建。
 
 最终本地软件门禁 size：Debug `text=189212, data=532, bss=90264`；Release
-`text=168876, data=528, bss=90248`。以上不代表实板 HIL 已完成。
+`text=168876, data=528, bss=90248`。RC2 允许在以下硬件门未完成时作为 Pre-release 发布，
+但必须保留 `HIL_PENDING` 和 `release_compatible=false`。
+
+当前上位机候选为 `ARM@c472bc6 / v0.6.0-rc2`。fixture 通过只证明软件协议链一致；
+其兼容清单中的 `tested_commit`、`compatible_commit` 仍为空。
+
+以下 RC1、Beta5.3 与 Beta2 段落是对应版本当时的历史检查表，保留原协议、测试数量和门禁口径，
+不得用于描述当前 RC2 状态。
 
 ## v1.0.0-rc1 / Upper Protocol v3
 
@@ -74,6 +83,8 @@
 
 ## P0 板级安全
 
+以下项目是 `v1.0.0` 正式版硬门，不阻止 RC2 软件候选标签，但不得在 RC2 中提前勾选。
+
 - [ ] 编码器临界区最大值小于 20 us
 - [ ] 调试输出 deadman 最迟 500 ms 停车
 - [ ] 编码器断线最迟 200 ms 锁停
@@ -102,3 +113,6 @@
 - [ ] HIL JSON、串口 transcript 和 P0 验收表完整
 - [ ] 参数、IMU、电流和直行报告绑定固件 SHA
 - [ ] CHANGELOG 和已知限制已同步
+
+只有 P0 板级安全、参数与集成、正式兼容和发布产物全部通过，才能发布 `v1.0.0` 并将其描述为
+实板与车辆验收版本。

@@ -15,13 +15,13 @@
   手机网页 ──WiFi──→ ESP12F ──robot_link_protocol帧──→ STM32F407
                      (USART2)                      │
                                                    ↓
-                                              CONTROL_SOURCE_ESP12F
+                                              COMMAND_SOURCE_ESP12F
 
 烧录模式 (espflash on):
   PC (esptool.py) ──bin──→ USART1 ──透明桥──→ USART2 ──→ ESP12F BootROM
 ```
 
-**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的控制指令通过 `robot_link_protocol` 帧协议发送给 STM32（`Service/communication/wireless_communication_service.c` 解析），提交至 `CONTROL_SOURCE_ESP12F`。这不是桥接，而是标准的帧协议通信。
+**正常模式**：ESP12F 作为 WiFi 转 UART 模块，将手机/网页的 Upper Protocol v3 帧发送给 STM32（`Service/communication/wireless_communication_service.c` 接收，内部 dispatcher 解析），提交至 `COMMAND_SOURCE_ESP12F`。这不是桥接，而是标准帧协议通信。
 
 **烧录模式** (`espflash on`)：USART1 和 USART2 之间建立透明桥——STM32 将 PC 发来的二进制流直传给 ESP12F，同时将 ESP12F 的回复直传给 PC。此模式下调试台暂停命令解析（避免二进制流被误当作文本命令）。**桥接仅用于烧录固件，正常通信不使用桥接。**
 
@@ -227,7 +227,7 @@ plt.savefig('lab13_esp_frame_rate.png', dpi=150)
 
 2. `espflash status` 的 `auto_exit` 计数器记录了空闲自动退出次数。这个机制的目的是什么？（提示：考虑用户忘记执行 `espflash off` 的场景）
 
-3. ESP12F 作为 `CONTROL_SOURCE_ESP12F (3)`，优先级高于 LINE(5) 和 DEBUG(4)，但低于 PS2(2) 和 UPPER(1)。WiFi 控制可能因网络延迟导致命令抖动。500ms 的超时设计对 WiFi 控制是否足够？
+3. ESP12F 在 AUTO 模式与 Host 同属 remote mask，Host 优先；PS2 则通过 App 切换 MANUAL 接管。WiFi 控制可能因网络延迟导致命令抖动，500 ms 租约与 2000 ms 最大远程寿命分别解决什么问题？
 
 4. 如果没有 STM32 的透明桥，要烧录 ESP8266 需要什么硬件？（提示：USB-TTL 模块 + 手动拉低 GPIO0）。STM32 烧录桥相比直连方案的优势是什么？
 

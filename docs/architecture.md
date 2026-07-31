@@ -1,6 +1,6 @@
-# Beta5 五层架构
+# RC2 五层架构
 
-Beta5 最终只保留 `App / Service / BSP / Algorithm / Platform` 五类用户代码。`Core / Drivers / Middlewares` 是生成区或第三方边界，不参与业务所有权。
+RC2 只保留 `App / Service / BSP / Algorithm / Platform` 五类用户代码。`Core / Drivers / Middlewares` 是生成区或第三方边界，不参与业务所有权。
 
 依赖方向固定为：App 负责编排，Service 负责业务能力，BSP 负责设备事实，Algorithm 负责无状态或显式状态的纯逻辑，Platform 负责 RTOS/Cortex-M 系统能力。
 
@@ -53,7 +53,7 @@ SafetyManagement 不读取 Power/State/System/Motor/Command，也不写 Command 
 Safety/Command/Power/State/Parameter，也不写 Safety fault。BSP 电机事实由 `App/adapters` 转换为硬件无关 DTO，
 维护与故障清除由 `App/composition` 按顺序编排。
 
-## Beta5.4 运行时边界
+## RC2 运行时边界
 
 - 巡线 Service 只拥有请求、采样、校验和 RAM apply；App 协调器持有完整维护租约并区分 PS2 自动提交与 Debug 手动提交。
 - IMU 标定的 Motion 事实和 Flash 持久化由 App 主动编排；每次开机以有效 Flash bias 为初值重新自动标定，
@@ -76,6 +76,6 @@ CI 与本地发布验收统一运行 Final 门禁，要求 `Domain/`、混杂配
 
 ## CubeMX 边界
 
-`.ioc`、引脚、外设、NVIC、十个任务的数量/周期/优先级均不在 Beta5 修改范围。CubeMX 重新生成时只接受 USER CODE 区业务入口差异；硬件或调度差异必须回退并单独评审。
+`.ioc`、引脚、外设、NVIC、十个任务的数量/周期/优先级均不在 RC2 文档同步范围。CubeMX 重新生成时只接受 USER CODE 区业务入口差异；硬件或调度差异必须回退并单独评审。
 
-本地软件验收不替代最终 25 项 HIL 及 Beta5 追加场景。
+本地软件验收不替代 RC2 后续 HIL、标定和实车验收。

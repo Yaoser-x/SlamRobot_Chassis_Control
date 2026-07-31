@@ -14,11 +14,11 @@ REACQUIRING，异常原始计数仍累计；连续三个稳定样本只重建 ba
 
 ```
 控制源 → CommandManagement       优先级仲裁 + 超时 + motion gate
-       → MotionControl_Update    每 10ms，motorTask 驱动
+       → MotionControl_StepWithInput 每 10ms，motorTask 驱动
          → MotorHardwareLayout         电机启用/侧别/方向查表
          → 差速模型              linear_x / angular_z → left_mps / right_mps
          → 速度斜坡              按 CHASSIS_SPEED_RAMP_MPS2 平滑过渡
-         → StraightController    方向 trim + 轮速耦合 + gyro PI (angular_z=0 自动激活)
+         → StraightLineController 方向 trim + 轮速耦合 + gyro PI (angular_z=0 自动激活)
          → PID 速度环            独立四路 PID 控制器 (M1-M3 PID, M4 纯 P)
          → permille 输出          限幅到 CHASSIS_PWM_MAX_PERMILLE
          → MotorDriver           TIM1 EN/PWM + GPIO PH/DIR 输出
@@ -26,26 +26,24 @@ REACQUIRING，异常原始计数仍累计；连续三个稳定样本只重建 ba
 
 ---
 
-## 2. 控制源优先级
+## 2. 控制模式与来源仲裁
 
-```
-上位机 (USART3)  >  PS2 手柄  >  ESP12F (WiFi)  >  巡线 (UART4)  >  调试台 (USART1)
-```
+App 先将当前 mode mask 与 Safety capability mask 求交，Command Management 只在允许集合中仲裁：
 
-| 控制源 | 枚举值 | 接口 | 激活方式 | 说明 |
-| --- | --- | --- | --- | --- |
-| **UPPER** | `CONTROL_SOURCE_UPPER (1)` | USART3 DMA | RPI 上位机发送帧 | 最高优先级，用于 ROS/上位机自主导航 |
-| **PS2** | `CONTROL_SOURCE_PS2 (2)` | GPIO bit-bang | 手柄在线 + 摇杆/十字键操作 | 手柄三角键切换巡线模式 |
-| **ESP12F** | `CONTROL_SOURCE_ESP12F (3)` | USART2 中断 | WiFi 模块发送 `SET_VELOCITY` 帧 | 支持 `LINE_CTRL` 远程启停巡线 |
-| **LINE** | `CONTROL_SOURCE_LINE (5)` | UART4 DMA | 巡线启用 + 传感器检测到黑线 | 默认关闭，丢线自动退让 |
-| **DEBUG** | `CONTROL_SOURCE_DEBUG (4)` | USART1 中断 | 调试台 `vel` 命令 | 最低优先级，用于人工验证调试 |
+| 模式 | 允许来源 | 说明 |
+| --- | --- | --- |
+| `DISABLED` | 无 | 安全降级或 MANUAL 期间 PS2 断联 |
+| `AUTO` | `COMMAND_SOURCE_HOST`、`COMMAND_SOURCE_ESP12F` | 远程自动控制；Host 优先于 ESP12F |
+| `MANUAL` | `COMMAND_SOURCE_PS2` | PS2 去抖接管 |
+| `LINE` | `COMMAND_SOURCE_LINE` | 显式进入并启用巡线 |
+| `MAINTENANCE` | `COMMAND_SOURCE_DEBUG` | App 维护编排持锁期间的诊断来源 |
 
 ### 2.1 仲裁逻辑
 
 `CommandManagement_GetActive()` 按优先级数组 `{HOST, PS2, ESP12F, LINE, DEBUG}` 顺序遍历各源命令槽：
 
 1. 检查源命令的 `enable` 标志
-2. 按控制源验证命令年龄：UPPER 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
+2. 检查 mode/capability mask 与 rearm 状态，并验证命令年龄：Host 为 200ms，PS2/ESP12F 为 500ms，LINE 为 50ms，DEBUG 为 2000ms
 3. 命中即返回，不再检查更低优先级源
 4. 若所有源均未命中，返回空命令（`enable=0`），底盘停止
 
@@ -86,8 +84,9 @@ PWM 在 IWDG 复位前归零。
 
 `CommandManagement_Set()` 在以下任一条件时拒绝命令：
 
-- 当前处于 ESTOP 或 fault-stop 状态
-- 源 ID 非法（`NONE` 或超出 `CONTROL_SOURCE_LINE`）
+- Safety motion gate 关闭，或来源不在当前 mode/capability mask 中
+- 源 ID 非法（`COMMAND_SOURCE_NONE` 或超出 `COMMAND_SOURCE_COUNT`）
+- 来源尚未完成 rearm，或 generation 已过期
 - 速度值为 NaN 或 Inf → **额外触发 reject-and-stop**：拒绝并清空该源命令槽
 - 命令 `enable == 0` → 清空该源槽位
 - 运动学无效（轮半径/轴距 ≤ 0）且角速度非零 → 拒绝角速度，直线仍允许
@@ -96,16 +95,19 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 
 ### 3.3 巡线特有安全行为
 
-- **默认关闭**：`LINE_DEFAULT_ENABLED = 0U`，上电不启用
-- **丢线退让**：8 路全白（无黑线）→ `ClearSource(LINE)` → 回退到 DEBUG 或更低源
-- **超时退让**：传感器 50ms 无有效帧 → `ClearSource(LINE)`
-- **手动覆盖**：PS2 摇杆操作时 LINE 被优先级仲裁自动跳过
+- **默认关闭**：App 注入的 `line.default_enabled = 0U`，上电不启用
+- **丢线退让**：8 路全白（无黑线）→ release LINE source → 停止
+- **超时退让**：传感器 50ms 无有效帧 → release LINE source
+- **手动接管**：PS2 达到接管条件后 App 切换 MANUAL，撤销 LINE；恢复 LINE 模式后仍需新的显式 enable
 
 ---
 
 ### 3.3 P0 运动安全
 
-- ParamService generation 快照供 ControlService、ChassisService 和 WheelEncoderDriver 同代消费；代际变化清 PID/斜坡。电机/编码器方向支持编译期默认（`MotorHardwareLayout`）和运行时覆盖（`set motor_dir`/`set encoder_dir`）。
+- Parameter Management 发布 generation 快照；App 在同一 Motor 周期组装 `motion_control_input_t`，
+  Motion Control 与状态估计消费同代参数，代际变化时清 PID、斜坡和直行控制状态。电机/编码器方向
+  由 `App/config/robot_config.c` 提供 factory defaults，并可通过 `set motor_dir` / `set encoder_dir`
+  整包更新运行时快照。
 - 维护锁先阻止新命令，再清控制源/raw/open-loop/PWM 并确认编码器静止。raw/open-loop 租约 400ms；Release 还需本地 `maint arm` 60s 授权。
 - 维护、ESTOP 和 fault-stop 首次置位都会递增 motion-revoke generation；此前启用的 LINE 和自动续发 DEBUG `vel` 会失效，解除安全锁后必须重新执行 `line on` 或发送新的本地 `vel`，不会恢复旧运动模式。
 - 正常闭环任一 enabled encoder 无效，或 RUN/PWM 有效时非零 requested target 持续 150ms 无运动，当前 motorTask 周期立即整车停车并锁存 bit17。
@@ -122,7 +124,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `HostCommunication_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
 | **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
-| **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 1024W (4096B) | `LineSensorDriver_Update` + `LineSensorDriver_RequestAnalog` + `LineControl_Update`：帧解析、传感器查询、P 控制提交 |
+| **lineTask** | `Task_Line` | BelowNormal | 5ms | `osDelayUntil` | 1024W (4096B) | `LineSensorDriver_Update` + `LineSensorDriver_RequestAnalog` + `LineFollowing_Update`：帧解析、传感器查询、PD 控制提交 |
 | **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `WirelessCommunication_Update`：ESP12F 协议收发与烧录桥 |
 | **debugTask** | `Task_Debug` | BelowNormal | 10ms | `osDelay` | 2048W (8192B) | `PlatformResetTrace_TaskHeartbeat` + 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
 | **ledTask** | `Task_Led` | Low (osPriorityLow) | 50ms | `osDelayUntil` | 128W (512B) | `StatusLedDriver_TaskStep`：TEST_LED 状态闪烁 |
@@ -163,7 +165,9 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 
 ## 5. 底盘布局配置
 
-`Domain/config/control_config.h / BSP/bsp_config.h` 提供编译期布局配置，支持四驱/两驱和自定义左右侧：
+`BSP/motor/internal/motor_hardware_layout_config.h` 提供编译期 enabled/side 布局；电机方向、
+编码器方向、轮径和轮距的 factory defaults 位于 `App/config/robot_config.c`，运行时由 Parameter
+Management 发布：
 
 | 宏 | 可选值 | 说明 |
 | --- | --- | --- |
@@ -191,7 +195,7 @@ RTOS comm upper_tx=X upper_drop=X esp_tx=X esp_drop=X
 - **ESP12F flash bridge**：维护功能。进入前获取统一维护锁并确认静止，active 全生命周期拒绝所有控制源；USART1 被二进制透传接管，30s 无活动自动退出并释放锁
 # P1-P3 运行时增强
 
-- 电机/编码器方向、巡线阈值/极性/PD/速度、电流三层阈值与直行补偿增益均由 ParamService 原子快照驱动；编译期宏只提供安全默认值。
-- 所有来源的 `angular_z=0` 在底盘层统一进入 `StraightController`。控制器按前进/后退和 0.15/0.30m/s 插值 trim，再叠加轮速耦合与 gyro-z 积分航向 PI；不等待 400ms，也不使用 Mahony yaw。
+- 电机/编码器方向、巡线阈值/极性/PD/速度、电流三层阈值与直行补偿增益均由 Parameter Management 原子快照驱动；编译期宏只保留硬件布局事实。
+- 所有来源的 `angular_z=0` 在 Motion Control 中统一进入 `StraightLineController`。控制器按前进/后退和 0.15/0.30m/s 插值 trim，再叠加轮速耦合与 gyro-z 积分航向 PI；不等待 400ms，也不使用 Mahony yaw。
 - IMU stale、未校准、SPI/timestamp/gyro quality 异常时同周期退化为 trim + wheel，恢复周期清零航向参考，禁止输出阶跃。纠偏/PWM/电流饱和时冻结积分；弱侧无法增速时降低共同速度以保留差速。
 - 默认 trim、Kp、Ki 和航向保持关闭，必须用匹配固件身份的双向 2m 基线/改后报告决定参数。前 0.30m 万向轮翻转段单独记录，不计入稳态验收。
