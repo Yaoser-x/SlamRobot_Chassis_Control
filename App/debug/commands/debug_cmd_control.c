@@ -69,8 +69,8 @@ uint8_t DebugCmdControl_TryHandle(const char *line, const debug_cmd_control_cont
     int     angular_mrad_s = 0;
     uint8_t motor;
 
-    if (line == 0 || context == 0 || context->velocity_enabled == 0 || context->velocity_generation == 0
-        || context->velocity_command == 0)
+    if (line == 0 || context == 0 || context->velocity_enabled == 0 || context->velocity_mode_active == 0
+        || context->velocity_generation == 0 || context->velocity_command == 0)
     {
         return 0U;
     }
@@ -126,7 +126,39 @@ uint8_t DebugCmdControl_TryHandle(const char *line, const debug_cmd_control_cont
     }
     else if (sscanf(line, "vel %d %d", &linear_mm_s, &angular_mrad_s) == 2 || sscanf(line, "vel %d", &linear_mm_s) == 1)
     {
-        uint32_t generation_before = CommandManagement_GetMotionRevokeGeneration();
+        uint8_t  acquired_mode = 0U;
+        uint32_t generation_before;
+
+        if (linear_mm_s == 0 && angular_mrad_s == 0)
+        {
+            *context->velocity_enabled = 0U;
+            CommandManagement_ClearSource(COMMAND_SOURCE_DEBUG);
+            if (*context->velocity_mode_active != 0U && context->end_velocity_mode != 0)
+            {
+                context->end_velocity_mode();
+                *context->velocity_mode_active = 0U;
+            }
+            CONTROL_LOG("INFO", "velocity command stopped");
+            return 1U;
+        }
+        if (*context->velocity_mode_active == 0U)
+        {
+            if (context->begin_velocity_mode == 0 || context->begin_velocity_mode() == 0U)
+            {
+                CONTROL_LOG("WARN", "velocity mode unavailable: chassis must be stationary and non-manual");
+                return 1U;
+            }
+            *context->velocity_mode_active = 1U;
+            acquired_mode                  = 1U;
+            if (CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG).outcome != COMMAND_OUTCOME_RELEASE_ACCEPTED)
+            {
+                context->end_velocity_mode();
+                *context->velocity_mode_active = 0U;
+                CONTROL_LOG("WARN", "velocity mode unavailable: debug source not permitted");
+                return 1U;
+            }
+        }
+        generation_before          = CommandManagement_GetMotionRevokeGeneration();
         *context->velocity_command = (command_velocity_t){
             .linear_x     = (float)linear_mm_s / 1000.0f,
             .angular_z    = (float)angular_mrad_s / 1000.0f,
@@ -154,6 +186,11 @@ uint8_t DebugCmdControl_TryHandle(const char *line, const debug_cmd_control_cont
         }
         else
         {
+            if (acquired_mode != 0U && context->end_velocity_mode != 0)
+            {
+                context->end_velocity_mode();
+                *context->velocity_mode_active = 0U;
+            }
             CONTROL_LOG("WARN", "velocity command rejected");
         }
     }
@@ -163,7 +200,11 @@ uint8_t DebugCmdControl_TryHandle(const char *line, const debug_cmd_control_cont
         MotionControl_OpenLoopTest(0, 0);
         MotionControl_RawInputTest(0, 0, 0, 0);
         CommandManagement_ClearAll();
-        (void)CommandManagement_QualifyRearm(COMMAND_SOURCE_DEBUG);
+        if (*context->velocity_mode_active != 0U && context->end_velocity_mode != 0)
+        {
+            context->end_velocity_mode();
+            *context->velocity_mode_active = 0U;
+        }
         CONTROL_LOG("INFO", "chassis stopped");
     }
     else if (sscanf(line, "estop %d", &value) == 1)

@@ -534,6 +534,21 @@ uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *status)
     return generation;
 }
 
+uint32_t StateEstimation_GetImuSampleSnapshot(state_estimation_imu_status_t *status)
+{
+    platform_critical_state_t critical;
+    uint32_t generation;
+    if (status == 0)
+    {
+        return 0UL;
+    }
+    critical = PlatformCritical_Enter();
+    *status = imu_status;
+    generation = imu_sample_generation;
+    PlatformCritical_Exit(critical);
+    return generation;
+}
+
 uint32_t StateEstimation_GetStatus(uint32_t now_ms, state_estimation_status_t *status)
 {
     platform_critical_state_t critical;

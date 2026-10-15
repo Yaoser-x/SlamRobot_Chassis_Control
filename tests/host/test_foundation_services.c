@@ -43,6 +43,8 @@ static flash_param_bundle_t            last_saved_bundle;
 static flash_param_status_t            fake_persistence_save_status;
 static flash_param_status_t            fake_persistence_load_status = FLASH_PARAM_STATUS_EMPTY;
 static flash_param_bundle_t            fake_persistence_load_bundle;
+static app_motion_maintenance_result_t fake_maintenance_result;
+static uint32_t                       stationary_maintenance_attempts;
 
 static void require_int(int condition, const char *message)
 {
@@ -365,6 +367,13 @@ app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
     return APP_MOTION_MAINTENANCE_OK;
 }
 
+app_motion_maintenance_result_t AppMotionMaintenance_TryBeginStationary(void)
+{
+    record_external_call();
+    stationary_maintenance_attempts++;
+    return fake_maintenance_result;
+}
+
 void AppMotionMaintenance_End(void)
 {
     record_external_call();
@@ -508,10 +517,18 @@ static void test_state_generations_and_freshness_are_independent(void)
                     && status.imu_status_generation == 1UL && status.imu_generation == 2UL,
                 "wheel, IMU sample, and IMU status generations publish independently");
     require_int(status.wheel_fresh != 0U && status.imu_fresh != 0U, "both chains initially fresh");
+    require_int(StateEstimation_GetImuSampleSnapshot(&imu) == status.imu_sample_generation
+                    && imu.sample_count == status.imu.sample_count && imu.last_update_ms == status.imu.last_update_ms,
+                "lightweight IMU getter returns coherent sample facts and sample generation");
+    require_int(StateEstimation_GetImu(&imu) == status.imu_generation,
+                "historical GetImu retains its aggregate status plus sample generation contract");
     fake_imu_update_enabled = 0U;
     require_int(StateEstimation_RunImuCycle() == 0U, "empty IMU cycle reports no sample");
     (void)StateEstimation_GetStatus(120U, &status);
     require_int(status.imu_sample_generation == 1UL, "empty IMU cycle does not publish a sample generation");
+    require_int(StateEstimation_GetImuSampleSnapshot(&imu) == 1UL,
+                "empty or status-only cycle cannot manufacture a new IMU sample token");
+    require_int(StateEstimation_GetImuSampleSnapshot(NULL) == 0UL, "null sample snapshot request is rejected");
     fake_imu_update_enabled = 1U;
     (void)StateEstimation_GetStatus(151U, &status);
     require_int(status.wheel_fresh != 0U && status.imu_fresh == 0U,
@@ -683,6 +700,24 @@ static void test_factory_reset_persists_before_publishing_defaults(void)
     require_int(params.max_linear_mps == 0.5f, "factory defaults publish only after save succeeds");
 }
 
+static void test_imu_autosave_defers_busy_acquisition_with_backoff(void)
+{
+    persistence_save_count = 0UL;
+    stationary_maintenance_attempts = 0UL;
+    fake_maintenance_result = APP_MOTION_MAINTENANCE_NOT_STATIONARY;
+    ImuCalibrationOrchestrator_Init(1U, 0U);
+    run_stationary_auto_calibration(13000U);
+    ImuCalibrationOrchestrator_ProcessPersistence(15000U);
+    require_int(stationary_maintenance_attempts == 1UL && persistence_save_count == 0UL,
+                "moving chassis defers IMU autosave through stationary acquisition");
+    ImuCalibrationOrchestrator_ProcessPersistence(15020U);
+    require_int(stationary_maintenance_attempts == 1UL, "failed acquisition does not retry every Safety cycle");
+    fake_maintenance_result = APP_MOTION_MAINTENANCE_OK;
+    ImuCalibrationOrchestrator_ProcessPersistence(16000U);
+    require_int(stationary_maintenance_attempts == 2UL && persistence_save_count == 1UL,
+                "pending save succeeds after the retry deadline and stationary acquisition");
+}
+
 int main(void)
 {
     test_parameter_owner_uses_injected_factory_and_monotonic_generation();
@@ -692,6 +727,7 @@ int main(void)
     test_power_owner_publishes_and_gates_zero_calibration();
     test_system_owner_uses_injected_strict_timeout_boundary();
     test_factory_reset_persists_before_publishing_defaults();
+    test_imu_autosave_defers_busy_acquisition_with_backoff();
     test_persistence_policy_is_not_a_dead_config_field();
     require_int(external_call_in_critical_count == 0UL, "no BSP or Service call occurs inside a critical section");
     (void)puts("foundation service tests passed");

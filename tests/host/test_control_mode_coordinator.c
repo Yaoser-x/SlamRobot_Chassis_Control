@@ -145,7 +145,7 @@ static void test_capability_mask_is_applied_before_source_selection(void)
 
     assert(ControlModeCoordinator_ApplyCapabilityMask(COMMAND_SOURCE_MASK_PS2 | COMMAND_SOURCE_MASK_LINE) != 0U);
     assert(applied_permitted_mask == 0U);
-    assert(applied_rearm_mask == COMMAND_ALL_SOURCE_MASK && applied_qualify_mask == 0U);
+    assert(applied_rearm_mask == COMMAND_SOURCE_MASK_REMOTE && applied_qualify_mask == 0U);
     assert(applied_mode_generation == 1U);
 
     assert(ControlModeCoordinator_ApplyCapabilityMask(COMMAND_ALL_SOURCE_MASK) != 0U);
@@ -153,6 +153,19 @@ static void test_capability_mask_is_applied_before_source_selection(void)
     assert(applied_qualify_mask == 0U);
     assert(ControlModeCoordinator_ApplyCapabilityMask(0x80U) == 0U);
     assert(applied_permitted_mask == COMMAND_SOURCE_MASK_REMOTE);
+}
+
+static void test_unrelated_capability_changes_preserve_current_sources(void)
+{
+    control_mode_config_t config = TestConfig();
+    InitReady(&config);
+    uint32_t calls = policy_apply_count;
+    assert(ControlModeCoordinator_ApplyCapabilityMask(COMMAND_ALL_SOURCE_MASK & ~COMMAND_SOURCE_MASK_LINE) != 0U);
+    assert(policy_apply_count == calls && applied_permitted_mask == COMMAND_SOURCE_MASK_REMOTE);
+    assert(ControlModeCoordinator_ApplyCapabilityMask(COMMAND_ALL_SOURCE_MASK) != 0U);
+    assert(policy_apply_count == calls);
+    assert(ControlModeCoordinator_Request(CONTROL_MODE_LINE) != 0U);
+    assert(applied_permitted_mask == COMMAND_SOURCE_MASK_LINE);
 }
 
 int main(void)
@@ -165,6 +178,7 @@ int main(void)
     test_edges_disconnect_and_line_recovery();
     test_manual_neutral_timer_wraparound();
     test_capability_mask_is_applied_before_source_selection();
+    test_unrelated_capability_changes_preserve_current_sources();
     puts("PASS: App control mode coordinator");
     return 0;
 }

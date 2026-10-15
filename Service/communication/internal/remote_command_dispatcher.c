@@ -78,6 +78,20 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
 
         command_result = CommandManagement_ApplyIntent(&intent);
         applied        = (command_result.outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED) ? 1U : 0U;
+        if (applied != 0U)
+        {
+            command_management_status_t status;
+
+            (void)CommandManagement_GetStatus(now_ms, &status);
+            applied = (status.motion_allowed != 0U && (status.permitted_source_mask & COMMAND_SOURCE_BIT(source)) != 0U
+                       && (status.rearm_required_mask & COMMAND_SOURCE_BIT(source)) == 0U
+                       && CommunicationSessionTracker_SetDisableQualification(link,
+                                                                                velocity.sequence,
+                                                                                status.motion_revoke_generation,
+                                                                                status.mode_generation) != 0U)
+                          ? 1U
+                          : 0U;
+        }
     }
     else if (decision == COMMUNICATION_SESSION_NEW_COMMAND)
     {
@@ -105,16 +119,19 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
     {
         if (velocity.enable == 0U)
         {
-            command_intent_t intent = {
-                .kind                       = COMMAND_INTENT_REMOTE_DISABLE,
-                .source                     = source,
-                .sample_time_ms             = now_ms,
-                .expected_revoke_generation = CommandManagement_GetMotionRevokeGeneration(),
-                .mode                       = velocity.mode,
-            };
+            command_management_status_t status;
 
-            command_result = CommandManagement_ApplyIntent(&intent);
-            applied        = (command_result.outcome == COMMAND_OUTCOME_RELEASE_ACCEPTED) ? 1U : 0U;
+            /* Retransmission confirms the original qualification; it cannot
+             * sign a new rearm after a safety or mode generation changes. */
+            (void)CommandManagement_GetStatus(now_ms, &status);
+            applied = (status.motion_allowed != 0U && (status.permitted_source_mask & COMMAND_SOURCE_BIT(source)) != 0U
+                       && (status.rearm_required_mask & COMMAND_SOURCE_BIT(source)) == 0U
+                       && CommunicationSessionTracker_IsDisableQualified(link,
+                                                                           velocity.sequence,
+                                                                           status.motion_revoke_generation,
+                                                                           status.mode_generation) != 0U)
+                          ? 1U
+                          : 0U;
         }
         else
         {

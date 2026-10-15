@@ -112,6 +112,9 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 - 维护、ESTOP 和 fault-stop 首次置位都会递增 motion-revoke generation；此前启用的 LINE 和自动续发 DEBUG `vel` 会失效，解除安全锁后必须重新执行 `line on` 或发送新的本地 `vel`，不会恢复旧运动模式。
 - 正常闭环任一 enabled encoder 无效，或 RUN/PWM 有效时非零 requested target 持续 150ms 无运动，当前 motorTask 周期立即整车停车并锁存 bit17。
 - PS2 非巡线中位提交零速；巡线中位让权给 LINE。L1/R1=±90°，L2/R2=±360°，使用 IMU yaw 增量累计。
+- 航向宏仅积分新的 IMU 样本，重复快照不推进角度；运行期 IMU 离线、未标定、质量失效或超过新鲜度上限时立即取消并提交零速，恢复后需要新的按键边沿。
+- 首次 IMU 标定自动保存等待底盘已静止，再获取维护锁并复查；运动中或 Motor 周期进行中不撤销命令，获取失败退避 1s。显式手动维护仍先主动停车再确认静止。
+- 巡线禁用期间仍发布传感器有效性；不影响当前模式允许来源的 capability 变化不撤销命令，来源能力恢复继续要求显式 rearm。
 
 ## 4. FreeRTOS 任务模型
 
@@ -120,7 +123,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 | 任务 | 入口函数 | 优先级 | 周期 | 调度方式 | 栈大小 | 核心职责 |
 | --- | --- | --- | --- | --- | --- | --- |
 | **safetyTask** | `Task_Safety` | High (osPriorityHigh) | 20ms | Platform 周期延时 | 4096B | App 收集事实、Safety Evaluate/permit、快照发布、提交 Safety completion 与看门狗门控 |
-| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | Platform 周期延时 | 512W (2048B) | 状态估计、电源静止更新、Motion DTO/事件、提交 Motor completion |
+| **motorTask** | `Task_MotorControl` | AboveNormal | 10ms | Platform 周期延时 | 768W (3072B) | 状态估计、电源静止更新、Motion DTO/事件、提交 Motor completion；闭环实测保留栈裕量 |
 | **rpiCommTask** | `Task_RpiComm` | Normal | 5ms | `osDelayUntil` | 512W (2048B) | `HostCommunication_Update`：USART3 上位机协议收发 |
 | **imuTask** | `Task_Imu` | Normal | DRDY 优先 / 10ms 超时降级 | `osThreadFlagsWait` | 512W (2048B) | BMI270 INT1 唤醒后读取 FIFO/SensorTime；超时走直读轮询降级 |
 | **ps2Task** | `Task_Ps2` | Normal | 20ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Ps2Control_Update`：PS2 手柄数据读取 + 巡线切换检测 |
@@ -128,7 +131,7 @@ clamping 规则：`linear_x` 钳位到 `±CHASSIS_MAX_LINEAR_MPS`（0.5 m/s）�
 | **espTask** | `Task_Esp12f` | BelowNormal | 5ms | `osDelayUntil` | 512W (2048B) | `PlatformResetTrace_TaskHeartbeat` + `Esp12fFlashBridge_Update` + `WirelessCommunication_Update`：ESP12F 协议收发与烧录桥 |
 | **debugTask** | `Task_Debug` | BelowNormal | 10ms | `osDelay` | 2048W (8192B) | `PlatformResetTrace_TaskHeartbeat` + 命令解析、2 Hz CSV 日志、`vel` 指令刷新 |
 | **ledTask** | `Task_Led` | Low (osPriorityLow) | 50ms | `osDelayUntil` | 128W (512B) | `StatusLedDriver_TaskStep`：TEST_LED 状态闪烁 |
-| **oledTask** | `Task_Oled` | Low (osPriorityLow) | 100ms | `osDelayUntil` | 256W (1024B) | `OLED_UI_Update`：SSD1306 OLED 三阶段 UI 刷新（欢迎/自检/运行） |
+| **oledTask** | `Task_Oled` | Low (osPriorityLow) | 250ms | `osDelayUntil` | 512W (2048B) | `OLED_UI_Update`：SSD1306 OLED 三阶段 UI 刷新（欢迎/自检/运行） |
 
 ### 4.2 FreeRTOS 关键配置
 

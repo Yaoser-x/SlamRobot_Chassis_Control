@@ -285,6 +285,23 @@ uint8_t ParameterManagement_Validate(const param_model_t *params)
     {
         return 0U;
     }
+    const float scalars[] = {
+        params->max_linear_mps, params->max_angular_rps, params->speed_ramp_mps2,
+        params->angular_ramp_rps2, params->wheel_radius_m, params->track_width_m,
+        params->pid_integral_limit, params->line_kp, params->line_kd, params->line_speed_mps,
+        params->line_slowdown_gain, params->straight_wheel_coupling_gain, params->straight_heading_kp,
+        params->straight_trim_forward_015_mps, params->straight_trim_forward_030_mps,
+        params->straight_trim_reverse_015_mps, params->straight_trim_reverse_030_mps,
+        params->straight_heading_ki, params->straight_heading_integral_limit_deg_s,
+        params->straight_max_speed_mps,
+    };
+    for (size_t index = 0U; index < sizeof(scalars) / sizeof(scalars[0]); ++index)
+    {
+        if (ParameterManagement_Finite(scalars[index]) == 0U)
+        {
+            return 0U;
+        }
+    }
     if (params->max_linear_mps <= 0.0f || params->max_linear_mps > 3.0f)
     {
         return 0U;
@@ -324,7 +341,10 @@ uint8_t ParameterManagement_Validate(const param_model_t *params)
             return 0U;
         }
         if (ParameterManagement_Finite(params->pid_kp[i]) == 0U || ParameterManagement_Finite(params->pid_ki[i]) == 0U
-            || ParameterManagement_Finite(params->pid_kd[i]) == 0U)
+            || ParameterManagement_Finite(params->pid_kd[i]) == 0U
+            || ParameterManagement_Finite(params->current_observe_a[i]) == 0U
+            || ParameterManagement_Finite(params->current_soft_limit_a[i]) == 0U
+            || ParameterManagement_Finite(params->current_fault_a[i]) == 0U)
         {
             return 0U;
         }

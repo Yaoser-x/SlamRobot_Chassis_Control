@@ -48,7 +48,7 @@ f407_app / f407_app_adapters`。
 ### 1.3 任务模型
 
 系统保留 10 个业务任务：Safety 20 ms、Motor 10 ms、Host/Line/ESP 5 ms、PS2 20 ms、
-LED 50 ms、OLED 100 ms、Debug 10 ms，以及事件驱动的 IMU 任务。任务数量、周期、优先级和
+LED 50 ms、OLED 250 ms、Debug 10 ms，以及事件驱动的 IMU 任务。任务数量、周期、优先级和
 `.ioc` 在 RC2 中冻结。
 
 ## 2. App 编排与唯一所有权
@@ -252,8 +252,8 @@ ESP 烧录桥、巡线和 CSV/JSON 遥测。完整命令见 [调试命令台](de
 | 参数与 UI | schema 迁移、effective CRC、App config、OLED/self-check、Debug console |
 | 工具 | Roadmap/IMU/直行/控制分析、架构/命名/所有权和发布元数据纯函数 |
 
-软件门禁状态：Host 62/62；ASan/UBSan 61/61；Debug `text=189212,data=532,bss=90264`；
-Release `text=168876,data=528,bss=90248`；cppcheck、clang-format、架构、命名、Service ownership、
+软件门禁状态：Host 62/62；ASan/UBSan 61/61；Debug `text=189876,data=532,bss=90264`；
+Release `text=169356,data=528,bss=90248`；cppcheck、clang-format、架构、命名、Service ownership、
 CubeMX 安全和 ESP8266 固定工具链检查均通过。
 
 这些结果不代表真实 UART HIL、故障注入、标定或实车验收完成。RC2 可作为

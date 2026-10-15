@@ -87,9 +87,15 @@ uint8_t ControlModeCoordinator_ApplyCapabilityMask(uint8_t capability_mask)
     critical = PlatformCritical_Enter();
     if (capability_source_mask != capability_mask)
     {
+        uint8_t previous_mask = (uint8_t)(ControlModeCoordinator_ModeMask(mode_snapshot.mode) & capability_source_mask);
         effective_mask = (uint8_t)(ControlModeCoordinator_ModeMask(mode_snapshot.mode) & capability_mask);
-        result =
-            CommandManagement_ApplySourcePolicy(effective_mask, COMMAND_ALL_SOURCE_MASK, 0U, mode_snapshot.generation);
+        if (effective_mask != previous_mask)
+        {
+            result = CommandManagement_ApplySourcePolicy(effective_mask,
+                                                         (uint8_t)(previous_mask ^ effective_mask),
+                                                         0U,
+                                                         mode_snapshot.generation);
+        }
         if (result != 0U)
         {
             capability_source_mask = capability_mask;

@@ -233,6 +233,11 @@ uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *state)
     *state = fake_imu;
     return 1UL;
 }
+uint32_t StateEstimation_GetImuSampleSnapshot(state_estimation_imu_status_t *state)
+{
+    *state = fake_imu;
+    return fake_imu.sample_count;
+}
 
 static void reset_fake(void)
 {
@@ -357,8 +362,7 @@ static void test_imu_gate_and_runtime_cancel(void)
     Ps2ControlService_GetState(&state);
     require_int(state.heading_active == 0U, "uncalibrated IMU rejects heading macro");
 
-    /* 进行中 transient error (SPI_ERROR) 或 IMU 掉线不应取消 heading：
-     heading 进行中不再检查 IMU 状态，只靠 gyro 速率积分累积航向。 */
+    /* An active macro must stop when its heading feedback becomes invalid. */
     reset_fake();
     fake_sample.btn2 = PS2_MACRO_L1_MASK;
     Ps2ControlService_Update();
@@ -369,7 +373,45 @@ static void test_imu_gate_and_runtime_cancel(void)
     fake_imu.last_update_ms = fake_tick_ms;
     Ps2ControlService_Update();
     Ps2ControlService_GetState(&state);
-    require_int(state.heading_active != 0U, "IMU error/offline does NOT cancel active heading");
+    require_int(state.heading_active == 0U && state.heading_end_reason == RELATIVE_YAW_END_IMU_INVALID,
+                "IMU error/offline cancels active heading");
+    require_int(last_command.angular_z == 0.0f, "invalid IMU submits neutral in the same cycle");
+}
+
+static void test_heading_integrates_each_fresh_imu_sample_once(void)
+{
+    ps2_control_service_state_t state;
+    reset_fake();
+    fake_sample.btn2 = PS2_MACRO_L1_MASK;
+    fake_imu.body_gyro_dps[2] = 90.0f;
+    Ps2ControlService_Update();
+    fake_sample.btn2 = 0U;
+    fake_tick_ms += 20U;
+    fake_hal_tick_ms += 20U;
+    fake_imu.sample_count++;
+    fake_imu.last_update_ms = fake_hal_tick_ms;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(fabsf(state.heading_accumulated_deg - 1.8f) < 0.001f,
+                "fresh gyro sample integrates its sample interval");
+    fake_tick_ms += 20U;
+    fake_hal_tick_ms += 20U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.heading_active != 0U && fabsf(state.heading_accumulated_deg - 1.8f) < 0.001f,
+                "duplicate fresh snapshot does not fabricate heading progress");
+    fake_tick_ms += 40U;
+    fake_hal_tick_ms += 40U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.heading_active == 0U && state.heading_end_reason == RELATIVE_YAW_END_IMU_INVALID
+                    && last_command.angular_z == 0.0f,
+                "frozen sample cancels macro at the configured freshness bound");
+    fake_imu.sample_count++;
+    fake_imu.last_update_ms = fake_hal_tick_ms;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.heading_active == 0U, "IMU recovery without a new button edge does not restart macro");
 }
 
 static void test_held_macro_retries_after_transient_imu_gate(void)
@@ -530,6 +572,7 @@ int main(void)
     test_heading_button_mapping();
     test_heading_imu_freshness_uses_hal_tick_epoch();
     test_imu_gate_and_runtime_cancel();
+    test_heading_integrates_each_fresh_imu_sample_once();
     test_held_macro_retries_after_transient_imu_gate();
     test_released_macro_does_not_start_after_imu_gate_clears();
     test_offline_and_safety_stop_cancel_heading();

@@ -14,11 +14,15 @@
 #define POWER_ADC_DRIVER_INVALID_SAMPLE_RATE      (1UL << 4)
 #define POWER_ADC_DRIVER_INVALID_ZERO_UNSTABLE    (1UL << 5)
 #define POWER_ADC_DRIVER_INVALID_WINDOW_TOO_SMALL (1UL << 6)
+/* Reserved legacy bit: amplitude alone no longer invalidates acquisition. */
 #define POWER_ADC_DRIVER_INVALID_WINDOW_SPIKE     (1UL << 7)
+#define POWER_ADC_DRIVER_INVALID_ADC_SATURATED    (1UL << 8)
 
 #define POWER_ADC_DRIVER_QUALITY_ZERO_UNSTABLE    (1UL << 0)
 #define POWER_ADC_DRIVER_QUALITY_WINDOW_TOO_SMALL (1UL << 1)
+/* Legacy name retained for the non-blocking current-amplitude diagnostic. */
 #define POWER_ADC_DRIVER_QUALITY_WINDOW_SPIKE     (1UL << 2)
+#define POWER_ADC_DRIVER_QUALITY_ADC_SATURATED    (1UL << 3)
 
 /** @brief Hardware-independent ADC voltage/current measurement facts. */
 typedef struct

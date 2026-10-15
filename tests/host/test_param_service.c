@@ -2,6 +2,7 @@
 #include "motor_types.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,6 +214,49 @@ static void test_all_direction_fields_publish_in_one_snapshot(void)
                 "four encoder directions share one atomic snapshot");
 }
 
+static void test_whole_model_rejects_every_nonfinite_float(void)
+{
+    const struct { size_t offset; size_t count; } fields[] = {
+#define FLOAT_FIELD(field) {offsetof(param_model_t, field), 1U}
+        FLOAT_FIELD(max_linear_mps), FLOAT_FIELD(max_angular_rps), FLOAT_FIELD(speed_ramp_mps2),
+        FLOAT_FIELD(angular_ramp_rps2), FLOAT_FIELD(wheel_radius_m), FLOAT_FIELD(track_width_m),
+        FLOAT_FIELD(pid_integral_limit), FLOAT_FIELD(line_kp), FLOAT_FIELD(line_kd), FLOAT_FIELD(line_speed_mps),
+        FLOAT_FIELD(line_slowdown_gain), FLOAT_FIELD(straight_wheel_coupling_gain), FLOAT_FIELD(straight_heading_kp),
+        FLOAT_FIELD(straight_trim_forward_015_mps), FLOAT_FIELD(straight_trim_forward_030_mps),
+        FLOAT_FIELD(straight_trim_reverse_015_mps), FLOAT_FIELD(straight_trim_reverse_030_mps),
+        FLOAT_FIELD(straight_heading_ki), FLOAT_FIELD(straight_heading_integral_limit_deg_s),
+        FLOAT_FIELD(straight_max_speed_mps),
+#undef FLOAT_FIELD
+        {offsetof(param_model_t, pid_kp), 4U}, {offsetof(param_model_t, pid_ki), 4U},
+        {offsetof(param_model_t, pid_kd), 4U}, {offsetof(param_model_t, imu_gyro_bias_dps), 3U},
+        {offsetof(param_model_t, current_observe_a), 4U}, {offsetof(param_model_t, current_soft_limit_a), 4U},
+        {offsetof(param_model_t, current_fault_a), 4U},
+    };
+    const float invalid_values[] = {NAN, INFINITY, -INFINITY};
+    param_model_t defaults;
+    param_model_t before;
+    param_model_t after;
+    ParamService_Defaults(&defaults);
+    uint32_t generation = ParamService_GetSnapshot(&before);
+    for (size_t field = 0U; field < sizeof(fields) / sizeof(fields[0]); ++field)
+    {
+        for (size_t element = 0U; element < fields[field].count; ++element)
+        {
+            for (size_t value = 0U; value < sizeof(invalid_values) / sizeof(invalid_values[0]); ++value)
+            {
+                param_model_t invalid = defaults;
+                memcpy((uint8_t *)&invalid + fields[field].offset + element * sizeof(float),
+                       &invalid_values[value], sizeof(float));
+                require_int(ParamService_Validate(&invalid) == 0U && ParamService_Set(&invalid) == 0U,
+                            "whole-pack validation rejects NaN and both infinities in every float field");
+                require_int(ParamService_GetSnapshot(&after) == generation
+                                && memcmp(&before, &after, sizeof(before)) == 0,
+                            "non-finite rejection preserves the active model and generation");
+            }
+        }
+    }
+}
+
 int main(void)
 {
     test_defaults_match_safe_runtime_values();
@@ -222,6 +266,7 @@ int main(void)
     test_snapshot_generation_is_consistent();
     test_invalid_set_does_not_advance_generation();
     test_all_direction_fields_publish_in_one_snapshot();
+    test_whole_model_rejects_every_nonfinite_float();
 
     (void)printf("PASS: param store host tests\n");
     return 0;

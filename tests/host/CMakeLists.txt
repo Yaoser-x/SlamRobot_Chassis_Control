@@ -12,6 +12,12 @@ endif()
 
 enable_testing()
 
+find_program(F407_HOST_NODE_EXECUTABLE node)
+if(F407_HOST_NODE_EXECUTABLE)
+    add_test(NAME esp_web_control COMMAND ${F407_HOST_NODE_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../firmware/esp12f/F407_ESP12F/tools/test_web_control.cjs)
+endif()
+
 include_directories(
     ../../Platform
     ../../BSP/transport
@@ -116,6 +122,18 @@ target_include_directories(test_control_mode_coordinator PRIVATE
 )
 add_test(NAME control_mode_coordinator COMMAND test_control_mode_coordinator)
 
+add_executable(test_line_mode_integration
+    test_line_mode_integration.c
+    ../../App/config/control_mode_config.c
+    ../../App/composition/control_mode_coordinator.c
+    ../../Service/command_management/command_management_service.c
+    ../../Service/line_following/line_following_service.c
+    ../../Service/line_following/internal/line_parameter_sync.c
+    ../../Algorithm/calibration/line_sensor_calibration.c
+)
+target_include_directories(test_line_mode_integration PRIVATE ../../BSP/line)
+add_test(NAME line_mode_integration COMMAND test_line_mode_integration)
+
 add_executable(test_motor_hardware_layout_2wd
     test_chassis_layout_2wd.c
     ../../BSP/motor/internal/motor_hardware_layout.c
@@ -153,6 +171,10 @@ add_executable(test_power_adc_driver
     test_power_adc_driver.c
     ../../BSP/adc/power_adc_driver.c
     ../../BSP/motor/internal/motor_hardware_layout.c
+    ../../Service/safety_management/internal/safety_capability_policy.c
+    ../../Service/command_management/command_management_service.c
+    ../../App/config/control_mode_config.c
+    ../../App/composition/control_mode_coordinator.c
 )
 
 target_include_directories(test_power_adc_driver PRIVATE
@@ -296,6 +318,16 @@ add_executable(test_remote_command_dispatcher
     ../../Service/communication/internal/robot_link_protocol.c
 )
 add_test(NAME remote_command_dispatcher COMMAND test_remote_command_dispatcher)
+
+add_executable(upper_v3_contract_harness
+    upper_v3_contract_harness.c
+    ../../Service/communication/internal/remote_command_dispatcher.c
+    ../../Service/communication/internal/communication_session_tracker.c
+    ../../Service/communication/internal/communication_operation_mailbox.c
+    ../../Service/communication/internal/robot_link_protocol.c
+    ../../Service/command_management/command_management_service.c
+    ../../Service/communication/internal/frame_stream_parser.c
+)
 
 add_executable(test_communication_session_tracker
     test_communication_session_tracker.c

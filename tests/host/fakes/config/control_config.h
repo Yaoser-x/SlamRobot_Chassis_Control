@@ -117,7 +117,7 @@ extern "C"
 
 /* OLED SSD1306 配置 */
 #define OLED_I2C_ADDR                          0x3CU /* 7-bit addr; HAL <<1 = 0x78 */
-#define OLED_TASK_PERIOD_MS                    100U
+#define OLED_TASK_PERIOD_MS                    250U
 #define OLED_WELCOME_DURATION_MS               5000U
 #define OLED_SELFCHECK_ITEM_MS                 600U
 #define OLED_SELFCHECK_TOTAL_ITEMS             8U

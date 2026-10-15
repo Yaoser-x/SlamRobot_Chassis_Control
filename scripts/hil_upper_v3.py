@@ -14,10 +14,16 @@ from upper_v3_codec import StreamDecoder, build_frame, decode_payload, encode_se
 COMMAND_NAMES = {0x80: "HELLO", 0x81: "STATUS", 0x82: "DIAGNOSTIC", 0x83: "IMU_STATUS"}
 
 
+def decode_report_payload(name: str, payload: bytes) -> dict[str, object]:
+    decoded = decode_payload(name, payload) if name in COMMAND_NAMES.values() else {"payload_hex": payload.hex()}
+    # Both HELLO git_commit and DIAGNOSTIC reserved fields are schema bytes.
+    return {key: value.hex() if isinstance(value, bytes) else value for key, value in decoded.items()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", required=True)
-    parser.add_argument("--baud", type=int, default=921600)
+    parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--duration", type=float, default=3.0)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--platform", default="unspecified", help="set to raspberry-pi for compatibility evidence")
@@ -47,9 +53,7 @@ def main() -> int:
             transcript.append({"direction": "rx", "monotonic_ms": int(time.monotonic() * 1000), "hex": chunk.hex()})
             for command, payload in decoder.feed(chunk):
                 name = COMMAND_NAMES.get(command, f"0x{command:02x}")
-                decoded = decode_payload(name, payload) if name in COMMAND_NAMES.values() else {"payload_hex": payload.hex()}
-                if isinstance(decoded.get("git_commit"), bytes):
-                    decoded["git_commit"] = decoded["git_commit"].hex()
+                decoded = decode_report_payload(name, payload)
                 decoded["hil_receive_ms"] = int(time.monotonic() * 1000)
                 frames.setdefault(name, []).append(decoded)
 

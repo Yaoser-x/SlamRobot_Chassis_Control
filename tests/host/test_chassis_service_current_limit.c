@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "power_adc_driver.h"
 #include "bsp_config.h"
@@ -18,6 +19,8 @@
 #include "safety_management_service.h"
 #include "state_estimation_service.h"
 #include "power_management_service.h"
+#include "motor_output_coordinator.h"
+#include "wheel_target_planner.h"
 
 static power_adc_driver_state_t        fake_adc_state;
 static state_estimation_wheel_status_t fake_encoder_state;
@@ -742,6 +745,37 @@ static void test_straight_reset_paths_clear_observable_state(void)
                 "fault stop clears straight diagnostics");
 }
 
+static void test_pid_feedforward_model_preserves_speed_cap_and_legacy_outputs(void)
+{
+    motion_control_config_t config = {
+        .max_linear_mps = 0.5f, .max_angular_rps = 10.0f, .open_loop_full_mps = 0.5f,
+        .pid_feedforward_full_mps = 0.67f, .pid_correction_limit = 500.0f,
+        .test_mode_lease_ms = 400U, .encoder_feedback_timeout_ms = 150U,
+        .pid_feedback_loss_count = 50U, .pid_enabled = 1U, .wheel_speed_proportional_scale = 1U,
+    };
+    wheel_target_planner_t planner;
+    float left = 0.7f;
+    float right = 0.6f;
+    require_int(MotionControl_ValidateConfig(&config) != 0U, "independent feedforward model validates");
+    MotorOutputCoordinator_Init(&config);
+    require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 746, "500mm/s no longer implies full PID feedforward");
+    require_int(MotorOutputCoordinator_MpsToPermille(-0.5f) == -746, "reverse feedforward uses the same physical scale");
+    WheelTargetPlanner_Init(&planner, &config);
+    WheelTargetPlanner_ScaleWheelTargets(&planner, &left, &right);
+    require_int(fabsf(left - 0.5f) < 0.0001f && right < 0.5f, "feedforward model does not raise wheel target cap");
+    config.pid_enabled = 0U;
+    MotorOutputCoordinator_Init(&config);
+    require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 1000, "PID-disabled conversion retains legacy scale");
+    config.pid_enabled = 1U;
+    config.pid_feedforward_full_mps = 0.0f;
+    MotorOutputCoordinator_Init(&config);
+    require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 1000, "zero-initialized configurations remain compatible");
+    config.pid_feedforward_full_mps = NAN;
+    require_int(MotionControl_ValidateConfig(&config) == 0U, "nonfinite feedforward model rejected");
+    config.pid_feedforward_full_mps = -1.0f;
+    require_int(MotionControl_ValidateConfig(&config) == 0U, "negative feedforward model rejected");
+}
+
 int main(void)
 {
     test_high_adc_current_does_not_throttle_pwm_output();
@@ -760,5 +794,6 @@ int main(void)
     test_straight_heading_gate_distinguishes_imu_failures();
     test_straight_integrates_gyro_without_settle_delay();
     test_straight_reset_paths_clear_observable_state();
+    test_pid_feedforward_model_preserves_speed_cap_and_legacy_outputs();
     return 0;
 }

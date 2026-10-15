@@ -12,6 +12,9 @@
 - wire duplicate 校验留在 Communication，Command refresh 绑定 slot/command/mode/revoke generation。
 - 修复 encoder_count 原始累计语义和 Host delivery latch，保持 Upper Protocol v3 字节布局不变。
 - 控制 timing 按 nominal period 整数派生；四轮 effective `pid_kd=0`，HELLO 报告 effective parameter CRC。
+- 修复 USART1 `vel` 无法进入 DEBUG motion mode：静止时获取诊断模式，停止或安全撤销时恢复原模式；
+  OLED 刷新周期调整为 250 ms、健康超时调整为 750 ms，消除 100 kHz I2C 全帧刷新导致的持续 deadline miss；
+  Motor task 栈由 2048 B 增至 3072 B，修复闭环实测仅余 32 B 的风险。
 - 增加 gyro-rate OADEV、ARW/BI/RRW、缺口/抖动检查和确定性噪声 fixture；yaw 结果独立命名。
 - 发布打包元数据从 `VERSION` 派生 tag，显式区分软件包完整性、HIL 状态和正式兼容状态；
   上位机候选更新为 `ARM@c472bc6 / v0.6.0-rc2`，仍保持 `release_compatible=false`。

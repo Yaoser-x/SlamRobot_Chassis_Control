@@ -14,7 +14,9 @@
 #define POWER_MANAGEMENT_ADC_INVALID_SAMPLE_RATE      (1UL << 4)
 #define POWER_MANAGEMENT_ADC_INVALID_ZERO_UNSTABLE    (1UL << 5)
 #define POWER_MANAGEMENT_ADC_INVALID_WINDOW_TOO_SMALL (1UL << 6)
+/* Reserved legacy bit: amplitude alone no longer invalidates acquisition. */
 #define POWER_MANAGEMENT_ADC_INVALID_WINDOW_SPIKE     (1UL << 7)
+#define POWER_MANAGEMENT_ADC_INVALID_ADC_SATURATED    (1UL << 8)
 
 typedef struct
 {

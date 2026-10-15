@@ -26,6 +26,11 @@ uint16_t HostUartTransport_GetRxWritePosition(uint16_t size)
     return (uint16_t)(size - __HAL_DMA_GET_COUNTER(huart3.hdmarx));
 }
 
+uint32_t HostUartTransport_GetBaudRate(void)
+{
+    return huart3.Init.BaudRate;
+}
+
 transport_status_t HostUartTransport_TransmitAsync(uint8_t *data, uint16_t size)
 {
     HAL_StatusTypeDef status = HAL_UART_Transmit_IT(&huart3, data, size);

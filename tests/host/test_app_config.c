@@ -25,6 +25,7 @@ static void test_default_matches_beta4_constants(void)
     require_int(config->motion.max_linear_mps == CHASSIS_MAX_LINEAR_MPS, "motion max linear");
     require_int(config->motion.max_angular_rps == CHASSIS_MAX_ANGULAR_RPS, "motion max angular");
     require_int(config->motion.open_loop_full_mps == CHASSIS_OPENLOOP_FULL_MPS, "motion open loop scale");
+    require_int(config->motion.pid_feedforward_full_mps == 0.67f, "PID feedforward model is independent of speed cap");
     require_int(config->motion.speed_ramp_mps2 == CHASSIS_SPEED_RAMP_MPS2, "motion linear ramp");
     require_int(config->motion.angular_ramp_rps2 == CHASSIS_ANGULAR_RAMP_RPS2, "motion angular ramp");
     require_int(config->motion.test_mode_lease_ms == CHASSIS_TEST_MODE_LEASE_MS, "motion test lease");
@@ -86,6 +87,7 @@ static void test_default_matches_beta4_constants(void)
 
     require_int(config->tasks[APP_TASK_SAFETY].period_ms == CHASSIS_ADC_PERIOD_MS, "safety period");
     require_int(config->tasks[APP_TASK_MOTOR].period_ms == CHASSIS_CONTROL_PERIOD_MS, "motor period");
+    require_int(config->tasks[APP_TASK_MOTOR].stack_size_bytes == 3072U, "motor stack budget");
     require_int(config->tasks[APP_TASK_HOST].period_ms == UPPER_UART_TASK_PERIOD_MS, "host period");
     require_int(config->tasks[APP_TASK_IMU].period_ms == CHASSIS_IMU_PERIOD_MS, "IMU timeout period");
     require_int(config->tasks[APP_TASK_IMU].event_driven == 1U, "IMU remains event driven");

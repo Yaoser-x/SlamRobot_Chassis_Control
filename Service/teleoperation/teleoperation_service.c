@@ -25,6 +25,8 @@ static relative_heading_controller_t heading_control;
 static uint8_t                       heading_button;
 static uint8_t                       heading_zero_pending;
 static uint32_t                      heading_motion_generation;
+static uint32_t                      heading_imu_sample_generation;
+static float                         heading_angular_command;
 static uint32_t                      ps2_idle_start_ms;
 static uint8_t                       ps2_neutral_rearm_count;
 
@@ -214,7 +216,8 @@ static uint32_t Ps2ControlService_ImuGateFlags(const state_estimation_imu_status
     {
         flags |= TELEOPERATION_HEADING_GATE_IMU_STALE;
     }
-    if (imu_state == 0 || (imu_state->quality_flags & PS2_HEADING_CRITICAL_QUALITY_MASK) != 0UL)
+    if (imu_state == 0 || (imu_state->quality_flags & PS2_HEADING_CRITICAL_QUALITY_MASK) != 0UL
+        || !(imu_state->body_gyro_dps[2] > -3.4e38f && imu_state->body_gyro_dps[2] < 3.4e38f))
     {
         flags |= TELEOPERATION_HEADING_GATE_IMU_QUALITY;
     }
@@ -228,6 +231,7 @@ static uint8_t Ps2ControlService_ImuUsable(const state_estimation_imu_status_t *
 
 static uint8_t Ps2ControlService_StartMacro(uint8_t                              pressed,
                                             const state_estimation_imu_status_t *imu_state,
+                                            uint32_t                             imu_sample_generation,
                                             uint32_t                             imu_now_ms,
                                             uint32_t                             control_now_ms,
                                             uint32_t                             input_generation)
@@ -235,7 +239,7 @@ static uint8_t Ps2ControlService_StartMacro(uint8_t                             
     float    target_deg = 0.0f;
     uint32_t timeout_ms = 0U;
 
-    if (Ps2ControlService_ImuUsable(imu_state, imu_now_ms) == 0U
+    if (imu_sample_generation == 0UL || Ps2ControlService_ImuUsable(imu_state, imu_now_ms) == 0U
         || input_generation != CommandManagement_GetMotionRevokeGeneration())
     {
         return 0U;
@@ -280,6 +284,10 @@ static uint8_t Ps2ControlService_StartMacro(uint8_t                             
         RelativeHeadingController_Cancel(&heading_control, RELATIVE_YAW_END_SAFETY_STOP);
         return 0U;
     }
+    heading_imu_sample_generation = imu_sample_generation;
+    /* The starting sample predates the macro; compute the initial command without integrating it. */
+    (void)RelativeHeadingController_Update(&heading_control, imu_state->yaw_deg, 0.0f,
+                                           control_now_ms, &heading_angular_command);
     return 1U;
 }
 
@@ -312,6 +320,8 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     RelativeHeadingController_Init(&heading_control);
     heading_button            = 0U;
     heading_zero_pending      = 0U;
+    heading_imu_sample_generation = 0UL;
+    heading_angular_command   = 0.0f;
     heading_motion_generation = CommandManagement_GetMotionRevokeGeneration();
 
     Ps2ControllerDriver_Init();
@@ -325,6 +335,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     ps2_controller_driver_sample_t sample;
     ps2_control_service_state_t    next_state;
     state_estimation_imu_status_t  imu_state;
+    uint32_t                      imu_sample_generation;
     float                          linear_x  = 0.0f;
     float                          angular_z = 0.0f;
     uint8_t                        pressed_btn2;
@@ -381,8 +392,8 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     }
     consecutive_read_failures = 0U;
     input_revoked             = (input_generation != CommandManagement_GetMotionRevokeGeneration()) ? 1U : 0U;
-    (void)StateEstimation_GetImu(&imu_state);
     uint32_t imu_now_ms = PlatformTime_NowMs();
+    imu_sample_generation = StateEstimation_GetImuSampleSnapshot(&imu_state);
 
     linear_x  = -Ps2ControlService_NormalizeAxis(sample.left_y) * teleoperation_config.linear_max_mps;
     angular_z = -Ps2ControlService_NormalizeAxis(sample.right_x) * teleoperation_config.angular_max_rps;
@@ -469,7 +480,8 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
         if (heading_control.active == 0U && heading_zero_pending == 0U)
         {
             uint8_t macro_started =
-                Ps2ControlService_StartMacro(pressed_btn2, &imu_state, imu_now_ms, now_ms, input_generation);
+                Ps2ControlService_StartMacro(pressed_btn2, &imu_state, imu_sample_generation,
+                                              imu_now_ms, now_ms, input_generation);
             if (macro_started == 0U && macro_pressed != 0U
                 && Ps2ControlService_ImuGateFlags(&imu_state, imu_now_ms) != 0U)
             {
@@ -479,14 +491,28 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
         }
         if (heading_control.active != 0U)
         {
-            if (RelativeHeadingController_Update(&heading_control,
-                                                 imu_state.yaw_deg,
-                                                 imu_state.body_gyro_dps[2],
-                                                 now_ms,
-                                                 &angular_z)
-                != 0U)
+            if (imu_sample_generation == 0UL || Ps2ControlService_ImuUsable(&imu_state, imu_now_ms) == 0U)
+            {
+                RelativeHeadingController_Cancel(&heading_control, RELATIVE_YAW_END_IMU_INVALID);
+            }
+            else if ((uint32_t)(now_ms - heading_control.start_ms) >= heading_control.timeout_ms)
+            {
+                RelativeHeadingController_Cancel(&heading_control, RELATIVE_YAW_END_TIMEOUT);
+            }
+            else if (imu_sample_generation != heading_imu_sample_generation)
+            {
+                uint32_t sample_control_ms = now_ms - (uint32_t)(imu_now_ms - imu_state.last_update_ms);
+                heading_imu_sample_generation = imu_sample_generation;
+                (void)RelativeHeadingController_Update(&heading_control,
+                                                        imu_state.yaw_deg,
+                                                        imu_state.body_gyro_dps[2],
+                                                        sample_control_ms,
+                                                        &heading_angular_command);
+            }
+            if (heading_control.active != 0U)
             {
                 command_active = 1U;
+                angular_z      = heading_angular_command;
             }
             else
             {

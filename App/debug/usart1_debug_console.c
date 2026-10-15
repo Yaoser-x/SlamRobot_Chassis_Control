@@ -2,6 +2,7 @@
 
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
+#include "motion_maintenance_orchestrator.h"
 #include "cmsis_os2.h"
 #include "command_management_service.h"
 #include "debug_maintenance_policy.h"
@@ -62,9 +63,20 @@
 static char                       rx_line[DEBUG_CONSOLE_RX_LINE_SIZE];
 static uint8_t                    rx_len;
 static uint8_t                    debug_velocity_enabled;
+static uint8_t                    debug_velocity_mode_active;
 static uint32_t                   debug_velocity_generation;
 static command_velocity_t         debug_velocity_cmd;
 static debug_maintenance_policy_t maintenance_policy;
+
+static uint8_t DebugConsole_BeginVelocityMode(void)
+{
+    return (AppMotionMaintenance_BeginDiagnosticMotion() == APP_MOTION_MAINTENANCE_OK) ? 1U : 0U;
+}
+
+static void DebugConsole_EndVelocityMode(void)
+{
+    AppMotionMaintenance_EndDiagnosticMotion();
+}
 
 static uint8_t DebugConsole_MotorTestAllowed(void)
 {
@@ -98,11 +110,14 @@ static void DebugConsole_HandleLine(char *line)
     }
     {
         const debug_cmd_control_context_t context = {
-            .velocity_enabled    = &debug_velocity_enabled,
-            .velocity_generation = &debug_velocity_generation,
-            .velocity_command    = &debug_velocity_cmd,
-            .motor_test_allowed  = DebugConsole_MotorTestAllowed,
-            .revoke_maintenance  = Usart1DebugConsole_RevokeMaintenanceAuthorization,
+            .velocity_enabled     = &debug_velocity_enabled,
+            .velocity_mode_active = &debug_velocity_mode_active,
+            .velocity_generation  = &debug_velocity_generation,
+            .velocity_command     = &debug_velocity_cmd,
+            .motor_test_allowed   = DebugConsole_MotorTestAllowed,
+            .begin_velocity_mode  = DebugConsole_BeginVelocityMode,
+            .end_velocity_mode    = DebugConsole_EndVelocityMode,
+            .revoke_maintenance   = Usart1DebugConsole_RevokeMaintenanceAuthorization,
         };
         if (DebugCmdControl_TryHandle(line, &context) != 0U)
         {
@@ -169,9 +184,10 @@ static void DebugConsole_PollRx(void)
 
 void Usart1DebugConsole_Init(void)
 {
-    rx_len                    = 0U;
-    debug_velocity_enabled    = 0U;
-    debug_velocity_generation = CommandManagement_GetMotionRevokeGeneration();
+    rx_len                     = 0U;
+    debug_velocity_enabled     = 0U;
+    debug_velocity_mode_active = 0U;
+    debug_velocity_generation  = CommandManagement_GetMotionRevokeGeneration();
     DebugMaintenancePolicy_Init(&maintenance_policy);
     DebugTelemetry_Init();
     debug_velocity_cmd = (command_velocity_t){0};
@@ -214,6 +230,11 @@ void Usart1DebugConsole_RevokeMaintenanceAuthorization(void)
     debug_velocity_enabled = 0U;
     MotionControl_CancelTestMode();
     CommandManagement_ClearSource(COMMAND_SOURCE_DEBUG);
+    if (debug_velocity_mode_active != 0U)
+    {
+        AppMotionMaintenance_EndDiagnosticMotion();
+        debug_velocity_mode_active = 0U;
+    }
 }
 
 void DebugConsole_RunTask(void *argument)
@@ -254,7 +275,7 @@ void DebugConsole_RunTask(void *argument)
             if (CommandManagement_SetForGeneration(&debug_velocity_cmd, debug_velocity_generation)
                 != COMMAND_RESULT_ACCEPTED)
             {
-                debug_velocity_enabled = 0U;
+                Usart1DebugConsole_RevokeMaintenanceAuthorization();
                 LOG_WARN("velocity command stopped");
             }
         }

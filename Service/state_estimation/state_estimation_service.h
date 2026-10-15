@@ -24,6 +24,8 @@ extern "C"
     /** Acknowledge physical Host delivery of a STATUS carrying an anomaly generation. */
     uint8_t  StateEstimation_AcknowledgeWheelAnomalyDelivery(uint32_t generation);
     uint32_t StateEstimation_GetImu(state_estimation_imu_status_t *status);
+    /** Atomically copy IMU facts and return only the accepted sample generation, not status changes. */
+    uint32_t StateEstimation_GetImuSampleSnapshot(state_estimation_imu_status_t *status);
     uint32_t StateEstimation_GetStatus(uint32_t now_ms, state_estimation_status_t *status);
 
 #ifdef __cplusplus

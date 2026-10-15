@@ -43,10 +43,15 @@ int main(void)
     assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 1U)
            == COMMUNICATION_SESSION_DISABLE);
     CommunicationSessionTracker_Complete(COMMUNICATION_LINK_UPPER, target.sequence, 1U, COMMUNICATION_REJECT_NONE);
+    assert(CommunicationSessionTracker_SetDisableQualification(COMMUNICATION_LINK_UPPER, target.sequence, 7U, 9U));
+    assert(CommunicationSessionTracker_IsDisableQualified(COMMUNICATION_LINK_UPPER, target.sequence, 7U, 9U));
+    assert(!CommunicationSessionTracker_IsDisableQualified(COMMUNICATION_LINK_UPPER, target.sequence, 8U, 9U));
+    assert(!CommunicationSessionTracker_IsDisableQualified(COMMUNICATION_LINK_UPPER, target.sequence, 7U, 10U));
 
     target = Target(11ULL, 0U, 1U);
     assert(CommunicationSessionTracker_Evaluate(COMMUNICATION_LINK_UPPER, &target, 2U)
            == COMMUNICATION_SESSION_NEW_COMMAND);
+    assert(!CommunicationSessionTracker_IsDisableQualified(COMMUNICATION_LINK_UPPER, target.sequence, 7U, 9U));
     assert(CommunicationSessionTracker_SetRefreshToken(COMMUNICATION_LINK_UPPER, target.sequence, &token) != 0U);
     assert(CommunicationSessionTracker_GetRefreshToken(COMMUNICATION_LINK_UPPER, target.sequence, &token_snapshot)
            != 0U);

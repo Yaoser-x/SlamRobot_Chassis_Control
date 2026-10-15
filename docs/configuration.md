@@ -40,7 +40,7 @@ HELLO 的 `parameter_crc32` 是 effective model CRC；诊断另报 persisted CRC
 | ESP12F | 5 ms | BelowNormal |
 | PS2 | 20 ms | Normal |
 | LED | 50 ms | Low |
-| OLED | 100 ms | Low |
+| OLED | 250 ms | Low |
 | Debug | 现有周期 | BelowNormal |
 
 RC2 不修改这些值；业务调度常量统一由 App 配置持有。

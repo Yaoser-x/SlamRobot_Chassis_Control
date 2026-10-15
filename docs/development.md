@@ -79,8 +79,8 @@ ctest --test-dir build/host-tests-ninja -R f407_v2_host --output-on-failure
 ### 2.4 当前构建验证
 
 ```
-Debug:   text 189212 B, data 532 B, bss 90264 B
-Release: text 168876 B, data 528 B, bss 90248 B
+Debug:   text 189876 B, data 532 B, bss 90264 B
+Release: text 169356 B, data 528 B, bss 90248 B
 Host 测试 62/62 通过（本地 fresh Ninja/CTest）
 ASan/UBSan 61/61 通过；静态栈预算由普通 Host 构建覆盖
 五层架构、命名、Service ownership 与 CubeMX 安全检查通过

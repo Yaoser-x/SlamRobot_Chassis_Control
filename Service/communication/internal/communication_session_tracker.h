@@ -41,6 +41,14 @@ uint8_t CommunicationSessionTracker_SetRefreshToken(communication_link_t        
 uint8_t CommunicationSessionTracker_GetRefreshToken(communication_link_t     link,
                                                     uint32_t                 sequence,
                                                     command_refresh_token_t *token);
+uint8_t CommunicationSessionTracker_SetDisableQualification(communication_link_t link,
+                                                             uint32_t             sequence,
+                                                             uint32_t             revoke_generation,
+                                                             uint32_t             mode_generation);
+uint8_t CommunicationSessionTracker_IsDisableQualified(communication_link_t link,
+                                                        uint32_t             sequence,
+                                                        uint32_t             revoke_generation,
+                                                        uint32_t             mode_generation);
 void    CommunicationSessionTracker_GetSnapshot(communication_link_t link, communication_session_snapshot_t *snapshot);
 
 #endif

@@ -16,6 +16,7 @@
 #define POWER_ADC_DRIVER_CURRENT_ZERO_MAX_SPAN_RAW  20U
 #define POWER_ADC_DRIVER_CONTROL_MIN_WINDOW_SAMPLES 2U
 #define POWER_ADC_DRIVER_CONTROL_MAX_WINDOW_SAMPLES 80U
+/* Diagnostic amplitude threshold only; current protection uses ampere thresholds. */
 #define POWER_ADC_DRIVER_CURRENT_SPIKE_MAX_RAW      512U
 
 #define MOTOR_CURRENT_ZERO_V                        0.0f

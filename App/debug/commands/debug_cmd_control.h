@@ -8,9 +8,12 @@
 typedef struct
 {
     uint8_t            *velocity_enabled;
+    uint8_t            *velocity_mode_active;
     uint32_t           *velocity_generation;
     command_velocity_t *velocity_command;
     uint8_t (*motor_test_allowed)(void);
+    uint8_t (*begin_velocity_mode)(void);
+    void (*end_velocity_mode)(void);
     void (*revoke_maintenance)(void);
 } debug_cmd_control_context_t;
 

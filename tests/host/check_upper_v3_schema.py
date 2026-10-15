@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from upper_v3_codec import decode_payload, load_schema, parse_frame  # noqa: E402
+from hil_upper_v3 import decode_report_payload  # noqa: E402
 
 
 def main() -> int:
@@ -39,8 +40,17 @@ def main() -> int:
         assert command == entry["command"]
         assert len(payload) == entry["payload_length"]
         fixture_names.add(entry["name"])
-        decode_payload(names_by_command[command], payload, schema)
+        name = names_by_command[command]
+        decoded = decode_payload(name, payload, schema)
+        # Reproduce the real HIL frames/report JSON path for every golden message,
+        # including HELLO git_commit and DIAGNOSTIC reserved schema byte fields.
+        report = {"frames": {name: [decode_report_payload(name, payload)]}}
+        serialized = json.loads(json.dumps(report))["frames"][name][0]
+        assert serialized.keys() == decoded.keys()
+        for key, value in decoded.items():
+            assert serialized[key] == (value.hex() if isinstance(value, bytes) else value)
     assert {"status_default_2wd", "status_4wd", "status_single_wheel_anomaly"} <= fixture_names
+    assert decode_report_payload("0xff", b"\x00\xff") == {"payload_hex": "00ff"}
 
     by_name = {entry["name"]: entry for entry in fixture["frames"]}
     expected_masks = {

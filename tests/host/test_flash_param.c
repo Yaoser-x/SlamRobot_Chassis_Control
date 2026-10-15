@@ -2,7 +2,10 @@
 #include "motor_types.h"
 #include "param_service.h"
 #include "parameter_imu_calibration_types.h"
+#include "flash_param_schema.h"
+#include "flash_parameter_codec.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -281,6 +284,24 @@ static void test_flash_maintenance_brackets_watchdog_on_all_paths(void)
     require_int(FlashParamHost_GetWatchdogMaintenanceExitCount() == 3U, "erase restores normal watchdog window");
 }
 
+static void test_crc_valid_nonfinite_payload_is_rejected(void)
+{
+    flash_param_bundle_t bundle;
+    flash_param_bundle_t decoded;
+    flash_param_image_t image;
+    make_bundle(&bundle, 0.5f);
+    require_int(FlashParam_EncodeBundle(&bundle, 1UL, (uint8_t *)&image, sizeof(image)) == FLASH_PARAM_STATUS_OK,
+                "valid baseline Flash image encodes");
+    image.payload.params.wheel_radius_m = NAN;
+    image.crc32 = FlashParamCodec_Crc32((const uint8_t *)&image, offsetof(flash_param_image_t, crc32));
+    require_int(FlashParam_DecodeBundle((const uint8_t *)&image, sizeof(image), &decoded, NULL)
+                    == FLASH_PARAM_STATUS_INVALID,
+                "valid CRC cannot authorize a non-finite geometry payload");
+    bundle.params.current_fault_a[MOTOR_ID_M2] = INFINITY;
+    require_int(FlashParam_EncodeBundle(&bundle, 2UL, (uint8_t *)&image, sizeof(image)) == FLASH_PARAM_STATUS_INVALID,
+                "Flash encoder rejects a non-finite current threshold before persistence");
+}
+
 int main(int argc, char **argv)
 {
     require_int(argc == 2, "schema4 golden fixture path is provided");
@@ -293,6 +314,7 @@ int main(int argc, char **argv)
     test_ab_update_survives_every_interrupted_word();
     test_legacy_v1_migrates_to_sector6();
     test_flash_maintenance_brackets_watchdog_on_all_paths();
+    test_crc_valid_nonfinite_payload_is_rejected();
 
     (void)printf("PASS: flash param host tests\n");
     return 0;

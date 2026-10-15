@@ -12,7 +12,7 @@
 
 #include <string.h>
 
-#define UPPER_UART_RX_BUFFER_SIZE    128U
+#define UPPER_UART_RX_BUFFER_SIZE    512U
 #define UPPER_UART_TX_QUEUE_CAPACITY 4U
 #define UPPER_UART_TX_SLOT_INVALID   0xFFU
 #define UPPER_TX_SLOT_FREE           0U
@@ -39,6 +39,7 @@ typedef struct
 } upper_tx_slot_t;
 
 static uint8_t                           upper_rx_dma_buffer[UPPER_UART_RX_BUFFER_SIZE] __attribute__((aligned(4)));
+static uint8_t                           upper_rx_pending_buffer[UPPER_UART_RX_BUFFER_SIZE];
 static uint16_t                          upper_rx_read_pos;
 static frame_parser_t                    upper_parser;
 static uint8_t                           upper_tx_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
@@ -47,7 +48,8 @@ static uint32_t                          upper_last_rx_timestamp_ms;
 static communication_config_t            upper_config;
 static host_communication_state_t        upper_state;
 static uint32_t                          upper_last_byte_ms;
-static uint16_t                          upper_last_write_pos;
+static uint32_t                          upper_last_poll_ms;
+static uint32_t                          upper_rx_safe_poll_gap_ms;
 static uint8_t                           upper_imu_tx_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
 static uint32_t                          upper_last_imu_status_ms;
 static uint8_t                           upper_diagnostic_tx_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
@@ -235,8 +237,8 @@ static void HostCommunication_RestartRxDma(uint8_t count_restart)
 {
     HostUartTransport_RestartRx(upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
     upper_rx_read_pos    = 0U;
-    upper_last_write_pos = 0U;
     upper_last_byte_ms   = PlatformTime_TaskNowMs();
+    upper_last_poll_ms   = upper_last_byte_ms;
     HostCommunication_ResetParser();
     if (count_restart != 0U)
     {
@@ -267,16 +269,49 @@ static void HostCommunication_ProcessByte(uint8_t byte)
 
 static void HostCommunication_PollRx(void)
 {
+    uint16_t pending_size = 0U;
     uint16_t write_pos;
-    uint32_t now_ms = PlatformTime_TaskNowMs();
+    uint32_t now_ms;
+    uint32_t primask = PlatformCritical_Enter();
 
+    now_ms    = PlatformTime_TaskNowMs();
     write_pos = HostUartTransport_GetRxWritePosition(UPPER_UART_RX_BUFFER_SIZE);
     if (write_pos >= UPPER_UART_RX_BUFFER_SIZE)
     {
         write_pos = 0U;
     }
 
-    if (upper_rx_read_pos == write_pos)
+    /* NDTR is modulo the ring size: after a possible full lap even equal
+     * positions do not prove an empty ring. Bound the observation interval
+     * using the actual 8N1 baud rate, then discard ambiguous data. */
+    if ((uint32_t)(now_ms - upper_last_poll_ms) >= upper_rx_safe_poll_gap_ms)
+    {
+        PlatformCritical_Exit(primask);
+        if (FrameParser_IsIdle(&upper_parser) == 0U
+            && (uint32_t)(now_ms - upper_last_byte_ms) >= UPPER_PARSER_TIMEOUT_MS)
+        {
+            upper_state.rx_timeout_resets++;
+        }
+        else
+        {
+            upper_state.rx_overwrite_count++;
+        }
+        HostCommunication_RestartRxDma(1U);
+        return;
+    }
+    upper_last_poll_ms = now_ms;
+    while (upper_rx_read_pos != write_pos)
+    {
+        upper_rx_pending_buffer[pending_size++] = upper_rx_dma_buffer[upper_rx_read_pos];
+        upper_rx_read_pos++;
+        if (upper_rx_read_pos >= UPPER_UART_RX_BUFFER_SIZE)
+        {
+            upper_rx_read_pos = 0U;
+        }
+    }
+    PlatformCritical_Exit(primask);
+
+    if (pending_size == 0U)
     {
         /* 无新字节：若解析器处于中间状态，超时后重置 */
         if (FrameParser_IsIdle(&upper_parser) == 0U)
@@ -291,29 +326,9 @@ static void HostCommunication_PollRx(void)
     }
 
     upper_last_byte_ms = now_ms;
+    for (uint16_t index = 0U; index < pending_size; ++index)
     {
-        uint16_t unread   = (write_pos >= upper_rx_read_pos)
-                                ? (uint16_t)(write_pos - upper_rx_read_pos)
-                                : (uint16_t)(UPPER_UART_RX_BUFFER_SIZE - upper_rx_read_pos + write_pos);
-        uint16_t advanced = (write_pos >= upper_last_write_pos)
-                                ? (uint16_t)(write_pos - upper_last_write_pos)
-                                : (uint16_t)(UPPER_UART_RX_BUFFER_SIZE - upper_last_write_pos + write_pos);
-        if (advanced > 0U && unread >= (UPPER_UART_RX_BUFFER_SIZE - ROBOT_LINK_PROTOCOL_MAX_FRAME))
-        {
-            upper_state.rx_overwrite_count++;
-            HostCommunication_RestartRxDma(1U);
-            return;
-        }
-        upper_last_write_pos = write_pos;
-    }
-    while (upper_rx_read_pos != write_pos)
-    {
-        HostCommunication_ProcessByte(upper_rx_dma_buffer[upper_rx_read_pos]);
-        upper_rx_read_pos++;
-        if (upper_rx_read_pos >= UPPER_UART_RX_BUFFER_SIZE)
-        {
-            upper_rx_read_pos = 0U;
-        }
+        HostCommunication_ProcessByte(upper_rx_pending_buffer[index]);
     }
 }
 
@@ -343,15 +358,24 @@ static void HostCommunication_SendStatus(uint32_t now_ms, const communication_pu
 
 uint8_t HostCommunication_Init(const communication_config_t *config, const communication_firmware_identity_t *identity)
 {
+    uint32_t baud_rate = HostUartTransport_GetBaudRate();
+
     if (config == 0 || identity == 0 || config->host_status_period_ms == 0U || config->host_imu_status_period_ms == 0U
-        || config->host_diagnostic_period_ms == 0U)
+        || config->host_diagnostic_period_ms == 0U || baud_rate == 0U)
+    {
+        return 0U;
+    }
+    /* 10 bits per byte (8N1), with 10% margin for tick quantization and
+     * clock tolerance. At 115200 baud, 512 bytes allow a 39ms poll gap. */
+    upper_rx_safe_poll_gap_ms = ((UPPER_UART_RX_BUFFER_SIZE - 1UL) * 10UL * 1000UL / baud_rate) * 9UL / 10UL;
+    if (upper_rx_safe_poll_gap_ms < 2UL)
     {
         return 0U;
     }
     upper_config             = *config;
     upper_identity           = *identity;
     upper_rx_read_pos        = 0U;
-    upper_last_write_pos     = 0U;
+    upper_last_poll_ms       = PlatformTime_TaskNowMs();
     upper_last_status_ms     = 0U;
     upper_last_imu_status_ms = 0U;
     upper_last_diagnostic_ms = 0U;

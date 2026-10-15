@@ -7,9 +7,12 @@
 #include "robot_config.h"
 #include "safety_workflow_coordinator.h"
 #include "state_estimation_service.h"
+#include "platform_critical.h"
 
 static uint8_t        maintenance_active;
 static control_mode_t previous_mode;
+static uint8_t        diagnostic_motion_active;
+static control_mode_t diagnostic_previous_mode;
 
 static void AppMotionMaintenance_Rollback(control_mode_t mode)
 {
@@ -51,7 +54,7 @@ app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
 {
     control_mode_snapshot_t mode;
 
-    if (maintenance_active != 0U)
+    if (maintenance_active != 0U || diagnostic_motion_active != 0U)
     {
         return APP_MOTION_MAINTENANCE_BUSY;
     }
@@ -78,6 +81,49 @@ app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
     return APP_MOTION_MAINTENANCE_OK;
 }
 
+app_motion_maintenance_result_t AppMotionMaintenance_TryBeginStationary(void)
+{
+    control_mode_snapshot_t mode;
+    platform_critical_state_t critical = PlatformCritical_Enter();
+
+    (void)ControlModeCoordinator_GetSnapshot(&mode);
+    if (maintenance_active != 0U || diagnostic_motion_active != 0U || mode.mode == CONTROL_MODE_MANUAL
+        || MotionControl_IsStepActive() != 0U)
+    {
+        PlatformCritical_Exit(critical);
+        return APP_MOTION_MAINTENANCE_BUSY;
+    }
+    if (AppMotionMaintenance_IsStationary() == 0U)
+    {
+        PlatformCritical_Exit(critical);
+        return APP_MOTION_MAINTENANCE_NOT_STATIONARY;
+    }
+    if (AppSafetyWorkflow_BeginMaintenance() == 0U)
+    {
+        PlatformCritical_Exit(critical);
+        return APP_MOTION_MAINTENANCE_BUSY;
+    }
+    if (ControlModeCoordinator_Request(CONTROL_MODE_MAINTENANCE) == 0U)
+    {
+        AppMotionMaintenance_Rollback(mode.mode);
+        PlatformCritical_Exit(critical);
+        return APP_MOTION_MAINTENANCE_BUSY;
+    }
+    previous_mode      = mode.mode;
+    maintenance_active = 1U;
+    PlatformCritical_Exit(critical);
+
+    /* Recheck after ownership is acquired, before any Flash operation. */
+    if (AppMotionMaintenance_IsStationary() == 0U)
+    {
+        AppMotionMaintenance_End();
+        return APP_MOTION_MAINTENANCE_NOT_STATIONARY;
+    }
+    MotionControl_CancelTestMode();
+    MotionControl_EmergencyStop();
+    return APP_MOTION_MAINTENANCE_OK;
+}
+
 void AppMotionMaintenance_End(void)
 {
     if (maintenance_active == 0U)
@@ -87,4 +133,41 @@ void AppMotionMaintenance_End(void)
     maintenance_active = 0U;
     (void)ControlModeCoordinator_Request(previous_mode);
     AppSafetyWorkflow_EndMaintenance();
+}
+
+app_motion_maintenance_result_t AppMotionMaintenance_BeginDiagnosticMotion(void)
+{
+    control_mode_snapshot_t mode;
+
+    if (maintenance_active != 0U || diagnostic_motion_active != 0U)
+    {
+        return APP_MOTION_MAINTENANCE_BUSY;
+    }
+    (void)ControlModeCoordinator_GetSnapshot(&mode);
+    if (mode.mode == CONTROL_MODE_MANUAL || MotionControl_IsStepActive() != 0U)
+    {
+        return APP_MOTION_MAINTENANCE_BUSY;
+    }
+    MotionControl_CancelTestMode();
+    if (AppMotionMaintenance_IsStationary() == 0U)
+    {
+        return APP_MOTION_MAINTENANCE_NOT_STATIONARY;
+    }
+    if (ControlModeCoordinator_Request(CONTROL_MODE_MAINTENANCE) == 0U)
+    {
+        return APP_MOTION_MAINTENANCE_BUSY;
+    }
+    diagnostic_previous_mode = mode.mode;
+    diagnostic_motion_active = 1U;
+    return APP_MOTION_MAINTENANCE_OK;
+}
+
+void AppMotionMaintenance_EndDiagnosticMotion(void)
+{
+    if (diagnostic_motion_active == 0U)
+    {
+        return;
+    }
+    diagnostic_motion_active = 0U;
+    (void)ControlModeCoordinator_Request(diagnostic_previous_mode);
 }

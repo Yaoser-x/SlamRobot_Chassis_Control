@@ -131,7 +131,7 @@ ADC1 由 TIM8 TRGO 以 2kHz 触发五通道 DMA 扫描（20kHz PWM / 10），saf
 `COMMAND_SOURCE_DEBUG`，不能绕过 RC2 的 mode/capability/rearm 门控，不作为 AUTO 闭环验收入口。
 
 ```bash
-python scripts/hil_upper_v3.py --port COMx --report evidence/host-motion.json --arm-motion
+python scripts/hil_upper_v3.py --port COMx --baud 115200 --report evidence/host-motion.json --arm-motion
 ```
 
 **确认项**：

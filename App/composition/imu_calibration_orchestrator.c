@@ -87,8 +87,11 @@ void ImuCalibrationOrchestrator_ProcessPersistence(uint32_t now_ms)
     {
         return;
     }
-    if (AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK)
+    if (AppMotionMaintenance_TryBeginStationary() != APP_MOTION_MAINTENANCE_OK)
     {
+        critical                 = PlatformCritical_Enter();
+        persistence.save_next_ms = now_ms + APP_IMU_AUTOSAVE_RETRY_MS;
+        PlatformCritical_Exit(critical);
         return;
     }
     if (StateEstimation_GetImuCalibration(&calibration) != (uint8_t)STATE_ESTIMATION_RESULT_OK)

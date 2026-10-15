@@ -77,6 +77,19 @@ uint32_t CommandManagement_GetMotionRevokeGeneration(void)
     return motion_revoke_generation;
 }
 
+uint32_t CommandManagement_GetStatus(uint32_t now_ms, command_management_status_t *status)
+{
+    (void)now_ms;
+    *status = (command_management_status_t){
+        .motion_allowed           = 1U,
+        .permitted_source_mask    = (source_permitted != 0U) ? COMMAND_ALL_SOURCE_MASK : 0U,
+        .rearm_required_mask      = (rearm_required != 0U) ? COMMAND_SOURCE_MASK_REMOTE : 0U,
+        .motion_revoke_generation = motion_revoke_generation,
+        .mode_generation          = 0U,
+    };
+    return 1UL;
+}
+
 command_apply_result_t CommandManagement_ApplyIntent(const command_intent_t *intent)
 {
     command_apply_result_t result = {COMMAND_OUTCOME_INVALID, 0U, 1UL};
@@ -159,8 +172,19 @@ int main(void)
     frame = VelocityFrame(0.0f, 0.0f, 0U, 0x1122334455667788ULL, 1U);
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 100U);
     assert(disable_count == 1U);
+    (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 110U);
+    assert(disable_count == 1U);
+    motion_revoke_generation++;
+    rearm_required = 1U;
+    (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 115U);
+    CommunicationSessionTracker_GetSnapshot(COMMUNICATION_LINK_UPPER, &session);
+    assert(rearm_required != 0U && (session.ack_flags & COMMUNICATION_ACK_APPLIED) == 0U);
+    assert((session.ack_flags & COMMUNICATION_ACK_REJECTED) != 0U);
+    frame = VelocityFrame(0.0f, 0.0f, 0U, 0x1122334455667788ULL, 2U);
+    (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 120U);
+    assert(rearm_required == 0U);
 
-    frame = VelocityFrame(0.5f, -0.25f, 1U, 0x1122334455667788ULL, 2U);
+    frame = VelocityFrame(0.5f, -0.25f, 1U, 0x1122334455667788ULL, 3U);
     (void)RemoteCommandDispatcher_Handle(COMMUNICATION_LINK_UPPER, &frame, 123U);
     assert(command_count == 1U);
     assert(last_command.source == COMMAND_SOURCE_HOST);

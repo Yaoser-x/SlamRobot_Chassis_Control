@@ -16,8 +16,17 @@ extern "C"
     /** Acquire the App-owned maintenance workflow and prove every enabled wheel is stationary. */
     app_motion_maintenance_result_t AppMotionMaintenance_Begin(void);
 
+    /** Acquire only when already stationary; a failed preflight never revokes motion. */
+    app_motion_maintenance_result_t AppMotionMaintenance_TryBeginStationary(void);
+
     /** Restore the previous product mode while the Safety gate is still closed, then release maintenance. */
     void AppMotionMaintenance_End(void);
+
+    /** Acquire DEBUG-only motion mode without taking the stop-only Safety maintenance lock. */
+    app_motion_maintenance_result_t AppMotionMaintenance_BeginDiagnosticMotion(void);
+
+    /** Restore the product mode held before diagnostic motion was acquired. */
+    void AppMotionMaintenance_EndDiagnosticMotion(void);
 
 #ifdef __cplusplus
 }

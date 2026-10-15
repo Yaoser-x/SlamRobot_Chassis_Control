@@ -11,6 +11,7 @@ static const robot_config_t robot_default_config = {
             .max_linear_mps                     = 0.5f,
             .max_angular_rps                    = 10.0f,
             .open_loop_full_mps                 = 0.5f,
+            .pid_feedforward_full_mps           = 0.67f,
             .angular_epsilon_rps                = 0.0001f,
             .speed_ramp_mps2                    = 1.0f,
             .angular_ramp_rps2                  = 10.0f,
@@ -148,19 +149,19 @@ static const robot_config_t robot_default_config = {
         },
     .system =
         {
-            .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 400U},
+            .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 750U},
         },
     .tasks =
         {
             [APP_TASK_SAFETY] = {20U, 4096U, APP_TASK_PRIORITY_HIGH, 0U},
-            [APP_TASK_MOTOR]  = {10U, 2048U, APP_TASK_PRIORITY_ABOVE_NORMAL, 0U},
+            [APP_TASK_MOTOR]  = {10U, 3072U, APP_TASK_PRIORITY_ABOVE_NORMAL, 0U},
             [APP_TASK_HOST]   = {5U, 2048U, APP_TASK_PRIORITY_NORMAL, 0U},
             [APP_TASK_IMU]    = {10U, 2048U, APP_TASK_PRIORITY_NORMAL, 1U},
             [APP_TASK_LINE]   = {5U, 4096U, APP_TASK_PRIORITY_BELOW_NORMAL, 0U},
             [APP_TASK_ESP12F] = {5U, 2048U, APP_TASK_PRIORITY_BELOW_NORMAL, 0U},
             [APP_TASK_PS2]    = {20U, 2048U, APP_TASK_PRIORITY_NORMAL, 0U},
             [APP_TASK_LED]    = {50U, 512U, APP_TASK_PRIORITY_LOW, 0U},
-            [APP_TASK_OLED]   = {100U, 2048U, APP_TASK_PRIORITY_LOW, 0U},
+            [APP_TASK_OLED]   = {250U, 2048U, APP_TASK_PRIORITY_LOW, 0U},
             [APP_TASK_DEBUG]  = {10U, 12288U, APP_TASK_PRIORITY_BELOW_NORMAL, 0U},
         },
     .display =

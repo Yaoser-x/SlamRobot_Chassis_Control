@@ -64,7 +64,7 @@ Safety 与 Motion 不再主动拉取兄弟 Service 或跨写业务状态。维�
 独立通过）；Debug/Release、架构、命名、Service ownership、CubeMX、cppcheck 2.21.0（416 个
 C/H 文件）和 clang-format 18.1.8 通过。arduino-cli 1.5.1 使用 ESP8266 Core 3.1.2 与
 WebSockets 2.7.2 完成编译和安全检查；Upper 固定提交 `c472bc6` 的联合 fixture 40/40 通过。
-Debug size 为 `text=189212, data=532, bss=90264`，Release 为
-`text=168876, data=528, bss=90248`。HIL 项始终未据软件测试提前勾选。
+Debug size 为 `text=189876, data=532, bss=90264`，Release 为
+`text=169356, data=528, bss=90248`。HIL 项始终未据软件测试提前勾选。
 
 该证据足以把 RC2 定义为软件功能冻结 Pre-release，但不构成 UART HIL、车辆验收或正式兼容。

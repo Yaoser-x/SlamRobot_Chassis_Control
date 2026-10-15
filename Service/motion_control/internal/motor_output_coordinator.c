@@ -9,6 +9,10 @@ static float output_full_speed_mps;
 void MotorOutputCoordinator_Init(const motion_control_config_t *config)
 {
     output_full_speed_mps = (config != 0) ? config->open_loop_full_mps : 0.0f;
+    if (config != 0 && config->pid_enabled != 0U && config->pid_feedforward_full_mps > 0.0f)
+    {
+        output_full_speed_mps = config->pid_feedforward_full_mps;
+    }
 }
 
 int16_t MotorOutputCoordinator_Clamp(int32_t permille)

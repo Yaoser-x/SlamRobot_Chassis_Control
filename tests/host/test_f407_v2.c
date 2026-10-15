@@ -772,7 +772,7 @@ static void test_encoder_reject_streak_rebuilds_window(void)
 static void test_task_timing_next_wake(void)
 {
     const system_monitoring_config_t config = {
-        .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 400U},
+        .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 750U},
     };
     system_monitoring_task_health_t health;
     uint8_t                         missed = 0U;

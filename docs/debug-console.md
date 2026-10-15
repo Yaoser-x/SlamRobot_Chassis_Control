@@ -36,7 +36,7 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | `left` / `right` | `<P>` | 单侧开环快捷命令 |
 | `m1`…`m4` | `<F> <R>` | 单路 raw EN/PH 测试；输出按 `F-R` 解析为有符号 PWM |
 | `raw` | `<LF> <LR> <RF> <RR>` | 左右侧 raw EN/PH 输入；每侧按 `F-R` 解析 |
-| `vel` | `<mm/s> [mrad/s]` | 闭环速度诊断（提交至 `COMMAND_SOURCE_DEBUG`，仍受 mode/capability/rearm 门控） |
+| `vel` | `<mm/s> [mrad/s]` | 闭环速度诊断；静止时申请 DEBUG motion mode，`vel 0`/`stop`/安全撤销时恢复原模式 |
 | `stop` | — | 清除所有测试命令、清空 open-loop 和 `vel` 指令 |
 | `estop` | `<0\|1>` | 清除/设置紧急停止 |
 | `clearfault` | — | 在硬件原因消失且输出安全时清除普通锁存故障；不能解除 ESTOP |

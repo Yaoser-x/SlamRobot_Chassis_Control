@@ -277,7 +277,7 @@ Byte 20:    CHECKSUM   校验和 = ~(sum of bytes[2..19]) & 0xFF
 
 ## 9. OLED SSD1306 显示屏
 
-SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPriorityLow, 100ms 周期）刷新。提供三阶段 UI：欢迎屏 → 系统自检 → 运行状态。
+SSD1306 128×64 单色 OLED，通过 I2C1 接口驱动，由 `oledTask`（osPriorityLow, 250ms 周期）刷新。250ms 周期为 100kHz I2C 全帧刷新保留执行裕量，避免健康任务持续记录 deadline miss。提供三阶段 UI：欢迎屏 → 系统自检 → 运行状态。
 
 ### 9.1 硬件连接
 
@@ -344,7 +344,7 @@ I2C 地址位于 `BSP/oled/oled_config.h`；任务周期和 UI 产品参数位�
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `OLED_I2C_ADDR` | `0x3CU` | SSD1306 7-bit I2C 地址 |
-| `OLED_TASK_PERIOD_MS` | `100U` | OLED 刷新任务周期 |
+| `OLED_TASK_PERIOD_MS` | `250U` | OLED 刷新任务周期 |
 | `OLED_WELCOME_DURATION_MS` | `5000U` | 欢迎屏持续时间 |
 | `OLED_SELFCHECK_ITEM_MS` | `600U` | 每项自检耗时 |
 | `OLED_SELFCHECK_TOTAL_ITEMS` | `8U` | 自检项目总数 |

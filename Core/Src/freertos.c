@@ -49,11 +49,15 @@
 #define FREERTOS_FATAL_TASK_CREATE     4UL
 #define SAFETY_TASK_STACK_SIZE_BYTES   4096U
 #define SAFETY_TASK_STACK_MIN_BYTES    3072U
+#define MOTOR_TASK_STACK_SIZE_BYTES    3072U
+#define MOTOR_TASK_STACK_MIN_BYTES     3072U
 #define OLED_TASK_STACK_SIZE_BYTES     2048U
 #define OLED_TASK_STACK_MIN_BYTES      2048U
 
 _Static_assert(SAFETY_TASK_STACK_SIZE_BYTES >= SAFETY_TASK_STACK_MIN_BYTES,
                "safetyTask stack is below the monitored-control budget");
+_Static_assert(MOTOR_TASK_STACK_SIZE_BYTES >= MOTOR_TASK_STACK_MIN_BYTES,
+               "motorTask stack is below the closed-loop diagnostic budget");
 _Static_assert(OLED_TASK_STACK_SIZE_BYTES >= OLED_TASK_STACK_MIN_BYTES,
                "oledTask stack is below the runtime-page budget");
 
@@ -110,7 +114,7 @@ const osThreadAttr_t safetyTask_attributes = {
 osThreadId_t motorTaskHandle;
 const osThreadAttr_t motorTask_attributes = {
   .name = "motorTask",
-  .stack_size = 512 * 4,
+  .stack_size = MOTOR_TASK_STACK_SIZE_BYTES,
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
 /* Definitions for rpiCommTask */

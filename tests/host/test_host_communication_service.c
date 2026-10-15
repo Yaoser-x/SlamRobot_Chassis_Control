@@ -21,7 +21,12 @@
 static USART_TypeDef      usart3_instance  = {0};
 static DMA_Stream_TypeDef usart3_rx_stream = {0};
 static DMA_HandleTypeDef  hdma_usart3_rx   = {.Instance = &usart3_rx_stream};
-UART_HandleTypeDef huart3 = {.Instance = &usart3_instance, .hdmarx = &hdma_usart3_rx, .gState = HAL_UART_STATE_READY};
+UART_HandleTypeDef huart3 = {
+    .Instance = &usart3_instance,
+    .Init     = {.BaudRate = 115200U},
+    .hdmarx   = &hdma_usart3_rx,
+    .gState   = HAL_UART_STATE_READY,
+};
 
 static uint8_t                      *rx_buffer;
 static uint16_t                      rx_size;
@@ -42,6 +47,7 @@ static uint8_t                       estop_last_value;
 static communication_publish_model_t fake_publish_model;
 static uint8_t                       fake_encoder_anomaly_mask;
 static uint32_t                      fake_encoder_anomaly_generation;
+static uint8_t                       overwrite_dma_on_release;
 static const communication_config_t  fake_communication_config = {
      .host_status_period_ms     = 50U,
      .host_imu_status_period_ms = 20U,
@@ -168,6 +174,14 @@ void CommandManagement_ClearSource(command_source_t source)
 command_result_t CommandManagement_DisableRemoteSource(command_source_t source)
 {
     CommandManagement_ClearSource(source);
+    if (overwrite_dma_on_release != 0U)
+    {
+        overwrite_dma_on_release = 0U;
+        for (uint16_t index = 0U; index < rx_size; ++index)
+        {
+            rx_buffer[index] = 0xFFU;
+        }
+    }
     return COMMAND_RESULT_ACCEPTED;
 }
 
@@ -194,6 +208,17 @@ uint8_t CommandManagement_RefreshAccepted(const command_refresh_token_t *token, 
 
 uint32_t CommandManagement_GetMotionRevokeGeneration(void)
 {
+    return 1UL;
+}
+
+uint32_t CommandManagement_GetStatus(uint32_t now_ms, command_management_status_t *status)
+{
+    (void)now_ms;
+    *status = (command_management_status_t){
+        .motion_allowed           = 1U,
+        .permitted_source_mask    = COMMAND_ALL_SOURCE_MASK,
+        .motion_revoke_generation = 1UL,
+    };
     return 1UL;
 }
 
@@ -359,11 +384,16 @@ static void reset_host_uart_state(void)
     estop_last_value                = 0U;
     fake_encoder_anomaly_mask       = 0U;
     fake_encoder_anomaly_generation = 0UL;
+    overwrite_dma_on_release        = 0U;
     usart3_instance                 = (USART_TypeDef){0};
     usart3_rx_stream                = (DMA_Stream_TypeDef){0};
     hdma_usart3_rx                  = (DMA_HandleTypeDef){.Instance = &usart3_rx_stream};
-    huart3 =
-        (UART_HandleTypeDef){.Instance = &usart3_instance, .hdmarx = &hdma_usart3_rx, .gState = HAL_UART_STATE_READY};
+    huart3 = (UART_HandleTypeDef){
+        .Instance = &usart3_instance,
+        .Init     = {.BaudRate = 115200U},
+        .hdmarx   = &hdma_usart3_rx,
+        .gState   = HAL_UART_STATE_READY,
+    };
     for (uint16_t i = 0U; i < (uint16_t)sizeof(tx_last_frame); ++i)
     {
         tx_last_frame[i] = 0U;
@@ -392,6 +422,195 @@ static void feed_valid_estop_frame(uint8_t value)
         rx_buffer[i] = frame[i];
     }
     huart3.hdmarx->Instance->NDTR = (uint32_t)(rx_size - len);
+}
+
+static uint16_t build_disabled_velocity_frame(uint64_t session_id, uint32_t sequence, uint8_t *frame)
+{
+    uint8_t payload[23] = {ROBOT_LINK_PROTOCOL_VERSION};
+
+    payload[10] = 2U;
+    for (uint8_t index = 0U; index < 8U; ++index)
+    {
+        payload[11U + index] = (uint8_t)(session_id >> (8U * index));
+    }
+    for (uint8_t index = 0U; index < 4U; ++index)
+    {
+        payload[19U + index] = (uint8_t)(sequence >> (8U * index));
+    }
+    return UpperProtocol_BuildFrame(UPPER_CMD_SET_VELOCITY,
+                                    payload,
+                                    sizeof(payload),
+                                    frame,
+                                    ROBOT_LINK_PROTOCOL_MAX_FRAME);
+}
+
+static void feed_dma_bytes(const uint8_t *data, uint16_t length)
+{
+    uint16_t position = (uint16_t)((rx_size - huart3.hdmarx->Instance->NDTR) % rx_size);
+
+    for (uint16_t index = 0U; index < length; ++index)
+    {
+        rx_buffer[position++] = data[index];
+        if (position == rx_size / 2U)
+        {
+            HostCommunication_OnDmaHalf();
+        }
+        if (position == rx_size)
+        {
+            position = 0U;
+            HostCommunication_OnDmaFull();
+        }
+    }
+    huart3.hdmarx->Instance->NDTR = (uint32_t)(rx_size - position);
+}
+
+static void test_complete_velocity_frame_is_consumed_from_dma(void)
+{
+    const uint64_t             session = UINT64_C(0x23456789abcdef01);
+    uint8_t                    frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    host_communication_state_t state;
+
+    reset_host_uart_state();
+    fake_tick = 1000U;
+    HostCommunication_Init();
+    uint16_t size = build_disabled_velocity_frame(session, 1U, frame);
+    require_int(size == 28U, "v3 disabled velocity is a complete 28-byte wire frame");
+    feed_dma_bytes(frame, size);
+    fake_tick += 5U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.session.session_id == session && state.session.applied_sequence == 1U,
+                "one atomic 28-byte disable must be parsed and applied without fragmentation");
+    require_int(state.rx_overwrite_count == 0U && state.rx_resync_restarts == 0U,
+                "a complete valid frame is not a DMA overwrite");
+}
+
+static void test_valid_dma_burst_and_stable_parse_copy(void)
+{
+    const uint64_t             session = UINT64_C(0x1234567812345678);
+    uint8_t                    frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    host_communication_state_t state;
+
+    reset_host_uart_state();
+    fake_tick = 1000U;
+    HostCommunication_Init();
+    for (uint32_t sequence = 1U; sequence <= 16U; ++sequence)
+    {
+        uint16_t size = build_disabled_velocity_frame(session, sequence, frame);
+        feed_dma_bytes(frame, size);
+    }
+    fake_tick += 38U;
+    overwrite_dma_on_release = 1U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.session.session_id == session && state.session.applied_sequence == 16U,
+                "all 16 complete frames in a bounded 448-byte burst survive DMA storage reuse");
+    require_int(state.rx_overwrite_count == 0U && state.rx_resync_restarts == 0U,
+                "an unambiguous valid burst is not discarded using outbound frame length");
+    require_int(fake_primask == 0U, "DMA snapshot restores interrupt mask");
+}
+
+static void test_velocity_frame_crosses_dma_wrap(void)
+{
+    uint8_t                    noise[100] = {0};
+    uint8_t                    frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    host_communication_state_t state;
+
+    reset_host_uart_state();
+    fake_tick = 1000U;
+    HostCommunication_Init();
+    for (uint8_t index = 0U; index < 5U; ++index)
+    {
+        feed_dma_bytes(noise, sizeof(noise));
+        fake_tick += 9U;
+        HostCommunication_Update();
+    }
+    require_int(rx_size == 512U, "RX ring provides margin above normal 5ms polling");
+    feed_dma_bytes(frame, build_disabled_velocity_frame(19U, 1U, frame));
+    fake_tick += 5U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.rx_dma_full_count == 1U, "control frame crossed the circular DMA boundary");
+    require_int(state.session.session_id == 19U && state.session.applied_sequence == 1U,
+                "a complete frame spanning the DMA wrap is applied once");
+    require_int(state.rx_overwrite_count == 0U, "ordinary DMA wrap is not an overwrite");
+}
+
+static void test_ambiguous_full_dma_laps_are_discarded_then_recover(void)
+{
+    uint8_t                    noise[512] = {0};
+    uint8_t                    frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    host_communication_state_t state;
+    host_communication_state_t before;
+
+    reset_host_uart_state();
+    fake_tick = 1000U;
+    HostCommunication_Init();
+    /* Session initialization is intentionally idempotent across link restarts. */
+    HostCommunication_GetState(&before);
+    feed_dma_bytes(noise, sizeof(noise));
+    fake_tick += 45U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.rx_overwrite_count == 1U && state.rx_resync_restarts == 1U,
+                "a possible full lap is detected even when NDTR returns to the same position");
+
+    feed_dma_bytes(noise, sizeof(noise));
+    feed_dma_bytes(noise, sizeof(noise));
+    uint16_t size = build_disabled_velocity_frame(23U, 1U, frame);
+    feed_dma_bytes(frame, size);
+    fake_tick += 95U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.rx_overwrite_count == 2U && state.session.session_id == before.session.session_id
+                    && state.session.generation == before.session.generation
+                    && state.session.received_sequence == before.session.received_sequence
+                    && state.session.applied_sequence == before.session.applied_sequence,
+                "data after multiple unobserved laps cannot manufacture a fresh command");
+    size = build_disabled_velocity_frame(23U, 2U, frame);
+    feed_dma_bytes(frame, size);
+    fake_tick += 5U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.session.session_id == 23U && state.session.applied_sequence == 2U,
+                "a new complete command is accepted after DMA resynchronization");
+}
+
+static void test_dma_poll_budget_tracks_baud_and_tick_wrap(void)
+{
+    uint8_t                    frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    host_communication_state_t state;
+    host_communication_state_t before;
+
+    reset_host_uart_state();
+    huart3.Init.BaudRate = 0U;
+    require_int(HostCommunication_Init() == 0U && rx_start_count == 0U,
+                "an unknown UART baud rate cannot create a fictitious safe polling budget");
+
+    reset_host_uart_state();
+    huart3.Init.BaudRate = 230400U;
+    fake_tick = 1000U;
+    HostCommunication_Init();
+    HostCommunication_GetState(&before);
+    feed_dma_bytes(frame, build_disabled_velocity_frame(29U, 1U, frame));
+    fake_tick += 20U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.rx_overwrite_count == 1U && state.session.session_id == before.session.session_id
+                    && state.session.generation == before.session.generation
+                    && state.session.received_sequence == before.session.received_sequence
+                    && state.session.applied_sequence == before.session.applied_sequence,
+                "higher baud shortens the conservative full-lap polling budget");
+
+    reset_host_uart_state();
+    fake_tick = UINT32_MAX - 2U;
+    HostCommunication_Init();
+    feed_dma_bytes(frame, build_disabled_velocity_frame(31U, 1U, frame));
+    fake_tick = 2U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.session.session_id == 31U && state.session.applied_sequence == 1U,
+                "tick rollover preserves the bounded elapsed polling calculation");
 }
 
 static void test_dma_callbacks_and_valid_frame_timestamp(void)
@@ -600,6 +819,11 @@ static void test_full_queue_drops_imu_for_status_priority(void)
 
 int main(void)
 {
+    test_complete_velocity_frame_is_consumed_from_dma();
+    test_valid_dma_burst_and_stable_parse_copy();
+    test_velocity_frame_crosses_dma_wrap();
+    test_ambiguous_full_dma_laps_are_discarded_then_recover();
+    test_dma_poll_budget_tracks_baud_and_tick_wrap();
     test_status_uses_interrupt_tx_without_usart3_tx_dma();
     test_anomaly_delivery_requires_physical_status_completion();
     test_status_and_imu_share_async_priority_queue();

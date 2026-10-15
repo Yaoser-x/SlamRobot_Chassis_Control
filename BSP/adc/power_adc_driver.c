@@ -481,8 +481,14 @@ void PowerAdcDriver_Update(void)
         }
         if (delta_max[i] > POWER_ADC_DRIVER_CURRENT_SPIKE_MAX_RAW)
         {
+            /* Load/PWM amplitude is diagnostic, not evidence of invalid acquisition. */
             quality_flags |= POWER_ADC_DRIVER_QUALITY_WINDOW_SPIKE;
-            next_state.invalid_reason_flags |= POWER_ADC_DRIVER_INVALID_WINDOW_SPIKE;
+        }
+        if (MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U
+            && raw_max[i] >= (uint16_t)POWER_ADC_DRIVER_RESOLUTION_COUNTS)
+        {
+            quality_flags |= POWER_ADC_DRIVER_QUALITY_ADC_SATURATED;
+            next_state.invalid_reason_flags |= POWER_ADC_DRIVER_INVALID_ADC_SATURATED;
         }
         if (next_current_valid != 0U && delta_sample_count != 0UL)
         {
@@ -544,11 +550,12 @@ void PowerAdcDriver_Update(void)
             right_current_sum += next_state.current_a[i];
         }
         next_state.current_quality_flags[i] = quality_flags;
-        if (quality_flags != 0UL)
+        if ((quality_flags & (POWER_ADC_DRIVER_QUALITY_ZERO_UNSTABLE | POWER_ADC_DRIVER_QUALITY_WINDOW_TOO_SMALL
+                              | POWER_ADC_DRIVER_QUALITY_ADC_SATURATED)) != 0UL)
         {
             next_current_control_valid = 0U;
         }
-        if (next_current_valid != 0U && quality_flags == 0UL && MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U)
+        else if (next_current_valid != 0U && MotorHardwareLayout_MotorEnabled((motor_id_t)i) != 0U)
         {
             next_state.current_control_valid_mask |= (uint8_t)(1U << i);
         }

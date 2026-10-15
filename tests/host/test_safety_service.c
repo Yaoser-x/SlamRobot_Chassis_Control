@@ -265,7 +265,7 @@ static void reset_fake_monitor(void)
     fake_encoder_state.speed_valid[MOTOR_ID_M2]    = 1U;
     fake_encoder_state.speed_valid[MOTOR_ID_M3]    = 1U;
     const system_monitoring_config_t system_config = {
-        .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 400U},
+        .task_timeout_ms = {80U, 40U, 40U, 80U, 40U, 40U, 80U, 200U, 750U},
     };
     require_int(SystemMonitoring_Init(&system_config, 0UL) != 0U, "system monitor config accepted");
     require_int(SafetyManagement_Init(&safety_config) != 0U, "safety config accepted");

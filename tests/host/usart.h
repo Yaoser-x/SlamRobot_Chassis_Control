@@ -32,7 +32,13 @@ typedef enum
 
 typedef struct
 {
+    uint32_t BaudRate;
+} UART_InitTypeDef;
+
+typedef struct
+{
     USART_TypeDef        *Instance;
+    UART_InitTypeDef      Init;
     DMA_HandleTypeDef    *hdmarx;
     DMA_HandleTypeDef    *hdmatx;
     HAL_UART_StateTypeDef gState;

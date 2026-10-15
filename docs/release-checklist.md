@@ -26,8 +26,8 @@
 
 历史 `v1.0.0-rc1` 已存在并指向 `bc472cc`，不得移动或重建。
 
-最终本地软件门禁 size：Debug `text=189212, data=532, bss=90264`；Release
-`text=168876, data=528, bss=90248`。RC2 允许在以下硬件门未完成时作为 Pre-release 发布，
+最终本地软件门禁 size：Debug `text=189876, data=532, bss=90264`；Release
+`text=169356, data=528, bss=90248`。RC2 允许在以下硬件门未完成时作为 Pre-release 发布，
 但必须保留 `HIL_PENDING` 和 `release_compatible=false`。
 
 当前上位机候选为 `ARM@c472bc6 / v0.6.0-rc2`。fixture 通过只证明软件协议链一致；

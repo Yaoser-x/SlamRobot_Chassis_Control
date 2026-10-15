@@ -22,7 +22,7 @@
 | lineTask | BelowNormal | 5ms | osDelayUntil | UART4 巡线帧 |
 | espTask | BelowNormal | 5ms | osDelayUntil | ESP12F 协议 |
 | debugTask | BelowNormal | 10ms | osDelay | 调试台 |
-| oledTask | Low | 100ms | osDelayUntil | OLED 显示 |
+| oledTask | Low | 250ms | osDelayUntil | OLED 显示 |
 | ledTask | Low | 50ms | osDelayUntil | 状态 LED |
 
 ### 2. 优先级与抢占

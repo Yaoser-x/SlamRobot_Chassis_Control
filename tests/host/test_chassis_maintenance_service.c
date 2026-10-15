@@ -17,6 +17,8 @@ static uint8_t                         fake_begin_allowed;
 static uint32_t                        cancel_count;
 static uint32_t                        emergency_stop_count;
 static uint32_t                        end_count;
+static uint32_t                        begin_count;
+static uint8_t                         move_after_acquire;
 static state_estimation_wheel_status_t fake_encoder;
 static app_motor_driver_snapshot_t     fake_motor;
 static uint8_t                         fake_control_step_active;
@@ -34,11 +36,16 @@ static void require_int(int condition, const char *message)
 
 uint8_t AppSafetyWorkflow_BeginMaintenance(void)
 {
+    begin_count++;
     if (fake_begin_allowed == 0U || fake_lock != 0U)
     {
         return 0U;
     }
     fake_lock = 1U;
+    if (move_after_acquire != 0U)
+    {
+        fake_encoder.speed_mps[MOTOR_ID_M2] = 0.1f;
+    }
     return 1U;
 }
 
@@ -57,15 +64,12 @@ uint32_t ControlModeCoordinator_GetSnapshot(control_mode_snapshot_t *snapshot)
 
 uint8_t ControlModeCoordinator_Request(control_mode_t mode)
 {
-    require_int(fake_lock != 0U, "mode changes while Safety maintenance gate is closed");
     fake_mode = mode;
     return 1U;
 }
 
 void MotionControl_CancelTestMode(void)
 {
-    require_int(fake_lock != 0U && fake_mode == CONTROL_MODE_MAINTENANCE,
-                "maintenance mode owns command sources before canceling test mode");
     cancel_count++;
 }
 
@@ -112,6 +116,8 @@ static void reset_fake(void)
     cancel_count                                 = 0U;
     emergency_stop_count                         = 0U;
     end_count                                    = 0U;
+    begin_count                                  = 0U;
+    move_after_acquire                           = 0U;
     fake_encoder                                 = (state_estimation_wheel_status_t){0};
     fake_motor                                   = (app_motor_driver_snapshot_t){0};
     fake_control_step_active                     = 0U;
@@ -192,6 +198,66 @@ static void test_any_pwm_stage_rejects_maintenance(void)
                 "effective pwm rejects maintenance");
 }
 
+static void test_diagnostic_motion_switches_mode_without_safety_lock(void)
+{
+    reset_fake();
+    require_int(AppMotionMaintenance_BeginDiagnosticMotion() == APP_MOTION_MAINTENANCE_OK,
+                "stationary diagnostic motion begins");
+    require_int(fake_lock == 0U && fake_mode == CONTROL_MODE_MAINTENANCE,
+                "diagnostic motion selects DEBUG mode without the stop-only Safety lock");
+    require_int(cancel_count == 1U && emergency_stop_count == 0U,
+                "diagnostic motion cancels raw test mode without forcing an emergency stop");
+    require_int(AppMotionMaintenance_Begin() == APP_MOTION_MAINTENANCE_BUSY,
+                "configuration maintenance cannot overlap diagnostic motion");
+    AppMotionMaintenance_EndDiagnosticMotion();
+    require_int(fake_mode == CONTROL_MODE_AUTO && fake_lock == 0U,
+                "diagnostic motion restores the previous product mode");
+}
+
+static void test_diagnostic_motion_requires_stationary_chassis(void)
+{
+    reset_fake();
+    fake_encoder.speed_mps[MOTOR_ID_M2] = 0.1f;
+    require_int(AppMotionMaintenance_BeginDiagnosticMotion() == APP_MOTION_MAINTENANCE_NOT_STATIONARY,
+                "moving chassis rejects diagnostic motion");
+    require_int(fake_mode == CONTROL_MODE_AUTO && fake_lock == 0U,
+                "diagnostic rejection leaves mode and Safety ownership unchanged");
+}
+
+static void test_stationary_try_rejects_motion_without_revoking_it(void)
+{
+    reset_fake();
+    fake_encoder.speed_mps[MOTOR_ID_M2] = 0.1f;
+    require_int(AppMotionMaintenance_TryBeginStationary() == APP_MOTION_MAINTENANCE_NOT_STATIONARY,
+                "background maintenance waits for an already stationary chassis");
+    require_int(begin_count == 0UL && end_count == 0UL && cancel_count == 0UL && emergency_stop_count == 0UL
+                    && fake_mode == CONTROL_MODE_AUTO,
+                "failed stationary preflight changes no gate, source mode, test lease or motor output");
+    reset_fake();
+    fake_control_step_active = 1U;
+    require_int(AppMotionMaintenance_TryBeginStationary() == APP_MOTION_MAINTENANCE_BUSY,
+                "background maintenance defers active Motor cycle before acquiring Safety");
+    require_int(begin_count == 0UL && end_count == 0UL && emergency_stop_count == 0UL,
+                "active cycle preflight has no side effects");
+}
+
+static void test_stationary_try_rechecks_after_acquisition(void)
+{
+    reset_fake();
+    move_after_acquire = 1U;
+    require_int(AppMotionMaintenance_TryBeginStationary() == APP_MOTION_MAINTENANCE_NOT_STATIONARY,
+                "background maintenance rejects facts that changed after acquisition");
+    require_int(fake_lock == 0U && fake_mode == CONTROL_MODE_AUTO && end_count == 1UL
+                    && emergency_stop_count == 0UL,
+                "failed second proof releases ownership before any Flash or output operation");
+    reset_fake();
+    require_int(AppMotionMaintenance_TryBeginStationary() == APP_MOTION_MAINTENANCE_OK,
+                "stationary background maintenance acquires ownership");
+    require_int(fake_lock != 0U && fake_mode == CONTROL_MODE_MAINTENANCE && emergency_stop_count == 1UL,
+                "successful background acquisition resets the output owner while locked");
+    AppMotionMaintenance_End();
+}
+
 int main(void)
 {
     test_success_holds_lock_until_end();
@@ -200,6 +266,10 @@ int main(void)
     test_active_control_step_defers_maintenance();
     test_invalid_encoder_releases_lock();
     test_any_pwm_stage_rejects_maintenance();
+    test_diagnostic_motion_switches_mode_without_safety_lock();
+    test_diagnostic_motion_requires_stationary_chassis();
+    test_stationary_try_rejects_motion_without_revoking_it();
+    test_stationary_try_rechecks_after_acquisition();
     (void)printf("PASS: App motion maintenance host tests\n");
     return 0;
 }

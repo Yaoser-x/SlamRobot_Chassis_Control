@@ -14,7 +14,7 @@ void MotorOutputCoordinator_Init(const motion_control_config_t *config);
 /** Clamp a signed motor command to the chassis permille limit. */
 int16_t MotorOutputCoordinator_Clamp(int32_t permille);
 
-/** Convert one wheel-speed target to open-loop permille. */
+/** Convert one wheel-speed target to feedforward permille using the configured model. */
 int16_t MotorOutputCoordinator_MpsToPermille(float target_mps);
 
 /** Stop one motor without consulting mutable Service state. */
