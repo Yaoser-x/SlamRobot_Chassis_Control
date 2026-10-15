@@ -10,6 +10,7 @@
 - **WebSocket owner 租约**：首个 claimant 获得 500ms 控制租约，每 200ms heartbeat；其他客户端只读遥测。owner 断开/超时立即停车释权。
 - **robot_link_protocol 帧协议**：与 STM32F407 USART2 通信，CRC-8/Dallas 校验
 - **安全保护**：配置前不启动 WebSocket；500ms 速度 deadman 与 owner 租约独立；任意客户端可设置 ESTOP，但不能远程解除。
+- **持续摇杆**：按住时页面每 50ms 提交新速度样本，即使位置不变；每条 WebSocket 样本推进 v3 sequence，UART keepalive 保持原序号。松手、失焦、页面隐藏或控制权丢失清除旧请求，恢复控制权不会自动续跑。
 - **故障处理**：页面按名称显示活动/锁存原因；仅 owner 可发送 `clearfault`，并以 STM32 后续 STATUS 为准确认成功。ESTOP 始终只能在 STM32 本地解除。
 - **重启中和**：ESP 每次启动都主动向 STM32 发送速度零和 `LINE_CTRL=0`，因此模块重启/掉电恢复不会遗留旧巡线模式。
 - **STM32 在线真源**：最后一帧有效 STATUS 超过 500ms 后页面/API 标记离线，只发送一次 neutral 并释放 owner；重新收到 STATUS 只恢复遥测，不恢复旧租约或旧运动。
@@ -47,6 +48,7 @@ gzip 资源并验证：
 python F407_ESP12F/tools/check_esp_safety_policy.py
 python F407_ESP12F/tools/generate_html_gz.py
 python F407_ESP12F/tools/check_html_gz.py
+node F407_ESP12F/tools/test_web_control.cjs
 ```
 
 打开 `F407_ESP12F.ino`，点击 Arduino IDE **✓ 验证**（编译），确认编译成功无错误。

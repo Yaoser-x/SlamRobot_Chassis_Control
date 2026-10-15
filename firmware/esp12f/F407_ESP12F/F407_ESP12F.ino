@@ -621,13 +621,13 @@ static void wsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
         if (next_lx < -MAX_LINEAR_MPS)  next_lx = -MAX_LINEAR_MPS;
         if (next_az >  MAX_ANGULAR_RPS) next_az =  MAX_ANGULAR_RPS;
         if (next_az < -MAX_ANGULAR_RPS) next_az = -MAX_ANGULAR_RPS;
-        bool changed = !g_vel_active || next_lx != g_lx || next_az != g_az;
         g_lx = next_lx;
         g_az = next_az;
         g_vel_active = true;
         g_last_vel_ms = millis();
 
-        sendVelocityCommand(g_lx, g_az, 1U, changed);
+        // Every fresh browser sample is a new intent; only UART keepalive reuses a sequence.
+        sendVelocityCommand(g_lx, g_az, 1U, true);
       }
     }
     else if (cmd.startsWith("{\"cmd\":\"stop\"")) {
@@ -717,13 +717,13 @@ function el(id){return document.getElementById(id)}
 function text(id,v){var n=el(id),s=String(v);if(n.textContent!==s){n.textContent=s;n.classList.add('flash');setTimeout(function(){n.classList.remove('flash')},260)}}
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 function applyControlLock(){var j=el('joy');j.dataset.lockReason=estop?'急停已锁定':'只读模式';j.classList.toggle('locked',estop||!owner);el('btnStop').disabled=estop||!owner;el('btnLine').disabled=estop||!owner;el('btnClearFault').disabled=estop||!owner}
-function setRole(role){owner=role==='owner';text('connText',owner?'已连接 · 控制权':'已连接 · 只读');applyControlLock();if(role==='available')setTimeout(function(){send({cmd:'claim'})},20)}
+function setRole(role){owner=role==='owner';if(!owner)resetJoy();text('connText',owner?'已连接 · 控制权':'已连接 · 只读');applyControlLock();if(role==='available')setTimeout(function(){send({cmd:'claim'})},20)}
 function handleMessage(d){if(d&&d.type==='control'){setRole(d.role);return}if(d&&d.type==='faultclear'){text('btnClearFault',d.result==='queued'?'请求已入队':(d.result==='estop_local_only'?'急停需本地解除':'清除故障'));return}update(d)}
 function connect(){var ip=location.hostname;ws=new WebSocket('ws://'+ip+':81');ws.onopen=function(){el('top').classList.add('connected');text('connText','申请控制权');send({cmd:'claim'})};ws.onclose=function(){owner=false;active=false;applyControlLock();el('top').classList.remove('connected');text('connText','重连中...');setTimeout(connect,2000)};ws.onerror=function(){try{ws.close()}catch(e){}};ws.onmessage=function(e){try{handleMessage(JSON.parse(e.data))}catch(_){}}}
 function hex(v){return('00000000'+(v>>>0).toString(16).toUpperCase()).slice(-8)}
 function decodeFaults(v){var a=[];for(var i=0;i<faultNames.length;i++)if(v&(1<<faultNames[i][0]))a.push(faultNames[i][1]);return a.length?a.join('、'):'无'}
 function update(d){lastData=Date.now();el('app').classList.remove('stale');var bat=d.bat||0,pct=Math.max(0,Math.min(100,Math.round((bat-10.5)/(12.6-10.5)*100)));text('proto',d.pv);text('batTop',bat.toFixed(1)+'V');text('batMain',bat.toFixed(1)+'V');text('batPct',pct+'%');el('batArc').style.strokeDashoffset=100-pct;el('batArc').style.stroke=bat<10.5?'var(--danger)':(bat<11.5?'var(--warn)':'var(--ok)');text('mode',srcNames[d.src]||String(d.src));text('fresh','实时');estop=!!(d.flags&1);lineOn=!!(d.flags&4);applyControlLock();el('btnEstop').classList.toggle('active',estop);text('btnEstop',estop?'请本地解除':'急停');el('btnLine').classList.toggle('active',lineOn);text('btnLine',lineOn?'巡线开':'巡线关');var err=d.err>>>0,lat=d.lat>>>0;latestLatched=lat;el('errBar').classList.toggle('show',err!==0||lat!==0);text('errBar','当前：'+decodeFaults(err)+'；锁存：'+decodeFaults(lat)+'（0x'+hex(lat)+'）');if(clearPendingLatched){text('btnClearFault',lat===0?'清除成功':(lat===clearPendingLatched?'主控拒绝：条件仍存在':'部分清除'));clearPendingLatched=0}for(var i=0;i<4;i++){var en=!!(d.mask&(1<<i)),valid=!!(d.valid&(1<<i)),fault=!!(err&(1<<(i+1)));el('m'+i).classList.toggle('fault',fault);text('v'+i,en?(valid?'正常':'超时'):'关闭');text('s'+i,(d.spd[i]||0).toFixed(2));text('e'+i,d.enc[i]||0);text('c'+i,(d.cur[i]||0).toFixed(2));text('p'+i,d.pwm[i]||0)}}
-function resetJoy(){active=false;joy.classList.remove('dragging');thumb.style.left='calc(50% - 26px)';thumb.style.top='calc(50% - 26px)';lx=0;az=0;if(owner){send({cmd:'vel',lx:0,az:0});send({cmd:'stop'})}}
+function resetJoy(){active=false;joy.classList.remove('dragging');thumb.style.left='calc(50% - 26px)';thumb.style.top='calc(50% - 26px)';lx=0;az=0;if(owner&&!estop){send({cmd:'vel',lx:0,az:0});send({cmd:'stop'})}}
 function moveJoy(x,y,force){if(estop||!owner)return;var r=joy.getBoundingClientRect(),maxX=r.width/2-26,maxY=r.height/2-26,dx=x-r.left-r.width/2,dy=y-r.top-r.height/2;dx=Math.max(-maxX,Math.min(maxX,dx));dy=Math.max(-maxY,Math.min(maxY,dy));thumb.style.left=(r.width/2+dx-26)+'px';thumb.style.top=(r.height/2+dy-26)+'px';var dead=12;if(Math.sqrt(dx*dx+dy*dy)<dead){lx=0;az=0}else{lx=-(dy/maxY)*.5*spdScale;az=(dx/maxX)*1.0*spdScale}var now=Date.now();if(force||now-lastSend>=50){lastSend=now;send({cmd:'vel',lx:Number(lx.toFixed(3)),az:Number(az.toFixed(3))})}}
 joy.addEventListener('pointerdown',function(e){if(estop||!owner)return;active=true;joy.classList.add('dragging');joy.setPointerCapture(e.pointerId);moveJoy(e.clientX,e.clientY,true)});
 joy.addEventListener('pointermove',function(e){if(active)moveJoy(e.clientX,e.clientY,false)});
@@ -735,6 +735,9 @@ el('btnClearFault').onclick=function(){if(owner&&!estop&&latestLatched){clearPen
 el('spdScale').oninput=function(){spdScale=parseInt(this.value,10)/100;text('spdVal',this.value+'%')};
 setInterval(function(){if(Date.now()-lastData>300){el('app').classList.add('stale');text('fresh','超时')}},150);
 setInterval(function(){if(owner)send({cmd:'heartbeat'})},200);
+setInterval(function(){if(active&&owner&&!estop){lastSend=Date.now();send({cmd:'vel',lx:Number(lx.toFixed(3)),az:Number(az.toFixed(3))})}},50);
+window.addEventListener('blur',resetJoy);
+document.addEventListener('visibilitychange',function(){if(document.hidden)resetJoy()});
 connect();
 </script>
 </body>

@@ -112,6 +112,10 @@ def main() -> int:
     for name, body in handlers:
         if "if (!clientIsOwner(num))" not in body:
             errors.append(f"{name} handler is not owner guarded")
+        if name == "vel" and "sendVelocityCommand(g_lx, g_az, 1U, true)" not in body:
+            errors.append("fresh WebSocket velocity does not advance its v3 sequence")
+    if "sendVelocityCommand(g_lx, g_az, 1U, false)" not in section(sketch, "void loop()", "// --- HTTP / WebSocket 事件 ---"):
+        errors.append("UART keepalive must reuse the accepted command sequence")
     neutral_body = section(sketch, "static void sendNeutralControl()", "static void releaseOwnerAndStop()")
     release_body = section(sketch, "static void releaseOwnerAndStop()", "// WebSocket 事件处理")
     if "stopChassis();" not in neutral_body or "buildLineCtrlFrame(0U" not in neutral_body:
