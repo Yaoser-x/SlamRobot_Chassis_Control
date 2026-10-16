@@ -244,6 +244,15 @@ static void ChassisService_StepImpl(const motion_control_input_t *input, motion_
     uint32_t                        nominal_period_ms = input->nominal_period_ms;
     safety_motion_permit_result_t   permit_result;
 
+    /* Refresh physical feedback before every stop path. */
+    encoder_state = input->wheel.value;
+    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
+    {
+        chassis_state.motor_actual_mps[i]  = encoder_state.speed_mps[i];
+        chassis_state.motor_speed_valid[i] = encoder_state.speed_valid[i];
+    }
+    MotionStatusBuilder_SyncSides(&chassis_state);
+
     permit_result = SafetyMotionPermitGuard_Evaluate(&safety_permit_guard, &input->safety_permit.value, now_ms);
     if (permit_result != SAFETY_MOTION_PERMIT_ALLOW)
     {
@@ -267,14 +276,6 @@ static void ChassisService_StepImpl(const motion_control_input_t *input, motion_
         MotionControl_EmergencyStop();
         return;
     }
-    encoder_state = input->wheel.value;
-    for (uint8_t i = 0U; i < MOTOR_ID_COUNT; ++i)
-    {
-        chassis_state.motor_actual_mps[i]  = encoder_state.speed_mps[i];
-        chassis_state.motor_speed_valid[i] = encoder_state.speed_valid[i];
-    }
-    MotionStatusBuilder_SyncSides(&chassis_state);
-
     MotionTestMode_GetSnapshot(&test_mode, now_ms, &test_snapshot);
     if (input->normal_motion_allowed == 0U
         && ((test_snapshot.open_loop_active == 0U && test_snapshot.raw_input_active == 0U)

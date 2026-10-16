@@ -168,7 +168,8 @@ uint16_t TelemetryEncoder_BuildStatus(const communication_publish_model_t *snaps
     }
     for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
     {
-        status.motor_speed_mps[index]       = snapshot->chassis.motor_actual_mps[index];
+        /* Speed, count and validity belong to the same encoder snapshot. */
+        status.motor_speed_mps[index]       = snapshot->encoder.speed_mps[index];
         status.encoder_count[index]         = snapshot->encoder.count[index];
         status.motor_current_a[index]       = snapshot->safety.motor_current_a[index];
         status.motor_target_mps[index]      = snapshot->chassis.motor_target_mps[index];

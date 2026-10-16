@@ -41,7 +41,7 @@ ExpectedStatus(const communication_publish_model_t *snapshot, uint8_t comm_healt
     status.ack_flags            = snapshot->communication.upper_session.ack_flags;
     for (uint8_t index = 0U; index < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++index)
     {
-        status.motor_speed_mps[index]       = snapshot->chassis.motor_actual_mps[index];
+        status.motor_speed_mps[index]       = snapshot->encoder.speed_mps[index];
         status.encoder_count[index]         = snapshot->encoder.count[index];
         status.motor_current_a[index]       = snapshot->safety.motor_current_a[index];
         status.motor_target_mps[index]      = snapshot->chassis.motor_target_mps[index];
@@ -96,6 +96,7 @@ static void SeedSnapshot(communication_publish_model_t *snapshot)
         snapshot->chassis.motor_target_mps[index]      = (float)index + 0.2f;
         snapshot->chassis.motor_output_permille[index] = (int16_t)(100 + index);
         snapshot->encoder.count[index]                 = 1000 + index;
+        snapshot->encoder.speed_mps[index]             = (float)index + 0.1f;
         snapshot->safety.motor_current_a[index]        = (float)index + 0.3f;
         snapshot->imu.quaternion[index]                = (float)index + 0.4f;
     }
@@ -107,6 +108,55 @@ static void SeedSnapshot(communication_publish_model_t *snapshot)
     for (uint8_t index = 0U; index < 7U; ++index)
     {
         snapshot->imu.quality_counters[index] = 10U + index;
+    }
+}
+
+static int16_t ReadStatusSpeed(const uint8_t *frame, uint8_t motor)
+{
+    uint16_t offset = (uint16_t)(4U + 14U + 2U * motor);
+    return (int16_t)((uint16_t)frame[offset] | ((uint16_t)frame[offset + 1U] << 8U));
+}
+
+static void TestStatusUsesEncoderObservationDuringEmergencyStop(void)
+{
+    communication_publish_model_t snapshot;
+    uint8_t frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+
+    SeedSnapshot(&snapshot);
+    snapshot.chassis.motor_enabled_mask = 0x06U;
+    snapshot.chassis.motor_actual_mps[1] = 0.052f;
+    snapshot.chassis.motor_actual_mps[2] = 0.050f;
+    snapshot.encoder.speed_mps[1] = 0.0f;
+    snapshot.encoder.speed_mps[2] = 0.0f;
+    snapshot.encoder.speed_valid[1] = 1U;
+    snapshot.encoder.speed_valid[2] = 1U;
+    for (uint8_t motor = 0U; motor < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++motor)
+    {
+        snapshot.chassis.motor_target_mps[motor] = 0.0f;
+        snapshot.chassis.motor_output_permille[motor] = 0;
+    }
+    for (uint8_t link = 0U; link < 2U; ++link)
+    {
+        communication_link_t destination = (link == 0U) ? COMMUNICATION_LINK_UPPER : COMMUNICATION_LINK_ESP12F;
+        assert(TelemetryEncoder_BuildStatus(&snapshot, destination, frame, sizeof(frame))
+               == ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN + 5U);
+        assert(ReadStatusSpeed(frame, 1U) == 0 && ReadStatusSpeed(frame, 2U) == 0);
+        assert(frame[4U + 62U] == 0x06U);
+
+        snapshot.encoder.speed_mps[1] = 0.125f;
+        snapshot.encoder.speed_mps[2] = -0.125f;
+        assert(TelemetryEncoder_BuildStatus(&snapshot, destination, frame, sizeof(frame))
+               == ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN + 5U);
+        assert(ReadStatusSpeed(frame, 1U) == 125 && ReadStatusSpeed(frame, 2U) == -125);
+        assert((frame[4U + 1U] & UPPER_STATUS_FLAG_ESTOP) != 0U);
+
+        snapshot.encoder.speed_valid[1] = 0U;
+        (void)TelemetryEncoder_BuildStatus(&snapshot, destination, frame, sizeof(frame));
+        assert(frame[4U + 62U] == 0x04U);
+        assert((frame[4U + 1U] & UPPER_STATUS_FLAG_SPEED_VALID_ALL) == 0U);
+        snapshot.encoder.speed_valid[1] = 1U;
+        snapshot.encoder.speed_mps[1] = 0.0f;
+        snapshot.encoder.speed_mps[2] = 0.0f;
     }
 }
 
@@ -204,6 +254,7 @@ int main(void)
     snapshot.imu.online = 0U;
     assert(TelemetryEncoder_BuildImu(&snapshot, actual, sizeof(actual)) == 0U);
 
+    TestStatusUsesEncoderObservationDuringEmergencyStop();
     puts("PASS: telemetry frame builder");
     return 0;
 }

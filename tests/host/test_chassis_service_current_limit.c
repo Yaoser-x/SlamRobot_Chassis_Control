@@ -453,6 +453,58 @@ static void test_input_dto_returns_event_without_cross_service_write(void)
                 "expected capability transition does not report a stale permit");
 }
 
+static void test_denied_safety_permit_keeps_live_wheel_feedback(void)
+{
+    for (uint8_t denial = 0U; denial < 3U; ++denial)
+    {
+        static const float measured[3][2] = {{0.03f, 0.02f}, {0.0f, 0.0f}, {-0.01f, 0.015f}};
+        motion_control_status_t state;
+
+        reset_fake_chassis();
+        set_closed_loop_command(0.05f);
+        fake_encoder_state.speed_mps[MOTOR_ID_M2] = 0.052f;
+        fake_encoder_state.speed_mps[MOTOR_ID_M3] = 0.050f;
+        ChassisService_Step(1000U);
+        (void)MotionControl_GetStatus(&state);
+        require_int(fabsf(state.motor_actual_mps[MOTOR_ID_M2] - 0.052f) < 0.00001f,
+                    "moving measurement is published before safety withdrawal");
+
+        for (uint8_t sample = 0U; sample < 3U; ++sample)
+        {
+            motion_control_input_t input = make_motion_input(1010U + 10U * sample);
+            motion_control_event_t event;
+
+            input.wheel.generation = 2UL + sample;
+            input.wheel.sample_time_ms = input.now_ms;
+            input.wheel.value.last_update_ms = input.now_ms;
+            input.wheel.value.speed_mps[MOTOR_ID_M2] = measured[sample][0];
+            input.wheel.value.speed_mps[MOTOR_ID_M3] = measured[sample][1];
+            if (denial == 2U)
+            {
+                input.safety_permit.value.issued_at_ms = 900U;
+                input.safety_permit.value.valid_for_ms = 40U;
+            }
+            else
+            {
+                input.safety_permit.value.base_motion = 0U;
+                input.safety_permit.value.generation = (denial == 1U) ? 2UL : 1UL;
+            }
+            MotionControl_StepWithInput(&input, &event);
+            (void)MotionControl_GetStatus(&state);
+            require_int(fabsf(state.motor_actual_mps[MOTOR_ID_M2] - measured[sample][0]) < 0.00001f
+                            && fabsf(state.motor_actual_mps[MOTOR_ID_M3] - measured[sample][1]) < 0.00001f,
+                        "revoked, changed and stale permits still publish live coasting, stopped and hand-moved feedback");
+            require_int(fabsf(state.left_actual_mps - measured[sample][0]) < 0.00001f
+                            && fabsf(state.right_actual_mps - measured[sample][1]) < 0.00001f,
+                        "side observations follow the live wheel measurements while stopped");
+            require_int(state.output_enabled == 0U && state.motor_target_mps[MOTOR_ID_M2] == 0.0f
+                            && state.motor_target_mps[MOTOR_ID_M3] == 0.0f
+                            && fake_signed_pwm[MOTOR_ID_M2] == 0 && fake_signed_pwm[MOTOR_ID_M3] == 0,
+                        "refreshing observations never grants motor output or restores an old command");
+        }
+    }
+}
+
 static void test_invalid_current_zero_blocks_test_outputs(void)
 {
     reset_fake_chassis();
@@ -781,6 +833,7 @@ int main(void)
     test_high_adc_current_does_not_throttle_pwm_output();
     test_stale_safety_permit_stops_output_before_watchdog_reset();
     test_input_dto_returns_event_without_cross_service_write();
+    test_denied_safety_permit_keeps_live_wheel_feedback();
     test_invalid_current_zero_blocks_test_outputs();
     test_raw_test_mode_has_400ms_deadman();
     test_diagnostic_outputs_are_capped_at_300_permille();
