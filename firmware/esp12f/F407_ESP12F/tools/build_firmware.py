@@ -13,6 +13,23 @@ ROOT = SKETCH.parents[2]
 DEFAULT_FQBN = "esp8266:esp8266:generic:eesz=4M,FlashMode=dout,CrystalFreq=26,baud=115200,ResetMethod=ck"
 
 
+def verify_embedded_identity(images, commit, web_sha256):
+    if (
+        not images
+        or not re.fullmatch(r"[0-9a-f]{40}", commit)
+        or not re.fullmatch(r"[0-9a-f]{64}", web_sha256)
+    ):
+        return False
+    for path in images:
+        binary = path.read_bytes()
+        if (
+            commit.encode("ascii") not in binary
+            or web_sha256.encode("ascii") not in binary
+        ):
+            return False
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -93,7 +110,7 @@ def main():
         "--output-dir",
         str(output / "image"),
         "--build-property",
-        f'compiler.cpp.extra_flags=-I"{include.as_posix()}"',
+        f'compiler.cpp.extra_flags="-I{include.as_posix()}"',
         str(SKETCH),
     ]
     with (output / "build.log").open("w", encoding="utf-8") as log:
@@ -126,14 +143,24 @@ def main():
         ).strip()
     )
     identity_consistent = after_commit == commit and after_dirty == dirty
-    exit_code = result.returncode or (0 if identity_consistent else 2)
+    image_paths = sorted((output / "image").glob("*.bin"))
+    web_hash = re.search(
+        r'HTML_PAGE_SHA256 "([0-9a-f]{64})"',
+        (SKETCH / "html_page_gz.h").read_text(encoding="utf-8"),
+    )
+    identity_embedded = verify_embedded_identity(
+        image_paths, commit, web_hash.group(1) if web_hash else ""
+    )
+    exit_code = result.returncode or (
+        0 if identity_consistent and identity_embedded else 2
+    )
     images = [
         {
             "file": str(path.relative_to(output)),
             "bytes": path.stat().st_size,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         }
-        for path in sorted((output / "image").glob("*.bin"))
+        for path in image_paths
     ]
     (output / "manifest.json").write_text(
         json.dumps(
@@ -143,6 +170,7 @@ def main():
                 "fqbn": args.fqbn,
                 "exit_code": exit_code,
                 "identity_consistent": identity_consistent,
+                "identity_embedded": identity_embedded,
                 "images": images,
             },
             indent=2,

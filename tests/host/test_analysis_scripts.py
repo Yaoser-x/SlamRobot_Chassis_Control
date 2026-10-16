@@ -777,5 +777,20 @@ class AnalysisTests(unittest.TestCase):
             hil_imu.timeout_snapshot(text.rsplit("\n", 1)[0])
 
 
+class EspBuildIdentityTests(unittest.TestCase):
+    def test_compiler_success_cannot_replace_embedded_source_and_asset_identity(self):
+        builder = load("esp_build_identity", ROOT / "firmware/esp12f/F407_ESP12F/tools/build_firmware.py")
+        commit, web = "a" * 40, "b" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "firmware.bin"
+            image.write_bytes(b"unknown esp_identity_valid web_sha256")
+            self.assertFalse(builder.verify_embedded_identity([image], commit, web))
+            image.write_bytes(commit.encode() + b" web=" + web.encode())
+            self.assertTrue(builder.verify_embedded_identity([image], commit, web))
+            self.assertFalse(builder.verify_embedded_identity([image], "c" * 40, web))
+            self.assertFalse(builder.verify_embedded_identity([image], commit, "c" * 64))
+            self.assertFalse(builder.verify_embedded_identity([], commit, web))
+
+
 if __name__ == "__main__":
     unittest.main()
