@@ -13,6 +13,16 @@
 
 #define ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS 30000U
 
+typedef enum
+{
+    ESP12F_BRIDGE_OFF = 0,
+    ESP12F_BRIDGE_PREPARING,
+    ESP12F_BRIDGE_STARTING,
+    ESP12F_BRIDGE_FORWARDING,
+    ESP12F_BRIDGE_RESTORING
+} esp12f_bridge_phase_t;
+
+static volatile esp12f_bridge_phase_t bridge_phase;
 static uint8_t  bridge_download_mode;
 static uint8_t  bridge_maintenance_lock_held;
 static uint32_t bridge_auto_exit_count;
@@ -29,13 +39,21 @@ static void Esp12fFlashBridge_ReleaseMaintenance(void)
 
 static void Esp12fFlashBridge_RestoreServices(void)
 {
-    Esp12fBootControl_EnterNormal();
     Usart1DebugConsole_RestartRx();
     WirelessCommunication_RestartRx();
 }
 
+static void Esp12fFlashBridge_BeginRestore(void)
+{
+    bridge_phase = ESP12F_BRIDGE_RESTORING;
+    UartBridgeTransport_Stop();
+    bridge_download_mode = 0U;
+    Esp12fBootControl_EnterNormal();
+}
+
 void Esp12fFlashBridge_Init(void)
 {
+    bridge_phase                  = ESP12F_BRIDGE_OFF;
     bridge_download_mode          = 0U;
     bridge_maintenance_lock_held  = 0U;
     bridge_auto_exit_count        = 0U;
@@ -45,9 +63,11 @@ void Esp12fFlashBridge_Init(void)
 
 uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
 {
-    uint32_t initial_activity_ms;
-
-    if (UartBridgeTransport_IsActive() != 0U)
+    if (bridge_phase == ESP12F_BRIDGE_RESTORING)
+    {
+        return 0U;
+    }
+    if (bridge_phase != ESP12F_BRIDGE_OFF)
     {
         return 1U;
     }
@@ -56,6 +76,8 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
         return 0U;
     }
     bridge_maintenance_lock_held = 1U;
+    /* Reserve both console and wireless tasks before touching either UART. */
+    bridge_phase = ESP12F_BRIDGE_PREPARING;
 
     CommandManagement_ClearAll();
     Usart1DebugConsole_RevokeMaintenanceAuthorization();
@@ -64,7 +86,6 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
     UartBridgeTransport_Stop();
     Usart1DebugConsole_ClearRxBuffer();
 
-    initial_activity_ms  = PlatformTime_NowMs();
     bridge_download_mode = (download_mode != 0U) ? 1U : 0U;
     if (bridge_download_mode != 0U)
     {
@@ -75,19 +96,13 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
         Esp12fBootControl_EnterNormal();
     }
 
-    if (UartBridgeTransport_Start(initial_activity_ms) == 0U)
-    {
-        bridge_download_mode = 0U;
-        Esp12fFlashBridge_RestoreServices();
-        Esp12fFlashBridge_ReleaseMaintenance();
-        return 0U;
-    }
+    bridge_phase = ESP12F_BRIDGE_STARTING;
     return 1U;
 }
 
 void Esp12fFlashBridge_Disable(void)
 {
-    if (UartBridgeTransport_IsActive() == 0U)
+    if (bridge_phase == ESP12F_BRIDGE_OFF)
     {
         bridge_download_mode = 0U;
         WirelessCommunication_SetDownloadMode(0U);
@@ -95,15 +110,15 @@ void Esp12fFlashBridge_Disable(void)
         return;
     }
 
-    UartBridgeTransport_Stop();
-    bridge_download_mode = 0U;
-    Esp12fFlashBridge_RestoreServices();
-    Esp12fFlashBridge_ReleaseMaintenance();
+    if (bridge_phase != ESP12F_BRIDGE_RESTORING)
+    {
+        Esp12fFlashBridge_BeginRestore();
+    }
 }
 
 uint8_t Esp12fFlashBridge_IsActive(void)
 {
-    return UartBridgeTransport_IsActive();
+    return (bridge_phase != ESP12F_BRIDGE_OFF) ? 1U : 0U;
 }
 
 uint32_t Esp12fFlashBridge_GetIdleMs(void)
@@ -116,7 +131,32 @@ void Esp12fFlashBridge_Update(uint32_t now_ms)
     uint32_t idle_ms;
 
     (void)now_ms;
-    if (UartBridgeTransport_IsActive() == 0U)
+    if (bridge_phase == ESP12F_BRIDGE_STARTING)
+    {
+        if (Esp12fBootControl_Update(PlatformTime_NowMs()) != 0U)
+        {
+            if (UartBridgeTransport_Start(PlatformTime_NowMs()) != 0U)
+            {
+                bridge_phase = ESP12F_BRIDGE_FORWARDING;
+            }
+            else
+            {
+                Esp12fFlashBridge_BeginRestore();
+            }
+        }
+        return;
+    }
+    if (bridge_phase == ESP12F_BRIDGE_RESTORING)
+    {
+        if (Esp12fBootControl_Update(PlatformTime_NowMs()) != 0U)
+        {
+            Esp12fFlashBridge_RestoreServices();
+            bridge_phase = ESP12F_BRIDGE_OFF;
+            Esp12fFlashBridge_ReleaseMaintenance();
+        }
+        return;
+    }
+    if (bridge_phase != ESP12F_BRIDGE_FORWARDING)
     {
         return;
     }
@@ -141,7 +181,7 @@ void Esp12fFlashBridge_GetState(esp12f_flash_bridge_state_t *state)
     }
     UartBridgeTransport_GetState(&transport);
     *state = (esp12f_flash_bridge_state_t){
-        .active                 = transport.active,
+        .active                 = Esp12fFlashBridge_IsActive(),
         .download_mode          = bridge_download_mode,
         .pc_to_esp_rx_bytes     = transport.pc_to_esp_rx_bytes,
         .esp_to_pc_rx_bytes     = transport.esp_to_pc_rx_bytes,

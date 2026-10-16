@@ -104,10 +104,12 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 - 清空当前运动命令（`stop`）
 - 停止 cycle CSV 日志（`stream_mode = 0`）
 - 关闭 `vel` 调试指令
-- **下载模式时序**（`Esp12fFlashBridge_StartDownloadBoot`）：
+- **下载模式时序**（`Esp12fBootControl_EnterDownload`）：
   1. 同时拉低 `EN` + `IO0` + `RST`，等待 50ms（全芯片掉电复位）
   2. 释放 `EN`，等待 10ms（ESP8266 在 `EN` 上升沿采样 `IO0`）
   3. 释放 `RST`，等待 BootROM 就绪
+- 50/10/100ms 的引脚等待由现有 ESP 任务分步推进，不在任务中忙等。`espflash on` 返回表示请求已接受；
+  UART RX 启动失败在后续推进时恢复普通模式。自动化连接保留启动等待与工具重试，不能把请求接受当作 ROM 已就绪。
 - 启动 USART1 ↔ USART2 双向透传
 - 先获取统一底盘维护锁、撤销旧 LINE/DEBUG/raw/open-loop 模式并确认编码器静止；不满足时 `espflash on`/`espat on` 被拒绝
 
@@ -117,6 +119,8 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 - USART2 收到的**每个字节**直接转发到 USART1（PC），不做任何修改
 - ESP12F 正常网页控制协议暂停，status 帧不会混入烧录数据
 - ESP 任务只推进透传和原有周期心跳；透传持有串口时不运行普通无线发送及操作请求分发，空闲退出后恢复
+- `active` 包含引脚启动和普通模式恢复阶段；维护锁与调试 TX 暂停一直保持到引脚稳定、RX 恢复。
+  UART 中断按实际 transport 所有者路由，避免恢复 RX 时将普通调试应答误送给已停止的透传。
 - 调试台命令台暂停（`Esp12fFlashBridge_IsActive()` 检查），避免二进制烧录流被误解析
 - 30 秒无任何串口活动 → **自动退出** bridge
 - 维护锁持续持有，UPPER/PS2/ESP/LINE/DEBUG 新命令均被拒绝；正常退出或启动失败都会释放锁

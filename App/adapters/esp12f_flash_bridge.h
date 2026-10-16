@@ -26,8 +26,10 @@ extern "C"
     } esp12f_flash_bridge_state_t;
 
     void     Esp12fFlashBridge_Init(void);
+    /** Accept a start request; pin sequencing and RX-start failures progress in Update. */
     uint8_t  Esp12fFlashBridge_Enable(uint8_t download_mode);
     void     Esp12fFlashBridge_Disable(void);
+    /** Includes startup and restoration, while normal console/wireless tasks must pause. */
     uint8_t  Esp12fFlashBridge_IsActive(void);
     uint32_t Esp12fFlashBridge_GetIdleMs(void);
     void     Esp12fFlashBridge_Update(uint32_t now_ms);

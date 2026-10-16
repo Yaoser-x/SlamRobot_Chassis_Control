@@ -71,5 +71,6 @@ HAL_StatusTypeDef HAL_UART_DMAStop(UART_HandleTypeDef *huart);
 HAL_StatusTypeDef HAL_UART_Receive_IT(UART_HandleTypeDef *huart, uint8_t *pData, uint16_t Size);
 HAL_StatusTypeDef HAL_UART_Abort(UART_HandleTypeDef *huart);
 HAL_StatusTypeDef HAL_UART_AbortTransmit(UART_HandleTypeDef *huart);
+void HAL_UART_IRQHandler(UART_HandleTypeDef *huart);
 
 #endif

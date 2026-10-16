@@ -273,10 +273,13 @@ add_test(NAME host_communication_service COMMAND test_host_communication_service
 add_executable(test_uart_bridge_transport
     test_uart_bridge_transport.c
     ../../BSP/transport/uart_bridge_transport.c
+    ../../App/adapters/uart_callbacks.c
 )
 target_include_directories(test_uart_bridge_transport PRIVATE
     .
     ../../BSP/transport
+    ../../BSP/line
+    ../../App/debug
 )
 add_test(NAME uart_bridge_transport COMMAND test_uart_bridge_transport)
 

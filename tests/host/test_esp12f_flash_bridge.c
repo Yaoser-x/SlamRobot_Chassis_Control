@@ -30,6 +30,7 @@ static jmp_buf                        task_exit;
 static unsigned                       task_cycles;
 static unsigned                       normal_updates;
 static unsigned                       operation_polls;
+static uint8_t                        boot_ready;
 
 uint32_t PlatformTime_TaskNowMs(void)
 {
@@ -134,6 +135,11 @@ void Esp12fBootControl_EnterNormal(void)
 {
     normal_boot_count++;
 }
+uint8_t Esp12fBootControl_Update(uint32_t now_ms)
+{
+    assert(now_ms == fake_now_ms);
+    return boot_ready;
+}
 uint32_t PlatformTime_NowMs(void)
 {
     return fake_now_ms;
@@ -183,6 +189,7 @@ static void ResetFakes(void)
     debug_suspended       = 0U;
     normal_updates        = 0U;
     operation_polls       = 0U;
+    boot_ready            = 1U;
     Esp12fFlashBridge_Init();
 }
 
@@ -196,11 +203,22 @@ static void RunThreeTaskCycles(void)
 static void TestTaskRespectsBridgeOwnershipAndResumes(void)
 {
     ResetFakes();
+    boot_ready = 0U;
     assert(Esp12fFlashBridge_Enable(1U) != 0U);
     RunThreeTaskCycles();
     assert(normal_updates == 0U && operation_polls == 0U);
+    assert(transport_state.active == 0U && debug_suspended != 0U);
+    boot_ready = 1U;
+    RunThreeTaskCycles();
     assert(Esp12fFlashBridge_IsActive() != 0U);
+    assert(transport_state.active != 0U);
     transport_idle_ms = 30000U;
+    boot_ready = 0U;
+    RunThreeTaskCycles();
+    assert(Esp12fFlashBridge_IsActive() != 0U && transport_state.active == 0U);
+    assert(normal_updates == 0U && operation_polls == 0U && maintenance_end_count == 0U);
+    assert(Esp12fFlashBridge_Enable(1U) == 0U); /* Restoration cannot be preempted. */
+    boot_ready = 1U;
     RunThreeTaskCycles();
     assert(Esp12fFlashBridge_IsActive() == 0U && debug_suspended == 0U);
     assert(normal_updates == 3U && operation_polls == 3U);
@@ -215,9 +233,12 @@ static void TestDownloadAndAutoExit(void)
     assert(Esp12fFlashBridge_Enable(1U) != 0U);
     assert(download_boot_count == 1U);
     assert(Esp12fFlashBridge_IsActive() != 0U);
-
+    Esp12fFlashBridge_Update(1000U);
+    assert(transport_state.active != 0U);
     transport_idle_ms = 30000U;
     Esp12fFlashBridge_Update(31000U);
+    assert(Esp12fFlashBridge_IsActive() != 0U && maintenance_end_count == 0U);
+    Esp12fFlashBridge_Update(31001U);
     assert(Esp12fFlashBridge_IsActive() == 0U);
     assert(normal_boot_count == 1U);
     assert(debug_restart_count == 1U && esp_restart_count == 1U);
@@ -230,8 +251,11 @@ static void TestStartFailureAndMaintenanceRejection(void)
 {
     ResetFakes();
     transport_start_ok = 0U;
-    assert(Esp12fFlashBridge_Enable(1U) == 0U);
+    assert(Esp12fFlashBridge_Enable(1U) != 0U); /* Accepted; RX startup happens asynchronously. */
+    Esp12fFlashBridge_Update(fake_now_ms);
     assert(download_boot_count == 1U && normal_boot_count == 1U);
+    assert(debug_restart_count == 0U && maintenance_end_count == 0U);
+    Esp12fFlashBridge_Update(fake_now_ms);
     assert(debug_restart_count == 1U && esp_restart_count == 1U);
     assert(maintenance_end_count == 1U);
 
@@ -239,6 +263,16 @@ static void TestStartFailureAndMaintenanceRejection(void)
     maintenance_result = APP_MOTION_MAINTENANCE_BUSY;
     assert(Esp12fFlashBridge_Enable(0U) == 0U);
     assert(normal_boot_count == 0U && maintenance_end_count == 0U);
+
+    ResetFakes();
+    boot_ready = 0U;
+    assert(Esp12fFlashBridge_Enable(1U) != 0U);
+    Esp12fFlashBridge_Disable();
+    assert(Esp12fFlashBridge_IsActive() != 0U && normal_boot_count == 1U);
+    assert(maintenance_end_count == 0U);
+    boot_ready = 1U;
+    Esp12fFlashBridge_Update(fake_now_ms);
+    assert(Esp12fFlashBridge_IsActive() == 0U && maintenance_end_count == 1U);
 }
 
 int main(void)

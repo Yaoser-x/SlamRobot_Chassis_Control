@@ -1,5 +1,4 @@
 #include "wireless_communication_service.h"
-#include "esp12f_flash_bridge.h"
 #include "line_sensor_driver.h"
 #include "host_communication_service.h"
 #include "uart_bridge_transport.h"
@@ -9,7 +8,7 @@
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
+    if ((UartBridgeTransport_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
     {
         UartBridgeTransport_OnRx((huart == &huart1) ? UART_BRIDGE_PORT_PC : UART_BRIDGE_PORT_ESP);
     }
@@ -37,7 +36,7 @@ void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
+    if ((UartBridgeTransport_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
     {
         UartBridgeTransport_OnTxComplete((huart == &huart1) ? UART_BRIDGE_PORT_PC : UART_BRIDGE_PORT_ESP);
     }
@@ -57,7 +56,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    if ((Esp12fFlashBridge_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
+    if ((UartBridgeTransport_IsActive() != 0U) && (huart == &huart1 || huart == &huart2))
     {
         UartBridgeTransport_OnError((huart == &huart1) ? UART_BRIDGE_PORT_PC : UART_BRIDGE_PORT_ESP);
     }
