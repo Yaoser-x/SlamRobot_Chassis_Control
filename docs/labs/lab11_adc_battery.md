@@ -51,7 +51,9 @@ V_bat = V_adc × 5.7
 
 ### 3. 电机电流换算——分流电阻
 
-DRV8874 IPROPI 输出电压与电机电流成正比，当前代码使用实测初始标定 `MOTOR_CURRENT_VOLTS_PER_AMP = 1.0V/A`：
+DRV8874 IPROPI 输出电压与电机电流成正比，当前代码使用历史默认 `MOTOR_CURRENT_VOLTS_PER_AMP = 1.0V/A`。
+目前缺少可追溯的实测标定依据；以下是该默认值的换算示例，不能当作真实电流精度或过流保护依据。
+原理图名义比例与实板标定边界见 [运动与启动诊断](../motion-diagnostics.md#电流比例的证据边界)。
 
 ```
 V_propi = I_motor × MOTOR_CURRENT_VOLTS_PER_AMP = I × 1.0

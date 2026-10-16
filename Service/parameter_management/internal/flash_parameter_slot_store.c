@@ -320,9 +320,19 @@ static int8_t FlashParam_SelectActiveSlot(uint32_t *sequence)
 
 flash_param_status_t FlashParamSlots_LoadBundle(flash_param_bundle_t *bundle)
 {
+    return FlashParamSlots_LoadBundleWithSequence(bundle, 0, 0);
+}
+
+flash_param_status_t
+FlashParamSlots_LoadBundleWithSequence(flash_param_bundle_t *bundle, uint32_t *sequence, uint8_t *sequence_valid)
+{
     int8_t               active;
     flash_param_status_t legacy_status;
 
+    if (sequence != 0)
+        *sequence = 0UL;
+    if (sequence_valid != 0)
+        *sequence_valid = 0U;
     if (bundle == 0)
     {
         return FLASH_PARAM_STATUS_INVALID;
@@ -330,7 +340,11 @@ flash_param_status_t FlashParamSlots_LoadBundle(flash_param_bundle_t *bundle)
     active = FlashParam_SelectActiveSlot(0);
     if (active >= 0)
     {
-        return FlashParam_DecodeBundle(FlashParam_SlotData((uint8_t)active), FLASH_PARAM_IMAGE_SIZE, bundle, 0);
+        flash_param_status_t status =
+            FlashParam_DecodeBundle(FlashParam_SlotData((uint8_t)active), FLASH_PARAM_IMAGE_SIZE, bundle, sequence);
+        if (sequence_valid != 0 && status == FLASH_PARAM_STATUS_OK)
+            *sequence_valid = 1U;
+        return status;
     }
     legacy_status = FlashParamCodec_DecodeLegacy(FlashParam_SlotData(1U), FLASH_PARAM_IMAGE_SIZE, bundle);
     return legacy_status;

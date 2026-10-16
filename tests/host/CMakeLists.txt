@@ -280,6 +280,24 @@ target_include_directories(test_uart_bridge_transport PRIVATE
 )
 add_test(NAME uart_bridge_transport COMMAND test_uart_bridge_transport)
 
+add_executable(test_debug_uart_transport
+    test_debug_uart_transport.c
+    ../../BSP/transport/debug_uart_transport.c
+)
+target_include_directories(test_debug_uart_transport PRIVATE .)
+add_test(NAME debug_uart_transport COMMAND test_debug_uart_transport)
+
+add_executable(test_motion_trace
+    test_motion_trace.c
+    ../../App/composition/motion_trace.c
+    ../../App/composition/boot_recovery_snapshot.c
+    ../../App/debug/commands/debug_cmd_diagnostics.c
+    ../../App/debug/debug_console_parser.c
+)
+target_include_directories(test_motion_trace PRIVATE
+    ../../App/debug ../../App/debug/commands ../../BSP/motor)
+add_test(NAME motion_trace COMMAND test_motion_trace)
+
 add_executable(test_esp12f_boot_control
     test_esp12f_boot_control.c
     ../../BSP/esp12f/esp12f_boot_control.c

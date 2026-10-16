@@ -9,6 +9,7 @@
 #include "platform_time.h"
 #include "uart_bridge_transport.h"
 #include "usart1_debug_console.h"
+#include "debug_uart_transport.h"
 
 #define ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS 30000U
 
@@ -59,6 +60,7 @@ uint8_t Esp12fFlashBridge_Enable(uint8_t download_mode)
     CommandManagement_ClearAll();
     Usart1DebugConsole_RevokeMaintenanceAuthorization();
     MotionControl_CancelTestMode();
+    DebugUartTransport_Suspend();
     UartBridgeTransport_Stop();
     Usart1DebugConsole_ClearRxBuffer();
 

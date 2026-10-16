@@ -42,6 +42,8 @@ extern "C"
     flash_param_status_t
     FlashParam_DecodeBundle(const uint8_t *image, size_t image_size, flash_param_bundle_t *bundle, uint32_t *sequence);
     flash_param_status_t FlashParam_LoadBundle(flash_param_bundle_t *bundle);
+    flash_param_status_t
+    FlashParam_LoadBundleWithSequence(flash_param_bundle_t *bundle, uint32_t *sequence, uint8_t *sequence_valid);
     flash_param_status_t FlashParam_SaveBundle(const flash_param_bundle_t *bundle);
     flash_param_status_t FlashParam_Load(param_model_t *params);
     flash_param_status_t FlashParam_Save(const param_model_t *params);

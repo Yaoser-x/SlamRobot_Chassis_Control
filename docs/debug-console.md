@@ -53,6 +53,9 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 | `espflash on` | — | 启用 USART1↔USART2 透明烧录桥（下载模式：IO0=0 + 复位） |
 | `espflash off` | — | 关闭烧录桥，ESP12F 正常启动 |
 | `espflash status` | — | 查看桥接统计（收发字节/溢出/错误/自动退出次数） |
+| `debugtx` | — | 异步发送队列长度、高水位、完成字节、忙/错误及丢弃计数 |
+| `trace` | `status\|freeze\|arm\|read N` | 固定容量的控制周期轨迹；冻结且停稳三周期后按索引导出 |
+| `bootcal` | `[loaded\|applied\|params OFFSET]` | 读取自动标定前的恢复快照；偏移须为 32 的倍数 |
 | **`espat on`** | — | 启用 USART1↔USART2 AT 透传桥（正常模式：IO0=1 + 复位） |
 | **`espat off`** | — | 关闭 AT 透传桥，ESP12F 正常启动 |
 | **`i2cscan`** | — | 扫描 I2C1 总线（地址 1–127），列出所有 ACK 响应的器件 |
@@ -60,6 +63,11 @@ USART1（PB6 TX / PB7 RX），`115200 8N1`。由 `debugTask`（osPriorityBelowNo
 ---
 
 ## 3. 周期 CSV 日志 (`log`)
+
+USART1 控制台采用 4096 字节静态异步队列和最多 128 字节的中断发送片段。队列不足时整次
+写入丢弃并计数，不等待串口；密集采集应检查 `debugtx`，有丢弃的记录不能当作完整证据。
+进入 ESP 桥时先中止并清空调试 TX；成功切换不再打印提示，避免文本混入二进制透传。
+新诊断接口的字段、冻结规则和逐块导出方式见 [运动与启动诊断](motion-diagnostics.md)。
 
 ### 3.1 基本用法
 

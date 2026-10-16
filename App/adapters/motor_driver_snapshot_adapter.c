@@ -3,6 +3,7 @@
 #include "motor_driver.h"
 #include "motor_hardware_layout.h"
 #include "platform_critical.h"
+#include "wheel_encoder_driver.h"
 
 static uint32_t motor_fact_generation;
 
@@ -37,11 +38,15 @@ uint32_t AppMotorDriverAdapter_GetSnapshot(app_motor_driver_snapshot_t *snapshot
     }
     MotorDriver_GetState(&state);
     *snapshot = (app_motor_driver_snapshot_t){0};
+    WheelEncoderDriver_GetHardwareCounts(snapshot->raw_encoder_count);
     for (uint8_t index = 0U; index < MOTOR_ID_COUNT; ++index)
     {
         snapshot->requested_pwm[index] = state.requested_pwm[index];
         snapshot->applied_pwm[index]   = state.applied_pwm[index];
         snapshot->effective_pwm[index] = state.effective_pwm[index];
+        snapshot->phase[index]         = (uint8_t)state.phase[index];
+        snapshot->ph_dir[index]        = state.current_ph_dir[index];
+        snapshot->pending_dir[index]   = state.pending_dir[index];
         snapshot->fault_active[index]  = state.fault_active[index];
         if (MotorHardwareLayout_MotorEnabled((motor_id_t)index) != 0U)
         {

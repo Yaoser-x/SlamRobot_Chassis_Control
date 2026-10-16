@@ -74,20 +74,8 @@ uint8_t DebugCmdEsp12f_TryHandle(const char *line, uint8_t *debug_velocity_enabl
         uint8_t download = (strcmp(line, "espflash on") == 0) ? 1U : 0U;
         DebugTelemetry_Stop();
         *debug_velocity_enabled = 0U;
-        if (Esp12fFlashBridge_Enable(download) != 0U)
-        {
-            if (download != 0U)
-            {
-                ESP_LOG("INFO", "esp12f flash bridge on: close this terminal and use esptool/Arduino at 115200");
-            }
-            else
-            {
-                ESP_LOG("INFO",
-                        "AT passthrough active: IO0=high, USART1<->USART2 bridge open.\r\n"
-                        "Type AT commands directly. Auto-exit after 30s idle.");
-            }
-        }
-        else
+        /* Successful handoff is silent: USART1 now belongs exclusively to the bridge. */
+        if (Esp12fFlashBridge_Enable(download) == 0U)
         {
             ESP_LOG("ERR", "%s failed: UART RX not ready", download != 0U ? "esp12f flash bridge" : "AT passthrough");
         }

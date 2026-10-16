@@ -61,6 +61,8 @@ set(F407_APP_SOURCES
     App/composition/system_publish_snapshot_collector.c
     App/composition/control_mode_coordinator.c
     App/composition/chassis_runtime_coordinator.c
+    App/composition/motion_trace.c
+    App/composition/boot_recovery_snapshot.c
     App/composition/safety_workflow_coordinator.c
     App/composition/motion_maintenance_orchestrator.c
     App/composition/watchdog_completion_gate.c
@@ -100,6 +102,7 @@ set(F407_APP_ADAPTER_SOURCES
     App/debug/commands/debug_cmd_line.c
     App/debug/commands/debug_cmd_current.c
     App/debug/commands/debug_cmd_system.c
+    App/debug/commands/debug_cmd_diagnostics.c
     App/debug/commands/debug_system_status.c
     App/debug/commands/debug_rtos_report.c
     App/debug/telemetry/debug_telemetry.c

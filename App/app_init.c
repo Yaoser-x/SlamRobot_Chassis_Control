@@ -24,12 +24,15 @@
 #include "host_communication_service.h"
 #include "firmware_identity_provider.h"
 #include "usart1_debug_console.h"
+#include "boot_recovery_snapshot.h"
 
 uint8_t App_InitWithConfig(const robot_config_t *config)
 {
     param_model_t                     params;
     parameter_management_status_t     parameter_status;
     uint8_t                           params_loaded;
+    uint8_t                           calibration_applied = 0U;
+    imu_calibration_t                 boot_calibration    = {0};
     communication_firmware_identity_t firmware_identity;
     if (RobotConfig_Validate(config) == 0U)
     {
@@ -73,12 +76,20 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
         uint8_t calibration_valid = ParameterImuCalibration_Validate(&parameter_status.imu_calibration);
         if (calibration_valid != 0U)
         {
-            (void)StateEstimation_ApplyImuCalibration(&parameter_status.imu_calibration);
+            calibration_applied = (StateEstimation_ApplyImuCalibration(&parameter_status.imu_calibration)
+                                   == (uint8_t)STATE_ESTIMATION_RESULT_OK)
+                                      ? 1U
+                                      : 0U;
         }
         if (params.current_zero_valid != 0U)
         {
             PowerManagement_ApplyCurrentZeroCalibration(params.current_zero_raw);
         }
+    }
+    {
+        uint8_t read_ok =
+            (StateEstimation_GetImuCalibration(&boot_calibration) == (uint8_t)STATE_ESTIMATION_RESULT_OK) ? 1U : 0U;
+        AppBootRecoverySnapshot_Capture(&parameter_status, &boot_calibration, calibration_applied, read_ok);
     }
     if (StateEstimation_ArmAutomaticImuCalibration() != (uint8_t)STATE_ESTIMATION_RESULT_OK)
     {

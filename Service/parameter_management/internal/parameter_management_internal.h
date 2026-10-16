@@ -4,7 +4,9 @@
 #include "flash_parameter_image.h"
 
 /** Internal persistence bridge; not available to other capabilities. */
-void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle);
+void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle,
+                                             uint32_t                    sequence,
+                                             uint8_t                     sequence_valid);
 void ParameterManagementInternal_BuildBundle(flash_param_bundle_t *bundle);
 void ParameterManagementInternal_CommitPersisted(const param_model_t *params);
 

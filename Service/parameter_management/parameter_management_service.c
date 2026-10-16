@@ -16,6 +16,8 @@ static uint32_t          persisted_parameter_crc32;
 static uint32_t          parameter_diagnostic_flags;
 static imu_calibration_t current_imu_calibration;
 static uint8_t           current_flash_loaded;
+static uint32_t          loaded_sequence;
+static uint8_t           loaded_sequence_valid;
 static uint8_t           persisted_model_valid;
 static uint8_t           persist_current_zero;
 
@@ -80,6 +82,8 @@ uint8_t ParameterManagement_Init(const parameter_management_config_t *config)
     current_params             = effective;
     current_imu_calibration    = (imu_calibration_t){0};
     current_flash_loaded       = 0U;
+    loaded_sequence            = 0UL;
+    loaded_sequence_valid      = 0U;
     persisted_model_valid      = 0U;
     persisted_parameter_crc32  = 0UL;
     persist_current_zero       = config->persist_current_zero;
@@ -170,6 +174,8 @@ uint32_t ParameterManagement_GetStatus(parameter_management_status_t *status)
     status->diagnostic_flags          = parameter_diagnostic_flags;
     status->initialized               = current_params_initialized;
     status->flash_loaded              = current_flash_loaded;
+    status->loaded_sequence           = loaded_sequence;
+    status->loaded_sequence_valid     = loaded_sequence_valid;
     status->persisted_model_valid     = persisted_model_valid;
     status->imu_calibration           = current_imu_calibration;
     PlatformCritical_Exit(primask);
@@ -211,7 +217,9 @@ void ParameterManagement_SetCurrentZeroPersistence(uint8_t enabled)
     PlatformCritical_Exit(primask);
 }
 
-void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle)
+void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle,
+                                             uint32_t                    sequence,
+                                             uint8_t                     sequence_valid)
 {
     param_model_t effective;
     uint32_t      diagnostic_flags;
@@ -231,6 +239,8 @@ void ParameterManagementInternal_ApplyLoaded(const flash_param_bundle_t *bundle)
     current_params            = effective;
     current_imu_calibration   = bundle->imu_calibration;
     current_flash_loaded      = 1U;
+    loaded_sequence           = sequence;
+    loaded_sequence_valid     = sequence_valid;
     persisted_model_valid     = 1U;
     persisted_parameter_crc32 = persisted_crc;
     current_params_generation++;
@@ -286,13 +296,25 @@ uint8_t ParameterManagement_Validate(const param_model_t *params)
         return 0U;
     }
     const float scalars[] = {
-        params->max_linear_mps, params->max_angular_rps, params->speed_ramp_mps2,
-        params->angular_ramp_rps2, params->wheel_radius_m, params->track_width_m,
-        params->pid_integral_limit, params->line_kp, params->line_kd, params->line_speed_mps,
-        params->line_slowdown_gain, params->straight_wheel_coupling_gain, params->straight_heading_kp,
-        params->straight_trim_forward_015_mps, params->straight_trim_forward_030_mps,
-        params->straight_trim_reverse_015_mps, params->straight_trim_reverse_030_mps,
-        params->straight_heading_ki, params->straight_heading_integral_limit_deg_s,
+        params->max_linear_mps,
+        params->max_angular_rps,
+        params->speed_ramp_mps2,
+        params->angular_ramp_rps2,
+        params->wheel_radius_m,
+        params->track_width_m,
+        params->pid_integral_limit,
+        params->line_kp,
+        params->line_kd,
+        params->line_speed_mps,
+        params->line_slowdown_gain,
+        params->straight_wheel_coupling_gain,
+        params->straight_heading_kp,
+        params->straight_trim_forward_015_mps,
+        params->straight_trim_forward_030_mps,
+        params->straight_trim_reverse_015_mps,
+        params->straight_trim_reverse_030_mps,
+        params->straight_heading_ki,
+        params->straight_heading_integral_limit_deg_s,
         params->straight_max_speed_mps,
     };
     for (size_t index = 0U; index < sizeof(scalars) / sizeof(scalars[0]); ++index)
@@ -548,10 +570,10 @@ uint8_t ParameterManagement_GetInt(const param_model_t *params, const char *name
     switch (binding.kind)
     {
         case PARAM_INT_KIND_U8:
-            *value = (int32_t) * (uint8_t *)binding.field;
+            *value = (int32_t)*(uint8_t *)binding.field;
             return 1U;
         case PARAM_INT_KIND_U16:
-            *value = (int32_t) * (uint16_t *)binding.field;
+            *value = (int32_t)*(uint16_t *)binding.field;
             return 1U;
         default:
             return 0U;

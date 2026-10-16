@@ -57,6 +57,12 @@ flash_param_status_t FlashParam_LoadBundle(flash_param_bundle_t *bundle)
     return FlashParamSlots_LoadBundle(bundle);
 }
 
+flash_param_status_t
+FlashParam_LoadBundleWithSequence(flash_param_bundle_t *bundle, uint32_t *sequence, uint8_t *sequence_valid)
+{
+    return FlashParamSlots_LoadBundleWithSequence(bundle, sequence, sequence_valid);
+}
+
 flash_param_status_t FlashParam_SaveBundle(const flash_param_bundle_t *bundle)
 {
     return FlashParamSlots_SaveBundle(bundle);

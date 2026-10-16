@@ -288,7 +288,7 @@ static void test_crc_valid_nonfinite_payload_is_rejected(void)
 {
     flash_param_bundle_t bundle;
     flash_param_bundle_t decoded;
-    flash_param_image_t image;
+    flash_param_image_t  image;
     make_bundle(&bundle, 0.5f);
     require_int(FlashParam_EncodeBundle(&bundle, 1UL, (uint8_t *)&image, sizeof(image)) == FLASH_PARAM_STATUS_OK,
                 "valid baseline Flash image encodes");
@@ -315,6 +315,23 @@ int main(int argc, char **argv)
     test_legacy_v1_migrates_to_sector6();
     test_flash_maintenance_brackets_watchdog_on_all_paths();
     test_crc_valid_nonfinite_payload_is_rejected();
+    {
+        flash_param_bundle_t bundle;
+        flash_param_bundle_t loaded;
+        uint32_t             sequence = 99UL;
+        uint8_t              valid    = 1U;
+        FlashParamHost_Reset();
+        require_int(FlashParam_LoadBundleWithSequence(&loaded, &sequence, &valid) != FLASH_PARAM_STATUS_OK,
+                    "empty storage has no restored sequence");
+        require_int(sequence == 0UL && valid == 0U, "failed load resets sequence metadata");
+        make_bundle(&bundle, 0.5f);
+        require_int(FlashParam_SaveBundle(&bundle) == FLASH_PARAM_STATUS_OK, "metadata baseline saves");
+        require_int(FlashParam_LoadBundleWithSequence(&loaded, &sequence, &valid) == FLASH_PARAM_STATUS_OK,
+                    "committed bundle loads with metadata");
+        require_int(sequence == 1UL && valid == 1U, "actual newest slot sequence is returned");
+        require_int(memcmp(&bundle.imu_calibration, &loaded.imu_calibration, sizeof(bundle.imu_calibration)) == 0,
+                    "metadata load preserves all calibration bytes");
+    }
 
     (void)printf("PASS: flash param host tests\n");
     return 0;

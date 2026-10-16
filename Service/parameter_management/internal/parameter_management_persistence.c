@@ -6,12 +6,14 @@
 uint8_t ParameterManagement_Load(void)
 {
     flash_param_bundle_t bundle;
+    uint32_t             sequence       = 0UL;
+    uint8_t              sequence_valid = 0U;
 
-    if (ParamPersistence_Load(&bundle) != FLASH_PARAM_STATUS_OK)
+    if (ParamPersistence_LoadWithSequence(&bundle, &sequence, &sequence_valid) != FLASH_PARAM_STATUS_OK)
     {
         return 0U;
     }
-    ParameterManagementInternal_ApplyLoaded(&bundle);
+    ParameterManagementInternal_ApplyLoaded(&bundle, sequence, sequence_valid);
     return 1U;
 }
 

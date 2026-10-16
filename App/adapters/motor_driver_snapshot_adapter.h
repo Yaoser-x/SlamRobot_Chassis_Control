@@ -10,6 +10,10 @@ typedef struct
     int16_t  requested_pwm[APP_MOTOR_DRIVER_COUNT];
     int16_t  applied_pwm[APP_MOTOR_DRIVER_COUNT];
     int16_t  effective_pwm[APP_MOTOR_DRIVER_COUNT];
+    uint32_t raw_encoder_count[APP_MOTOR_DRIVER_COUNT];
+    uint8_t  phase[APP_MOTOR_DRIVER_COUNT];
+    int8_t   ph_dir[APP_MOTOR_DRIVER_COUNT];
+    int8_t   pending_dir[APP_MOTOR_DRIVER_COUNT];
     uint8_t  fault_active[APP_MOTOR_DRIVER_COUNT];
     uint8_t  tim1_break_latched;
     uint8_t  enabled_mask;

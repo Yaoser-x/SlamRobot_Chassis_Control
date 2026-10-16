@@ -44,7 +44,7 @@ static flash_param_status_t            fake_persistence_save_status;
 static flash_param_status_t            fake_persistence_load_status = FLASH_PARAM_STATUS_EMPTY;
 static flash_param_bundle_t            fake_persistence_load_bundle;
 static app_motion_maintenance_result_t fake_maintenance_result;
-static uint32_t                       stationary_maintenance_attempts;
+static uint32_t                        stationary_maintenance_attempts;
 
 static void require_int(int condition, const char *message)
 {
@@ -387,12 +387,15 @@ flash_param_status_t ParamPersistence_Save(const flash_param_bundle_t *bundle)
     return fake_persistence_save_status;
 }
 
-flash_param_status_t ParamPersistence_Load(flash_param_bundle_t *bundle)
+flash_param_status_t
+ParamPersistence_LoadWithSequence(flash_param_bundle_t *bundle, uint32_t *sequence, uint8_t *sequence_valid)
 {
     record_external_call();
     if (fake_persistence_load_status == FLASH_PARAM_STATUS_OK)
     {
-        *bundle = fake_persistence_load_bundle;
+        *bundle         = fake_persistence_load_bundle;
+        *sequence       = 37UL;
+        *sequence_valid = 1U;
     }
     return fake_persistence_load_status;
 }
@@ -448,6 +451,8 @@ static void test_parameter_normalization_and_effective_identity(void)
     require_int(ParameterManagement_Load() != 0U, "valid schema-4 model loads");
     require_int(persistence_save_count == 0UL, "load normalization does not write Flash");
     (void)ParameterManagement_GetStatus(&status);
+    require_int(status.loaded_sequence == 37UL && status.loaded_sequence_valid != 0U,
+                "validated load publishes its actual slot sequence");
     require_int(status.persisted_model_valid != 0U && status.persisted_parameter_crc32 == raw_crc,
                 "persisted CRC identifies the validated raw model");
     require_int(status.effective_parameter_crc32 == ParameterManagement_GetIdentityCrc32(),
@@ -702,9 +707,9 @@ static void test_factory_reset_persists_before_publishing_defaults(void)
 
 static void test_imu_autosave_defers_busy_acquisition_with_backoff(void)
 {
-    persistence_save_count = 0UL;
+    persistence_save_count          = 0UL;
     stationary_maintenance_attempts = 0UL;
-    fake_maintenance_result = APP_MOTION_MAINTENANCE_NOT_STATIONARY;
+    fake_maintenance_result         = APP_MOTION_MAINTENANCE_NOT_STATIONARY;
     ImuCalibrationOrchestrator_Init(1U, 0U);
     run_stationary_auto_calibration(13000U);
     ImuCalibrationOrchestrator_ProcessPersistence(15000U);

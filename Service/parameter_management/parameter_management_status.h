@@ -19,6 +19,8 @@ typedef struct
     uint32_t          diagnostic_flags;
     uint8_t           initialized;
     uint8_t           flash_loaded;
+    uint32_t          loaded_sequence;
+    uint8_t           loaded_sequence_valid;
     uint8_t           persisted_model_valid;
     imu_calibration_t imu_calibration;
 } parameter_management_status_t;

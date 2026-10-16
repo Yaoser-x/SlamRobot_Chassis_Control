@@ -16,6 +16,7 @@
 #include "debug_cmd_line.h"
 #include "debug_cmd_param.h"
 #include "debug_cmd_system.h"
+#include "debug_cmd_diagnostics.h"
 #include "debug_system_status.h"
 #include "esp12f_flash_bridge.h"
 #include "platform_reset_trace.h"
@@ -92,6 +93,10 @@ static uint8_t DebugConsole_MotorTestAllowed(void)
 
 static void DebugConsole_HandleLine(char *line)
 {
+    if (DebugCmdDiagnostics_TryHandle(line) != 0U)
+    {
+        return;
+    }
     if (DebugCmdSystem_TryHandle(line) != 0U)
     {
         return;
@@ -263,6 +268,7 @@ void DebugConsole_RunTask(void *argument)
         }
 
         DebugConsole_PollRx();
+        DebugUartTransport_ProcessTx();
 
         if (debug_velocity_enabled != 0U && debug_velocity_generation != CommandManagement_GetMotionRevokeGeneration())
         {

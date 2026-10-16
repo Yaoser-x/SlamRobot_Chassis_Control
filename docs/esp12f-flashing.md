@@ -26,7 +26,7 @@ STM32 同时控制 ESP12F 的 `EN`、`RST`、`IO0` 引脚，管理启动模式�
    espflash on
    ```
 
-   提示 `"esp12f flash bridge on: close this terminal..."`
+   成功交接后调试 TX 静默并清空待发送文本，不再打印成功提示；桥接启动失败才打印错误。
 
 2. **立即关闭串口终端**，释放 STM32 USART1 对应的 COM 端口。
 

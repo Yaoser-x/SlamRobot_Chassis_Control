@@ -18,6 +18,13 @@ static uint32_t                        download_boot_count;
 static uint32_t                        debug_restart_count;
 static uint32_t                        esp_restart_count;
 static uint32_t                        fake_now_ms;
+static uint8_t                         debug_suspended;
+
+void DebugUartTransport_Suspend(void)
+{
+    assert(transport_state.active == 0U);
+    debug_suspended = 1U;
+}
 
 app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
 {
@@ -41,6 +48,7 @@ void Usart1DebugConsole_ClearRxBuffer(void)
 }
 void Usart1DebugConsole_RestartRx(void)
 {
+    debug_suspended = 0U;
     debug_restart_count++;
 }
 void WirelessCommunication_RestartRx(void)
@@ -69,6 +77,7 @@ void UartBridgeTransport_Init(void)
 }
 uint8_t UartBridgeTransport_Start(uint32_t initial_activity_ms)
 {
+    assert(debug_suspended != 0U);
     transport_state.active           = transport_start_ok;
     transport_state.last_activity_ms = initial_activity_ms;
     return transport_start_ok;
@@ -104,6 +113,7 @@ static void ResetFakes(void)
     debug_restart_count   = 0U;
     esp_restart_count     = 0U;
     fake_now_ms           = 1000U;
+    debug_suspended       = 0U;
     Esp12fFlashBridge_Init();
 }
 

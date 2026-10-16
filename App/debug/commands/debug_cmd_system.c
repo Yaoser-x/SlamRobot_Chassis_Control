@@ -8,6 +8,7 @@
 #include "debug_rtos_report.h"
 #include "debug_system_status.h"
 #include "debug_telemetry.h"
+#include "debug_uart_transport.h"
 #include "i2c_bus_diagnostic.h"
 #include "parameter_management_service.h"
 
@@ -20,6 +21,31 @@
 static void DebugConsole_PrintHelp(void);
 static void DebugConsole_PrintVersion(void);
 static void DebugConsole_PrintConfigExport(void);
+
+static debug_cmd_result_t DebugConsole_CommandTx(const debug_cmd_context_t *context, int argc, const char *const argv[])
+{
+    char                   tx[256];
+    debug_uart_tx_status_t status;
+    (void)context;
+    (void)argv;
+    if (argc != 1)
+        return DEBUG_CMD_NOT_SUPPORTED;
+    DebugUartTransport_GetTxStatus(&status);
+    (void)snprintf(tx,
+                   sizeof(tx),
+                   "DEBUGTX queued=%u high_water=%u completed=%lu dropped_bytes=%lu dropped_writes=%lu busy=%lu "
+                   "errors=%lu suspended=%u\r\n",
+                   status.queued_bytes,
+                   status.high_water_bytes,
+                   (unsigned long)status.completed_bytes,
+                   (unsigned long)status.dropped_bytes,
+                   (unsigned long)status.dropped_writes,
+                   (unsigned long)status.busy_count,
+                   (unsigned long)status.error_count,
+                   status.suspended);
+    DebugConsoleWriter_Write(tx);
+    return DEBUG_CMD_OK;
+}
 
 static debug_cmd_result_t
 DebugConsole_CommandHelp(const debug_cmd_context_t *context, int argc, const char *const argv[])
@@ -141,6 +167,7 @@ static const debug_command_t debug_system_commands[] = {
     {"version", "version", "show firmware identity", 0U, DebugConsole_CommandVersion},
     {"config", "config export", "export runtime configuration", 0U, DebugConsole_CommandConfig},
     {"rtos", "rtos", "show RTOS task state", 0U, DebugConsole_CommandRtos},
+    {"debugtx", "debugtx", "show bounded console TX counters", 0U, DebugConsole_CommandTx},
     {"header", "header", "show telemetry CSV header", 0U, DebugConsole_CommandHeader},
     {"i2cscan", "i2cscan", "scan I2C1 addresses", 0U, DebugConsole_CommandI2cScan},
 };
@@ -171,6 +198,8 @@ static void DebugConsole_PrintHelp(void)
     DebugConsoleWriter_Write("\r\nF407 V2 debug console\r\n"
                              "help/status/header\r\n"
                              "version | config export\r\n"
+                             "debugtx | trace status|arm|freeze|read N\r\n"
+                             "bootcal [loaded|applied|params OFFSET] (32-byte hex chunks)\r\n"
                              "get <param> | set <param> <value> | set save | set reset\r\n"
                              "set motor_dir m1|m2|m3|m4 -1|1\r\n"
                              "set encoder_dir m1|m2|m3|m4 -1|1\r\n"

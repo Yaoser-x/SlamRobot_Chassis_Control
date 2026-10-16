@@ -4,6 +4,7 @@
 #include "host_communication_service.h"
 #include "uart_bridge_transport.h"
 #include "usart1_debug_console.h"
+#include "debug_uart_transport.h"
 #include "usart.h"
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -43,6 +44,10 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     else if (huart == &huart4)
     {
         LineSensorDriver_OnTxCplt();
+    }
+    else if (huart == &huart1)
+    {
+        DebugUartTransport_OnTxComplete();
     }
     else if (huart == &huart3)
     {

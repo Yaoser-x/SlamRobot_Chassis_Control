@@ -43,7 +43,10 @@ typedef enum
 } HAL_StatusTypeDef;
 #endif
 
-#define RESET               0U
+#define RESET       0U
+#define USART1_IRQn 37
+void HAL_NVIC_SetPriority(int irq, uint32_t preempt, uint32_t sub);
+void HAL_NVIC_EnableIRQ(int irq);
 
 #define GPIO_PIN_0          ((uint16_t)0x0001)
 #define GPIO_PIN_1          ((uint16_t)0x0002)
