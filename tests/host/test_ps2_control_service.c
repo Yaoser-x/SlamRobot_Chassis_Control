@@ -342,6 +342,162 @@ static void test_manual_threshold_uses_normalized_axis_magnitude(void)
                 "small angular input uses the same normalized threshold as linear input");
 }
 
+static void test_slow_gear_scales_sticks_and_dpad(void)
+{
+    ps2_control_service_state_t state;
+    const uint8_t dpad_buttons[] = {0x10U, 0x40U, 0x80U, 0x20U};
+    const float linear[] = {0.1f, -0.1f, 0.0f, 0.0f};
+    const float angular[] = {0.0f, 0.0f, 1.0f, -1.0f};
+
+    for (uint8_t index = 0U; index < 4U; ++index)
+    {
+        reset_fake();
+        fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+        if (index < 2U)
+        {
+            fake_sample.left_y = (index == 0U) ? 0U : 255U;
+        }
+        else
+        {
+            fake_sample.right_x = (index == 2U) ? 0U : 255U;
+        }
+        Ps2ControlService_Update();
+        Ps2ControlService_GetState(&state);
+        require_int(state.slow_mode_active != 0U && state.drive_enabled != 0U,
+                    "SELECT enables low gear without suppressing normalized manual intent");
+        require_int(fabsf(last_command.linear_x - linear[index]) < 0.00001f
+                        && fabsf(last_command.angular_z - angular[index]) < 0.00001f,
+                    "low gear scales both directions of the driving sticks");
+        require_int(state.linear_x == last_command.linear_x && state.angular_z == last_command.angular_z,
+                    "status reports the scaled command submitted for arbitration");
+
+        reset_fake();
+        fake_sample.btn1 = (uint8_t)(PS2_SLOW_BUTTON_MASK | dpad_buttons[index]);
+        Ps2ControlService_Update();
+        require_int(fabsf(last_command.linear_x - linear[index]) < 0.00001f
+                        && fabsf(last_command.angular_z - angular[index]) < 0.00001f,
+                    "low gear applies to each D-pad direction");
+    }
+}
+
+static void test_slow_gear_release_requires_neutral(void)
+{
+    ps2_control_service_state_t state;
+
+    reset_fake();
+    fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.slow_mode_active != 0U && state.drive_enabled == 0U
+                    && state.stick_max_normalized == 0.0f && last_command.angular_z == 0.0f,
+                "SELECT alone does not create motion or stick takeover");
+
+    fake_sample.right_x = 255U;
+    Ps2ControlService_Update();
+    fake_sample.btn1 = 0U;
+    Ps2ControlService_Update();
+    require_int(last_command.angular_z == -1.0f, "releasing SELECT while steering cannot increase speed");
+
+    fake_sample.right_x = PS2_AXIS_CENTER;
+    fake_sample.btn1 = 0x20U;
+    Ps2ControlService_Update();
+    require_int(last_command.angular_z == -1.0f, "held D-pad retains low gear after SELECT release");
+
+    fake_sample.btn1 = 0U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.slow_mode_active == 0U && last_command.angular_z == 0.0f,
+                "neutral releases the low gear latch while stopped");
+    fake_sample.right_x = 255U;
+    Ps2ControlService_Update();
+    require_int(last_command.angular_z == -PS2_ANGULAR_MAX_RPS, "a new ordinary input retains the existing speed cap");
+}
+
+static void test_slow_gear_keeps_safety_gates_and_macro_speed(void)
+{
+    ps2_control_service_state_t state;
+    float ordinary_macro_speed;
+
+    for (uint8_t gate = 0U; gate < 3U; ++gate)
+    {
+        reset_fake();
+        fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+        fake_sample.left_y = 0U;
+        fake_estop = (gate == 0U) ? 1U : 0U;
+        fake_fault_stop = (gate == 1U) ? 1U : 0U;
+        fake_maintenance = (gate == 2U) ? 1U : 0U;
+        Ps2ControlService_Update();
+        Ps2ControlService_GetState(&state);
+        require_int(state.drive_enabled == 0U && last_command.linear_x == 0.0f && last_command.angular_z == 0.0f,
+                    "low gear cannot bypass ESTOP, fault or maintenance gates");
+    }
+
+    reset_fake();
+    fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+    fake_sample.left_y = 0U;
+    fake_maintenance_crosses_on_query = 1U;
+    Ps2ControlService_Update();
+    require_int(set_command_count == 0UL, "low gear cannot revive an input across a revoke generation");
+
+    reset_fake();
+    fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+    fake_sample.left_y = 0U;
+    Ps2ControlService_Update();
+    fake_read_ok = 0U;
+    for (uint8_t failure = 0U; failure < PS2_OFFLINE_FAIL_LIMIT; ++failure)
+    {
+        Ps2ControlService_Update();
+    }
+    Ps2ControlService_GetState(&state);
+    require_int(state.online == 0U && state.drive_enabled == 0U && state.slow_mode_active == 0U
+                    && state.linear_x == 0.0f && clear_source_count != 0UL,
+                "confirmed disconnect releases the low gear command and state");
+
+    reset_fake();
+    fake_sample.btn2 = PS2_MACRO_L1_MASK;
+    Ps2ControlService_Update();
+    ordinary_macro_speed = last_command.angular_z;
+    reset_fake();
+    fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+    fake_sample.btn2 = PS2_MACRO_L1_MASK;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.heading_active != 0U && ordinary_macro_speed > 0.0f
+                    && last_command.angular_z == ordinary_macro_speed,
+                "SELECT does not change the separate heading controller or its timeout model");
+}
+
+static void test_slow_gear_config_validation_and_opt_out(void)
+{
+    teleoperation_config_t config = {
+        .linear_max_mps = 0.5f, .angular_max_rps = 5.0f,
+        .dpad_linear_mps = 0.5f, .dpad_angular_rps = 5.0f, .manual_cancel_threshold = 0.12f,
+        .heading_quarter_timeout_ms = 6000U, .heading_full_timeout_ms = 20000U,
+        .heading_imu_fresh_ms = 50U, .idle_release_ms = 2000U,
+        .axis_center = 128, .axis_deadzone = 18, .offline_fail_limit = 3U,
+    };
+    const float invalid_scales[] = {NAN, INFINITY, -0.1f, 1.1f};
+
+    reset_fake();
+    require_int(Teleoperation_Init(&config) != 0U, "zero-initialized extension preserves ordinary mapping");
+    fake_sample.btn1 = PS2_SLOW_BUTTON_MASK;
+    fake_sample.right_x = 255U;
+    Ps2ControlService_Update();
+    require_int(last_command.angular_z == -PS2_ANGULAR_MAX_RPS, "disabled slow gear ignores SELECT");
+
+    config.slow_button_mask = PS2_SLOW_BUTTON_MASK;
+    require_int(Teleoperation_ValidateConfig(&config) == 0U, "enabled slow gear requires a positive scale");
+    for (uint8_t index = 0U; index < sizeof(invalid_scales) / sizeof(invalid_scales[0]); ++index)
+    {
+        config.slow_speed_scale = invalid_scales[index];
+        require_int(Teleoperation_Init(&config) == 0U, "invalid slow gear scale is rejected before initialization");
+    }
+    config.slow_speed_scale = PS2_SLOW_SPEED_SCALE;
+    require_int(Teleoperation_ValidateConfig(&config) != 0U, "default low gear configuration is valid");
+    config.linear_max_mps = NAN;
+    require_int(Teleoperation_ValidateConfig(&config) == 0U, "normalized threshold requires a finite positive speed cap");
+}
+
 static void test_heading_button_mapping(void)
 {
     ps2_control_service_state_t state;
@@ -591,6 +747,10 @@ int main(void)
     test_center_submits_zero_or_yields_to_line();
     test_neutral_rearm_is_qualified_once_per_observation();
     test_manual_threshold_uses_normalized_axis_magnitude();
+    test_slow_gear_scales_sticks_and_dpad();
+    test_slow_gear_release_requires_neutral();
+    test_slow_gear_keeps_safety_gates_and_macro_speed();
+    test_slow_gear_config_validation_and_opt_out();
     test_heading_button_mapping();
     test_heading_imu_freshness_uses_hal_tick_epoch();
     test_imu_gate_and_runtime_cancel();

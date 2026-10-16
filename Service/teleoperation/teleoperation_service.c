@@ -29,6 +29,7 @@ static uint32_t                      heading_imu_sample_generation;
 static float                         heading_angular_command;
 static uint32_t                      ps2_idle_start_ms;
 static uint8_t                       ps2_neutral_rearm_count;
+static uint8_t                       slow_mode_latched;
 
 #define PS2_HEADING_CRITICAL_QUALITY_MASK                                                                              \
     (STATE_ESTIMATION_IMU_QUALITY_SPI_ERROR | STATE_ESTIMATION_IMU_QUALITY_INIT_FAILED                                 \
@@ -293,7 +294,11 @@ static uint8_t Ps2ControlService_StartMacro(uint8_t                             
 
 uint8_t Teleoperation_ValidateConfig(const teleoperation_config_t *config)
 {
-    if (config == 0 || config->linear_max_mps <= 0.0f || config->angular_max_rps <= 0.0f || config->axis_deadzone < 0
+    if (config == 0 || !(config->linear_max_mps > 0.0f && config->linear_max_mps <= 10.0f)
+        || !(config->angular_max_rps > 0.0f && config->angular_max_rps <= 50.0f)
+        || !(config->manual_cancel_threshold >= 0.0f && config->manual_cancel_threshold <= 1.0f)
+        || !(config->slow_speed_scale >= 0.0f && config->slow_speed_scale <= 1.0f)
+        || (config->slow_button_mask != 0U && config->slow_speed_scale == 0.0f) || config->axis_deadzone < 0
         || config->axis_deadzone >= 127 || config->offline_fail_limit == 0U || config->heading_imu_fresh_ms == 0UL
         || config->idle_release_ms == 0UL)
     {
@@ -317,6 +322,7 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     last_btn2                 = 0U;
     consecutive_read_failures = 0U;
     ps2_neutral_rearm_count   = 0U;
+    slow_mode_latched         = 0U;
     RelativeHeadingController_Init(&heading_control);
     heading_button            = 0U;
     heading_zero_pending      = 0U;
@@ -370,6 +376,8 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
 
         next_state.online        = 0U;
         next_state.drive_enabled = 0U;
+        slow_mode_latched        = 0U;
+        next_state.slow_mode_active = 0U;
         if (heading_control.active != 0U)
         {
             RelativeHeadingController_Cancel(&heading_control, RELATIVE_YAW_END_CONTROLLER_OFFLINE);
@@ -436,6 +444,16 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     angular_z = Ps2ControlService_ClampFloat(angular_z, teleoperation_config.angular_max_rps);
 
     manual_active = Ps2ControlService_ManualInputActive(linear_x, angular_z);
+    if ((sample.btn1 & teleoperation_config.slow_button_mask) != 0U)
+    {
+        slow_mode_latched = 1U;
+    }
+    else if (Ps2ControlService_MaxStickMagnitude(&sample) == 0.0f
+             && (sample.btn1 & (PS2_DPAD_UP_MASK | PS2_DPAD_RIGHT_MASK | PS2_DPAD_DOWN_MASK | PS2_DPAD_LEFT_MASK)) == 0U)
+    {
+        /* Releasing SELECT while steering must not restore normal speed. */
+        slow_mode_latched = 0U;
+    }
     if (CommandManagement_IsMotionGateOpen() != 0U && manual_active == 0U && macro_pressed == 0U)
     {
         if (ps2_neutral_rearm_count < 4U)
@@ -532,6 +550,11 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
         linear_x  = 0.0f;
         angular_z = 0.0f;
     }
+    else if (manual_active != 0U && slow_mode_latched != 0U)
+    {
+        linear_x  *= teleoperation_config.slow_speed_scale;
+        angular_z *= teleoperation_config.slow_speed_scale;
+    }
 
     Ps2ControlService_CopyState(&next_state, &ps2_state);
     next_state.rx_ok_count++;
@@ -562,6 +585,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     next_state.angular_z               = angular_z;
     next_state.stick_max_normalized    = Ps2ControlService_MaxStickMagnitude(&sample);
     next_state.line_tracking_enabled   = line_tracking_enabled;
+    next_state.slow_mode_active        = slow_mode_latched;
     next_state.generation++;
     Ps2ControlService_CopyState(&ps2_state, &next_state);
 

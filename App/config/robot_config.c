@@ -88,6 +88,8 @@ static const robot_config_t robot_default_config = {
             .line_toggle_mask           = 0x10U,
             .linecal_floor_mask         = 0x80U,
             .linecal_line_mask          = 0x20U,
+            .slow_speed_scale           = 0.2f,
+            .slow_button_mask           = 0x01U,
         },
     .control_mode =
         {
@@ -289,6 +291,11 @@ static uint8_t RobotConfig_TeleoperationValid(const teleoperation_config_t *conf
         return 0U;
     }
     if (!(config->manual_cancel_threshold >= 0.0f) || config->manual_cancel_threshold > 1.0f)
+    {
+        return 0U;
+    }
+    if (!(config->slow_speed_scale >= 0.0f && config->slow_speed_scale <= 1.0f)
+        || (config->slow_button_mask != 0U && config->slow_speed_scale == 0.0f))
     {
         return 0U;
     }

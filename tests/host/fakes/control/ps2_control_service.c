@@ -26,6 +26,8 @@ void Ps2ControlService_Init(void)
         .line_toggle_mask           = PS2_LINE_TOGGLE_MASK,
         .linecal_floor_mask         = PS2_LINECAL_FLOOR_MASK,
         .linecal_line_mask          = PS2_LINECAL_LINE_MASK,
+        .slow_speed_scale           = PS2_SLOW_SPEED_SCALE,
+        .slow_button_mask           = PS2_SLOW_BUTTON_MASK,
     };
 
     (void)Teleoperation_Init(&config);

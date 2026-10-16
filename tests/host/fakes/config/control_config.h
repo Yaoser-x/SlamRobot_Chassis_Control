@@ -64,6 +64,8 @@ extern "C"
 #define PS2_AXIS_CENTER                        128
 #define PS2_AXIS_DEADZONE                      18
 #define PS2_MANUAL_CANCEL_THRESHOLD            0.12f
+#define PS2_SLOW_SPEED_SCALE                   0.2f
+#define PS2_SLOW_BUTTON_MASK                   0x01U
 #define PS2_HEADING_QUARTER_TIMEOUT_MS         6000U
 #define PS2_HEADING_FULL_TIMEOUT_MS            20000U
 #define PS2_HEADING_IMU_FRESH_MS               50U

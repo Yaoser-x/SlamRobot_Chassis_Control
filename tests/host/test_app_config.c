@@ -4,6 +4,7 @@
 #include "control_config.h"
 
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,6 +59,8 @@ static void test_default_matches_beta4_constants(void)
 
     require_int(config->teleoperation.linear_max_mps == PS2_LINEAR_MAX_MPS, "PS2 linear max");
     require_int(config->teleoperation.angular_max_rps == PS2_ANGULAR_MAX_RPS, "PS2 angular max");
+    require_int(config->teleoperation.slow_speed_scale == PS2_SLOW_SPEED_SCALE, "PS2 slow gear scale");
+    require_int(config->teleoperation.slow_button_mask == PS2_SLOW_BUTTON_MASK, "PS2 SELECT button mapping");
     require_int(config->teleoperation.idle_release_ms == PS2_IDLE_RELEASE_MS, "PS2 idle release");
     require_int(config->teleoperation.heading_imu_fresh_ms == PS2_HEADING_IMU_FRESH_MS, "PS2 IMU freshness");
     require_int(config->control_mode.takeover_enter_threshold == 0.15f, "PS2 takeover enter threshold");
@@ -149,6 +152,20 @@ static void test_validation_accepts_legal_config_and_rejects_illegal(void)
     copy                             = *RobotConfig_GetDefault();
     copy.teleoperation.axis_deadzone = 127;
     require_int(RobotConfig_Validate(&copy) == 0U, "axis deadzone == 127 is rejected by Service");
+
+    {
+        const float invalid_scales[] = {NAN, INFINITY, -0.1f, 0.0f, 1.1f};
+        for (uint8_t index = 0U; index < sizeof(invalid_scales) / sizeof(invalid_scales[0]); ++index)
+        {
+            copy = *RobotConfig_GetDefault();
+            copy.teleoperation.slow_speed_scale = invalid_scales[index];
+            require_int(RobotConfig_Validate(&copy) == 0U, "invalid enabled slow gear is rejected by App");
+        }
+        copy = *RobotConfig_GetDefault();
+        copy.teleoperation.slow_button_mask = 0U;
+        copy.teleoperation.slow_speed_scale = 0.0f;
+        require_int(RobotConfig_Validate(&copy) == 1U, "slow gear can be explicitly disabled");
+    }
 
     copy                                      = *RobotConfig_GetDefault();
     copy.control_mode.takeover_exit_threshold = copy.control_mode.takeover_enter_threshold;

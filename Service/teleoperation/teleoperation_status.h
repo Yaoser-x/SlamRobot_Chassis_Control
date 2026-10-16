@@ -39,6 +39,7 @@ typedef struct
     uint32_t rx_fail_count;
     uint8_t  line_tracking_enabled;
     uint32_t generation;
+    uint8_t  slow_mode_active;
 } teleoperation_status_t;
 
 #endif /* TELEOPERATION_STATUS_H */

@@ -62,6 +62,11 @@ AUTO/LINE 模式，机器人仍为 STANDBY；远程或巡线重新完成 neutral
 LINE 恢复事件只提交 neutral；必须等待之后独立的显式 LINE enable 操作，不能在同一恢复事件中自动 active。
 每个 Safety 周期先把 capability source mask 与 mode mask 求交并原子应用，再执行命令选择；能力恢复仍保留 rearm。
 
+手动激活/取消宏的 `manual_cancel_threshold=0.12` 使用死区后的归一化幅度，不能直接与 m/s 或 rad/s 比较。
+按住 SELECT（btn1 `0x01`）将手动摇杆与 D-pad 的线、角速度乘以 `0.2`；普通档上限和接管判定保持原配置。
+SELECT 松开后，只有全部摇杆回中且 D-pad 松开才退出低速档，防止偏转中速度跳升；SELECT 单独不触发运动。
+航向宏保持独立控制器与超时，不作缩放。该档位不改变安全门、来源 rearm 或掉线后的 DISABLED 规则。
+
 ---
 
 ## 3. 安全语义

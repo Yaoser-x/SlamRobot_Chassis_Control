@@ -25,6 +25,8 @@ typedef struct
     uint8_t  line_toggle_mask;
     uint8_t  linecal_floor_mask;
     uint8_t  linecal_line_mask;
+    float    slow_speed_scale; /* Manual velocity scale, 0..1; zero is legal only when disabled. */
+    uint8_t  slow_button_mask; /* btn1 mask; zero disables the slow gear. */
 } teleoperation_config_t;
 
 #endif

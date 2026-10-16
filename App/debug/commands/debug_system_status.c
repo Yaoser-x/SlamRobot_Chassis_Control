@@ -372,7 +372,7 @@ void DebugSystemStatus_Print(void)
     (void)snprintf(tx,
                    sizeof(tx),
                    "PS2 online=%u btn=%02X/%02X edge=%02X axis=%u,%u,%u,%u heading=%u button=%02X target=%.1f "
-                   "accum=%.1f end=%u imu_age=%lu gate=0x%08lX\r\n",
+                   "accum=%.1f end=%u imu_age=%lu gate=0x%08lX slow=%u\r\n",
                    ps2_state.online,
                    ps2_state.btn1,
                    ps2_state.btn2,
@@ -387,7 +387,8 @@ void DebugSystemStatus_Print(void)
                    ps2_state.heading_accumulated_deg,
                    ps2_state.heading_end_reason,
                    (unsigned long)ps2_state.imu_age_ms,
-                   (unsigned long)ps2_state.heading_gate_flags);
+                   (unsigned long)ps2_state.heading_gate_flags,
+                   ps2_state.slow_mode_active);
     DebugConsoleWriter_Write(tx);
     DebugSystemStatus_PrintResetTrace();
 }
