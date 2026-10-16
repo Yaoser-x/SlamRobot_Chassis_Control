@@ -20,6 +20,13 @@ void Task_Esp12f(void *argument)
 
         PlatformResetTrace_TaskHeartbeat(RESET_TRACE_TASK_ESP, now_ms);
         Esp12fFlashBridge_Update(now_ms);
+        if (Esp12fFlashBridge_IsActive() != 0U)
+        {
+            SystemMonitoring_DelayUntil(SYSTEM_MONITORING_TASK_ESP,
+                                        &next_wake,
+                                        RobotConfig_GetDefault()->tasks[APP_TASK_ESP12F].period_ms);
+            continue;
+        }
         (void)SystemPublishSnapshot_Get(&publish_model);
         WirelessCommunication_Update(&publish_model);
         for (;;)

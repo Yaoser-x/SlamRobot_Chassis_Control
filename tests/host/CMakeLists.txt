@@ -311,10 +311,12 @@ add_test(NAME esp12f_boot_control COMMAND test_esp12f_boot_control)
 add_executable(test_esp12f_flash_bridge
     test_esp12f_flash_bridge.c
     ../../App/adapters/esp12f_flash_bridge.c
+    ../../App/tasks/task_esp12f.c
 )
 target_include_directories(test_esp12f_flash_bridge PRIVATE
     ../../App/debug
     ../../App/adapters
+    ../../App/tasks
     ../../BSP/esp12f
     ../../BSP/motor
     ../../BSP/transport

@@ -116,6 +116,7 @@ esptool.py --chip esp8266 --port COMx --baud 115200 flash_id
 - USART1 收到的**每个字节**直接转发到 USART2（ESP12F），不做任何解析
 - USART2 收到的**每个字节**直接转发到 USART1（PC），不做任何修改
 - ESP12F 正常网页控制协议暂停，status 帧不会混入烧录数据
+- ESP 任务只推进透传和原有周期心跳；透传持有串口时不运行普通无线发送及操作请求分发，空闲退出后恢复
 - 调试台命令台暂停（`Esp12fFlashBridge_IsActive()` 检查），避免二进制烧录流被误解析
 - 30 秒无任何串口活动 → **自动退出** bridge
 - 维护锁持续持有，UPPER/PS2/ESP/LINE/DEBUG 新命令均被拒绝；正常退出或启动失败都会释放锁

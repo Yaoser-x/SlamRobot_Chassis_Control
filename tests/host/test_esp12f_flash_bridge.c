@@ -4,8 +4,15 @@
 #include "motion_control_service.h"
 #include "motion_control_maintenance.h"
 #include "uart_bridge_transport.h"
+#include "app_tasks.h"
+#include "robot_config.h"
+#include "remote_operation_orchestrator.h"
+#include "system_monitoring_service.h"
+#include "system_publish_snapshot_service.h"
+#include "platform_reset_trace.h"
 
 #include <assert.h>
+#include <setjmp.h>
 #include <stdio.h>
 
 static app_motion_maintenance_result_t maintenance_result;
@@ -19,6 +26,66 @@ static uint32_t                        debug_restart_count;
 static uint32_t                        esp_restart_count;
 static uint32_t                        fake_now_ms;
 static uint8_t                         debug_suspended;
+static jmp_buf                        task_exit;
+static unsigned                       task_cycles;
+static unsigned                       normal_updates;
+static unsigned                       operation_polls;
+
+uint32_t PlatformTime_TaskNowMs(void)
+{
+    return fake_now_ms;
+}
+void PlatformResetTrace_TaskHeartbeat(reset_trace_task_t task, uint32_t tick_ms)
+{
+    assert(task == RESET_TRACE_TASK_ESP && tick_ms == fake_now_ms);
+}
+const robot_config_t *RobotConfig_GetDefault(void)
+{
+    static const robot_config_t config = {.tasks = {[APP_TASK_ESP12F] = {.period_ms = 10U}}};
+    return &config;
+}
+void SystemMonitoring_DelayUntil(system_monitoring_task_id_t task, uint32_t *next, uint32_t period)
+{
+    assert(task == SYSTEM_MONITORING_TASK_ESP && period == 10U);
+    *next += period;
+    fake_now_ms += period;
+    if (--task_cycles == 0U)
+        longjmp(task_exit, 1);
+}
+uint32_t SystemPublishSnapshot_Get(communication_publish_model_t *out)
+{
+    assert(Esp12fFlashBridge_IsActive() == 0U);
+    *out = (communication_publish_model_t){0};
+    return 1U;
+}
+void WirelessCommunication_Update(const communication_publish_model_t *snapshot)
+{
+    assert(snapshot != 0 && Esp12fFlashBridge_IsActive() == 0U);
+    normal_updates++;
+}
+uint8_t WirelessCommunication_TakeOperation(uint32_t now, communication_operation_request_t *request)
+{
+    assert(now == fake_now_ms && request != 0 && Esp12fFlashBridge_IsActive() == 0U);
+    operation_polls++;
+    return 0U;
+}
+communication_operation_stage_t RemoteOperationOrchestrator_Dispatch(const communication_operation_request_t *request,
+                                                                   uint32_t *detail)
+{
+    (void)request;
+    (void)detail;
+    assert(0 && "No operation was offered");
+    return (communication_operation_stage_t)0U;
+}
+void WirelessCommunication_CompleteOperation(const communication_operation_request_t *request,
+                                             communication_operation_stage_t stage, uint32_t detail, uint32_t now)
+{
+    (void)request;
+    (void)stage;
+    (void)detail;
+    (void)now;
+    assert(0 && "No operation was dispatched");
+}
 
 void DebugUartTransport_Suspend(void)
 {
@@ -114,7 +181,30 @@ static void ResetFakes(void)
     esp_restart_count     = 0U;
     fake_now_ms           = 1000U;
     debug_suspended       = 0U;
+    normal_updates        = 0U;
+    operation_polls       = 0U;
     Esp12fFlashBridge_Init();
+}
+
+static void RunThreeTaskCycles(void)
+{
+    task_cycles = 3U;
+    if (setjmp(task_exit) == 0)
+        Task_Esp12f(0);
+}
+
+static void TestTaskRespectsBridgeOwnershipAndResumes(void)
+{
+    ResetFakes();
+    assert(Esp12fFlashBridge_Enable(1U) != 0U);
+    RunThreeTaskCycles();
+    assert(normal_updates == 0U && operation_polls == 0U);
+    assert(Esp12fFlashBridge_IsActive() != 0U);
+    transport_idle_ms = 30000U;
+    RunThreeTaskCycles();
+    assert(Esp12fFlashBridge_IsActive() == 0U && debug_suspended == 0U);
+    assert(normal_updates == 3U && operation_polls == 3U);
+    assert(maintenance_end_count == 1U && normal_boot_count == 1U);
 }
 
 static void TestDownloadAndAutoExit(void)
@@ -155,6 +245,7 @@ int main(void)
 {
     TestDownloadAndAutoExit();
     TestStartFailureAndMaintenanceRejection();
+    TestTaskRespectsBridgeOwnershipAndResumes();
     puts("PASS: ESP12F flash bridge policy");
     return 0;
 }
