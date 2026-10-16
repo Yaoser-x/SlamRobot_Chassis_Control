@@ -30,6 +30,7 @@ extern "C"
     void StateEstimation_ServiceImuCalibration(uint32_t now_ms, uint8_t stationary);
     /** Arm automatic gyro calibration while retaining the applied calibration as the initial bias model. */
     uint8_t StateEstimation_ArmAutomaticImuCalibration(void);
+    /** Boolean result: nonzero when applied, zero when invalid or busy. */
     uint8_t StateEstimation_ApplyImuCalibration(const imu_calibration_t *calibration);
     uint8_t StateEstimation_ClearImuCalibration(void);
     uint8_t StateEstimation_BeginImuCalibration(uint16_t samples, uint16_t interval_ms);

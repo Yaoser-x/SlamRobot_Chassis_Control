@@ -262,7 +262,7 @@ void ImuEstimationPipeline_ServiceCalibration(uint32_t                       now
 uint8_t ImuEstimationPipeline_ApplyCalibration(const imu_calibration_t *calibration)
 {
     record_external_call();
-    if (calibration == 0)
+    if (ParameterImuCalibration_Validate(calibration) == 0U)
     {
         return 0U;
     }
@@ -576,6 +576,10 @@ static void test_state_estimation_owns_imu_lifecycle(void)
     ParameterImuCalibration_Default(&calibration);
     calibration.gyro_bias_dps[0] = 9.0f;
     calibration.crc              = ParameterImuCalibration_Crc(&calibration);
+    calibration.crc ^= 1U;
+    require_int(StateEstimation_ApplyImuCalibration(&calibration) == 0U,
+                "calibration application rejects invalid data with boolean false");
+    calibration.crc ^= 1U;
     require_int(StateEstimation_ApplyImuCalibration(&calibration) != 0U,
                 "service accepts the historical boot calibration");
     generation = StateEstimation_GetImu(&status);
