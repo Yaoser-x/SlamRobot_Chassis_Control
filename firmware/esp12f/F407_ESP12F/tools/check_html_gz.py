@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -50,6 +51,9 @@ def main() -> int:
     source = extract_html(sketch_text)
     compressed = extract_gzip(HEADER_PATH.read_text(encoding="utf-8"))
     decoded = gzip.decompress(compressed)
+    if f'#define HTML_PAGE_SHA256 "{hashlib.sha256(source).hexdigest()}"' not in HEADER_PATH.read_text(encoding="utf-8"):
+        print("generated asset identity does not match HTML_PAGE", file=sys.stderr)
+        return 1
 
     if decoded != source:
         print("generated gzip asset does not match HTML_PAGE", file=sys.stderr)

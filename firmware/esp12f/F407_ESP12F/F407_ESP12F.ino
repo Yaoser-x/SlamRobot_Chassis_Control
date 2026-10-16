@@ -24,6 +24,7 @@
 #include "esp_frame_parser.h"
 
 #include "html_page_gz.h"
+#include "esp_build_identity.h"
 
 // ============================================================================
 // 1. 配置常量
@@ -753,9 +754,10 @@ static void pushTelemetry() {
   g_last_telem_ms = now;
 
   unsigned long status_age_ms = statusAgeMs(now);
-  char json[768];
+  char json[1536];
   snprintf(json, sizeof(json),
-    "{\"pv\":%u,\"flags\":%u,\"src\":%u,\"mask\":%u,\"valid\":%u,"
+    "{\"esp_commit\":\"%s\",\"esp_dirty\":%u,\"esp_identity_valid\":%u,\"web_sha256\":\"%s\","
+    "\"pv\":%u,\"flags\":%u,\"src\":%u,\"mask\":%u,\"valid\":%u,"
     "\"err\":%lu,\"lat\":%lu,\"bat\":%.2f,"
     "\"spd\":[%.2f,%.2f,%.2f,%.2f],"
     "\"enc\":[%ld,%ld,%ld,%ld],"
@@ -765,6 +767,7 @@ static void pushTelemetry() {
     "\"lx\":%.2f,\"az\":%.2f,\"online\":%s,\"status_age_ms\":%lu,"
     "\"diag\":{\"schema\":%u,\"post_done\":%u,\"imu_status\":%u,\"post\":%lu,\"adc_invalid\":%lu,\"task_timeout\":%u,\"imu_quality\":%lu,\"reset\":%lu,\"uptime_ms\":%lu},"
     "\"rx\":{\"timeout\":%lu,\"crc\":%lu,\"length\":%lu,\"uart\":%lu}}",
+    ESP_BUILD_GIT_SHA, ESP_BUILD_DIRTY, ESP_BUILD_IDENTITY_VALID, HTML_PAGE_SHA256,
     g_status.protocol_version, g_status.status_flags, g_status.control_source,
     g_status.motor_enabled_mask, g_status.motor_speed_valid_mask,
     (unsigned long)g_status.error_flags,
@@ -838,9 +841,10 @@ static void handleConfigure() {
 static void handleStatus() {
   unsigned long now = millis();
   unsigned long status_age_ms = statusAgeMs(now);
-  char json[768];
+  char json[1536];
   snprintf(json, sizeof(json),
-    "{\"pv\":%u,\"bat\":%.2f,\"err\":%lu,\"lat\":%lu,\"src\":%u,"
+    "{\"esp_commit\":\"%s\",\"esp_dirty\":%u,\"esp_identity_valid\":%u,\"web_sha256\":\"%s\","
+    "\"pv\":%u,\"bat\":%.2f,\"err\":%lu,\"lat\":%lu,\"src\":%u,"
     "\"wifi\":\"%s\",\"ws\":%d,\"online\":%s,\"status_age_ms\":%lu,"
     "\"diag_schema\":%u,\"post_done\":%u,\"imu_status\":%u,\"post_errors\":%lu,"
     "\"adc_invalid\":%lu,\"task_timeout\":%u,\"imu_quality\":%lu,\"reset_reason\":%lu,\"uptime_ms\":%lu,"
@@ -848,6 +852,7 @@ static void handleStatus() {
     "\"hello_valid\":%s,\"capabilities\":%lu,\"hardware_revision\":%lu,\"parameter_crc32\":%lu,"
     "\"handshake_ready\":%s,\"session_low\":%lu,\"session_high\":%lu,\"sequence\":%lu,"
     "\"received_sequence\":%lu,\"applied_sequence\":%lu,\"ack_flags\":%u,\"reject_reason\":%u}",
+    ESP_BUILD_GIT_SHA, ESP_BUILD_DIRTY, ESP_BUILD_IDENTITY_VALID, HTML_PAGE_SHA256,
     g_status.protocol_version,
     (float)g_status.battery_mv / 1000.0f,
     (unsigned long)g_status.error_flags,

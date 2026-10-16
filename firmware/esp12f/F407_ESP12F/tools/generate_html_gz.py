@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 from pathlib import Path
 
 from check_html_gz import HEADER_PATH, SKETCH_PATH, extract_html
 
 
-def format_header(compressed: bytes) -> str:
+def format_header(compressed: bytes, source_sha256: str) -> str:
     rows = []
     for offset in range(0, len(compressed), 16):
         chunk = compressed[offset : offset + 16]
@@ -22,6 +23,7 @@ def format_header(compressed: bytes) -> str:
             "",
             "#include <stddef.h>",
             "#include <stdint.h>",
+            f'#define HTML_PAGE_SHA256 "{source_sha256}"',
             "",
             "static const uint8_t HTML_PAGE_GZ[] PROGMEM = {",
             *rows,
@@ -38,7 +40,7 @@ def format_header(compressed: bytes) -> str:
 def main() -> None:
     source = extract_html(SKETCH_PATH.read_text(encoding="utf-8"))
     compressed = gzip.compress(source, compresslevel=9, mtime=0)
-    HEADER_PATH.write_text(format_header(compressed), encoding="utf-8", newline="\n")
+    HEADER_PATH.write_text(format_header(compressed, hashlib.sha256(source).hexdigest()), encoding="utf-8", newline="\n")
     print(f"generated {HEADER_PATH.name}: html={len(source)} gzip={len(compressed)}")
 
 

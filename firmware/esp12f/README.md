@@ -41,6 +41,18 @@
 
 ## 编译
 
+锁定版本时使用 `python F407_ESP12F/tools/build_firmware.py --output <新的输出目录>`，可通过
+`--config-file` 指定已安装工具链的 Arduino CLI 配置。脚本只编译，输出镜像、大小、SHA256、FQBN、
+源码提交和 dirty 标志；不会上传、复位或修改 Wi-Fi 配置。默认使用 3.1.2 Generic 的 `4M`、DOUT、
+26 MHz 和 `ResetMethod=ck`（不拉 DTR，脚本本身不调用 upload）。实际 Flash 容量须在烧录前另行读取。
+
+`/status` 和 WebSocket 遥测兼容增加 `esp_commit`、`esp_dirty`、`esp_identity_valid` 与 `web_sha256`。
+网页哈希由生成器从完整 HTML 源码计算。绕过此脚本编译且没有生成身份头时，版本明确为 unknown、
+dirty、identity invalid；不能将其视为版本冻结。板上旧固件没有这些字段时仍须标记版本未知。
+
+`espflash on` 成功后不再打印调试成功文本，防止污染透传。更新前备份全 Flash，确认容量和镜像布局，
+仅写应用区域并读回校验；不擦除 Wi-Fi EEPROM、RF 校准和芯片保留扇区。STM32/ESP 分别申请烧录许可。
+
 网页源码保留在 `F407_ESP12F.ino` 的 `HTML_PAGE` 块中。修改页面后，先重新生成
 gzip 资源并验证：
 
