@@ -162,7 +162,11 @@ target_include_directories(test_esp_link_policy PRIVATE
     ../../firmware/esp12f/F407_ESP12F)
 add_test(NAME esp_link_policy COMMAND test_esp_link_policy)
 
-add_executable(test_esp_frame_parser test_esp_frame_parser.c)
+add_executable(test_esp_frame_parser
+    test_esp_frame_parser.c
+    ../../Service/communication/internal/telemetry_encoder.c
+    ../../Service/communication/internal/robot_link_protocol.c
+)
 target_include_directories(test_esp_frame_parser PRIVATE
     ../../firmware/esp12f/F407_ESP12F)
 add_test(NAME esp_frame_parser COMMAND test_esp_frame_parser)

@@ -219,10 +219,10 @@ static bool saveConfig(const String &password) {
 // 3. robot_link_protocol 帧协议（与 STM32 一致）
 // ============================================================================
 
-#define PROTO_HEAD_0        0xA5
-#define PROTO_HEAD_1        0x5A
+#define PROTO_HEAD_0        ESP_FRAME_HEAD0
+#define PROTO_HEAD_1        ESP_FRAME_HEAD1
 #define PROTO_VERSION       3
-#define PROTO_MAX_PAYLOAD   99
+#define PROTO_MAX_PAYLOAD   ESP_FRAME_MAX_PAYLOAD
 #define CMD_SET_VELOCITY    0x01
 #define CMD_ESTOP           0x02
 #define CMD_LINE_CTRL       0x03

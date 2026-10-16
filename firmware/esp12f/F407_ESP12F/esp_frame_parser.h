@@ -4,9 +4,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#define ESP_FRAME_HEAD0 0xAAU
-#define ESP_FRAME_HEAD1 0x55U
-#define ESP_FRAME_MAX_PAYLOAD 64U
+#define ESP_FRAME_HEAD0 0xA5U
+#define ESP_FRAME_HEAD1 0x5AU
+#define ESP_FRAME_MAX_PAYLOAD 99U
 #define ESP_FRAME_INTERBYTE_TIMEOUT_MS 100UL
 
 typedef enum
