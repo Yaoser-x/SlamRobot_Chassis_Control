@@ -321,6 +321,27 @@ static void test_neutral_rearm_is_qualified_once_per_observation(void)
     require_int(qualify_rearm_count == 1UL, "held neutral qualifies PS2 rearm only once");
 }
 
+static void test_manual_threshold_uses_normalized_axis_magnitude(void)
+{
+    ps2_control_service_state_t state;
+
+    reset_fake();
+    fake_sample.left_y = 90U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.stick_max_normalized > 0.15f, "sample exceeds the normal MANUAL takeover threshold");
+    require_int(state.drive_enabled != 0U && last_command.linear_x > 0.08f && last_command.linear_x < 0.10f,
+                "normalized manual intent remains active below 0.12 m/s");
+    require_int(last_command.angular_z == 0.0f, "linear stick does not fabricate angular intent");
+
+    reset_fake();
+    fake_sample.right_x = 150U;
+    Ps2ControlService_Update();
+    Ps2ControlService_GetState(&state);
+    require_int(state.drive_enabled == 0U && last_command.angular_z == 0.0f,
+                "small angular input uses the same normalized threshold as linear input");
+}
+
 static void test_heading_button_mapping(void)
 {
     ps2_control_service_state_t state;
@@ -569,6 +590,7 @@ int main(void)
 {
     test_center_submits_zero_or_yields_to_line();
     test_neutral_rearm_is_qualified_once_per_observation();
+    test_manual_threshold_uses_normalized_axis_magnitude();
     test_heading_button_mapping();
     test_heading_imu_freshness_uses_hal_tick_epoch();
     test_imu_gate_and_runtime_cancel();

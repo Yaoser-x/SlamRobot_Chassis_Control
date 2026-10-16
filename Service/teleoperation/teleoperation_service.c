@@ -153,8 +153,8 @@ static void Ps2ControlService_ApplySlotIntent(command_intent_kind_t kind, uint32
 
 static uint8_t Ps2ControlService_ManualInputActive(float linear_x, float angular_z)
 {
-    float abs_linear  = (linear_x < 0.0f) ? -linear_x : linear_x;
-    float abs_angular = (angular_z < 0.0f) ? -angular_z : angular_z;
+    float abs_linear  = Ps2ControlService_AbsFloat(linear_x) / teleoperation_config.linear_max_mps;
+    float abs_angular = Ps2ControlService_AbsFloat(angular_z) / teleoperation_config.angular_max_rps;
 
     return (abs_linear > teleoperation_config.manual_cancel_threshold
             || abs_angular > teleoperation_config.manual_cancel_threshold)

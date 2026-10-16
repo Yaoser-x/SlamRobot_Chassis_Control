@@ -10,7 +10,7 @@ typedef struct
     float    angular_max_rps;
     float    dpad_linear_mps;
     float    dpad_angular_rps;
-    float    manual_cancel_threshold;
+    float    manual_cancel_threshold; /* Normalized axis magnitude after deadzone, 0..1. */
     uint32_t heading_quarter_timeout_ms;
     uint32_t heading_full_timeout_ms;
     uint32_t heading_imu_fresh_ms;
