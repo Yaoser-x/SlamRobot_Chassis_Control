@@ -902,6 +902,9 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME analysis_scripts
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_analysis_scripts.py)
 
+add_test(NAME esp_safety_policy
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_esp_safety_policy.py)
+
 add_executable(generate_upper_v3_golden
     generate_upper_v3_golden.c
     ../../Service/communication/internal/robot_link_protocol.c

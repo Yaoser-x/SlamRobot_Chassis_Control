@@ -19,6 +19,55 @@ def section(text: str, start: str, end: str) -> str:
     return text[begin:finish]
 
 
+def ordered(text: str, *markers: str) -> bool:
+    offset = 0
+    for marker in markers:
+        found = text.find(marker, offset)
+        if found < 0:
+            return False
+        offset = found + len(marker)
+    return True
+
+
+def bridge_holds_maintenance(bridge: str) -> bool:
+    restore_services = section(bridge, "static void Esp12fFlashBridge_RestoreServices", "static void Esp12fFlashBridge_BeginRestore")
+    enable = section(bridge, "uint8_t Esp12fFlashBridge_Enable", "void Esp12fFlashBridge_Disable")
+    disable = section(bridge, "void Esp12fFlashBridge_Disable", "uint8_t Esp12fFlashBridge_IsActive")
+    begin_restore = section(bridge, "static void Esp12fFlashBridge_BeginRestore", "void Esp12fFlashBridge_Init")
+    update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_GetState")
+    starting = section(update, "if (bridge_phase == ESP12F_BRIDGE_STARTING)", "if (bridge_phase == ESP12F_BRIDGE_RESTORING)")
+    restoring = section(update, "if (bridge_phase == ESP12F_BRIDGE_RESTORING)", "if (bridge_phase != ESP12F_BRIDGE_FORWARDING)")
+    return (
+        '#include "motion_maintenance_orchestrator.h"' in bridge
+        and "AppMotionMaintenance_End();" in bridge
+        and ordered(enable, "bridge_phase == ESP12F_BRIDGE_RESTORING", "return 0U;",
+                    "bridge_phase != ESP12F_BRIDGE_OFF")
+        and ordered(enable, "AppMotionMaintenance_Begin() != APP_MOTION_MAINTENANCE_OK",
+                    "return 0U;", "bridge_maintenance_lock_held = 1U;",
+                    "bridge_phase = ESP12F_BRIDGE_PREPARING;", "UartBridgeTransport_Stop();",
+                    "Esp12fBootControl_EnterDownload();", "bridge_phase = ESP12F_BRIDGE_STARTING;")
+        and "Esp12fFlashBridge_ReleaseMaintenance();" not in enable
+        and "UartBridgeTransport_Start(" not in enable
+        and ordered(begin_restore, "bridge_phase = ESP12F_BRIDGE_RESTORING;",
+                    "UartBridgeTransport_Stop();", "Esp12fBootControl_EnterNormal();")
+        and "Esp12fFlashBridge_ReleaseMaintenance();" not in begin_restore
+        and ordered(restore_services, "Usart1DebugConsole_RestartRx();",
+                    "WirelessCommunication_RestartRx();")
+        and ordered(disable, "bridge_phase != ESP12F_BRIDGE_RESTORING",
+                    "Esp12fFlashBridge_BeginRestore();")
+        and ordered(starting, "Esp12fBootControl_Update(PlatformTime_NowMs()) != 0U",
+                    "UartBridgeTransport_Start(PlatformTime_NowMs()) != 0U",
+                    "bridge_phase = ESP12F_BRIDGE_FORWARDING;", "else",
+                    "Esp12fFlashBridge_BeginRestore();")
+        and "Esp12fFlashBridge_ReleaseMaintenance();" not in starting
+        and ordered(restoring, "Esp12fBootControl_Update(PlatformTime_NowMs()) != 0U",
+                    "Esp12fFlashBridge_RestoreServices();", "bridge_phase = ESP12F_BRIDGE_OFF;",
+                    "Esp12fFlashBridge_ReleaseMaintenance();")
+        and ordered(update, "idle_ms >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS",
+                    "Esp12fFlashBridge_Disable();")
+    )
+
+
 def main() -> int:
     sketch = SKETCH_PATH.read_text(encoding="utf-8")
     link_policy = (SKETCH_PATH.parent / "esp_link_policy.h").read_text(encoding="utf-8")
@@ -125,26 +174,7 @@ def main() -> int:
     setup_body = section(sketch, "void setup()", "void loop()")
     if "attempt < 3U" not in setup_body or "sendVelocityCommand(0.0f, 0.0f, 0U, false)" not in setup_body:
         errors.append("ESP startup does not send three identical v3 release commands")
-    bridge_enable = section(bridge, "uint8_t Esp12fFlashBridge_Enable", "void Esp12fFlashBridge_Disable")
-    bridge_disable = section(bridge, "void Esp12fFlashBridge_Disable", "uint8_t Esp12fFlashBridge_IsActive")
-    bridge_update = section(bridge, "void Esp12fFlashBridge_Update", "void Esp12fFlashBridge_GetState")
-    bridge_rx_failure = section(bridge_enable, "if (UartBridgeTransport_Start", "return 1U;")
-    begin_index = bridge_enable.find("AppMotionMaintenance_Begin()")
-    active_index = bridge_enable.find("UartBridgeTransport_Start(")
-    failure_end_index = bridge_rx_failure.find("Esp12fFlashBridge_ReleaseMaintenance();")
-    failure_return_index = bridge_rx_failure.find("return 0U;")
-    disable_active_index = bridge_disable.find("UartBridgeTransport_Stop();")
-    disable_end_index = bridge_disable.rfind("Esp12fFlashBridge_ReleaseMaintenance();")
-    idle_condition_index = bridge_update.find("idle_ms >= ESP12F_FLASH_BRIDGE_IDLE_TIMEOUT_MS")
-    idle_disable_index = bridge_update.find("Esp12fFlashBridge_Disable();", idle_condition_index)
-    if ('#include "motion_maintenance_orchestrator.h"' not in bridge or
-            "bridge_maintenance_lock_held" not in bridge or
-            "AppMotionMaintenance_End();" not in bridge or
-            begin_index < 0 or active_index < 0 or begin_index > active_index or
-            failure_end_index < 0 or failure_return_index < 0 or
-            failure_end_index > failure_return_index or
-            disable_active_index < 0 or disable_end_index < disable_active_index or
-            idle_condition_index < 0 or idle_disable_index < idle_condition_index):
+    if not bridge_holds_maintenance(bridge):
         errors.append("ESP bridge does not hold the unified maintenance lock")
     if ("UpperProtocol_ParseVersionedFlag" not in command_router
             or "requested != 0U" not in command_router):
