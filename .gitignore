@@ -1,0 +1,4 @@
+# Host tests and firmware tooling must not dirty the source identity with bytecode.
+__pycache__/
+*.pyc
+*.pyo
