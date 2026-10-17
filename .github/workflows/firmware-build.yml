@@ -204,8 +204,8 @@ jobs:
           arduino-cli lib install WebSockets@2.7.2
       - name: Compile ESP8266 firmware
         run: |
-          python firmware/esp12f/F407_ESP12F/tools/build_firmware.py --output build/esp8266 || {
-            cat build/esp8266/build.log
+          python firmware/esp12f/F407_ESP12F/tools/build_firmware.py --output "${{ runner.temp }}/esp8266" || {
+            test ! -f "${{ runner.temp }}/esp8266/build.log" || cat "${{ runner.temp }}/esp8266/build.log"
             exit 1
           }
       - name: Upload ESP8266 identity and build evidence
@@ -215,9 +215,9 @@ jobs:
           name: esp8266-${{ github.sha }}
           if-no-files-found: warn
           path: |
-            build/esp8266/image/*.bin
-            build/esp8266/manifest.json
-            build/esp8266/build.log
+            ${{ runner.temp }}/esp8266/image/*.bin
+            ${{ runner.temp }}/esp8266/manifest.json
+            ${{ runner.temp }}/esp8266/build.log
       - name: Check ESP safety and embedded page
         run: |
           python firmware/esp12f/F407_ESP12F/tools/check_ap_only.py

@@ -216,12 +216,12 @@ static void test_all_direction_fields_publish_in_one_snapshot(void)
 
 static void test_whole_model_rejects_every_nonfinite_float(void)
 {
+#define FLOAT_FIELD(field) {offsetof(param_model_t, field), 1U}
     const struct
     {
         size_t offset;
         size_t count;
     } fields[] = {
-#define FLOAT_FIELD(field) {offsetof(param_model_t, field), 1U}
         FLOAT_FIELD(max_linear_mps),
         FLOAT_FIELD(max_angular_rps),
         FLOAT_FIELD(speed_ramp_mps2),
