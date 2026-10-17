@@ -104,7 +104,7 @@ ASan/UBSan 61/61 通过；静态栈预算由普通 Host 构建覆盖
 | 产物 | 上传 `firmware-Debug` 和 `firmware-Release` artifacts（含 `.elf`、`.map`、`.hex`、`.bin`） |
 | Host 测试 | 独立 `host-tests` job：配置 → 构建 → `ctest`（当前 62 个 case）→ CubeMX 安全检查 |
 | 架构检查 | `--final` 运行架构、命名和 Service ownership 三项门禁 |
-| 格式检查 | `clang-format --dry-run --Werror` 检查 Algorithm/App/BSP/Platform/Service 与 Host Test C/H |
+| 格式检查 | 固定 `clang-format-18 --dry-run --Werror` 检查 Algorithm/App/BSP/Platform/Service 与 Host Test C/H；其他主版本可能产生不同结果 |
 | 静态分析 | `cppcheck --enable=warning --error-exitcode=1` 检查同一项目自有 C/H 范围 |
 | ESP 固件 | Arduino CLI 固定 ESP8266 Core 3.1.2 与 WebSockets 2.7.2，并运行 AP/安全策略检查 |
 | 内存报告 | `arm-none-eabi-size` 输出 Flash/RAM 使用量到 GitHub Step Summary |
