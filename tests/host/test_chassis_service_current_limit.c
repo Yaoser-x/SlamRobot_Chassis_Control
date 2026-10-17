@@ -457,7 +457,7 @@ static void test_denied_safety_permit_keeps_live_wheel_feedback(void)
 {
     for (uint8_t denial = 0U; denial < 3U; ++denial)
     {
-        static const float measured[3][2] = {{0.03f, 0.02f}, {0.0f, 0.0f}, {-0.01f, 0.015f}};
+        static const float      measured[3][2] = {{0.03f, 0.02f}, {0.0f, 0.0f}, {-0.01f, 0.015f}};
         motion_control_status_t state;
 
         reset_fake_chassis();
@@ -474,9 +474,9 @@ static void test_denied_safety_permit_keeps_live_wheel_feedback(void)
             motion_control_input_t input = make_motion_input(1010U + 10U * sample);
             motion_control_event_t event;
 
-            input.wheel.generation = 2UL + sample;
-            input.wheel.sample_time_ms = input.now_ms;
-            input.wheel.value.last_update_ms = input.now_ms;
+            input.wheel.generation                   = 2UL + sample;
+            input.wheel.sample_time_ms               = input.now_ms;
+            input.wheel.value.last_update_ms         = input.now_ms;
             input.wheel.value.speed_mps[MOTOR_ID_M2] = measured[sample][0];
             input.wheel.value.speed_mps[MOTOR_ID_M3] = measured[sample][1];
             if (denial == 2U)
@@ -487,19 +487,20 @@ static void test_denied_safety_permit_keeps_live_wheel_feedback(void)
             else
             {
                 input.safety_permit.value.base_motion = 0U;
-                input.safety_permit.value.generation = (denial == 1U) ? 2UL : 1UL;
+                input.safety_permit.value.generation  = (denial == 1U) ? 2UL : 1UL;
             }
             MotionControl_StepWithInput(&input, &event);
             (void)MotionControl_GetStatus(&state);
-            require_int(fabsf(state.motor_actual_mps[MOTOR_ID_M2] - measured[sample][0]) < 0.00001f
-                            && fabsf(state.motor_actual_mps[MOTOR_ID_M3] - measured[sample][1]) < 0.00001f,
-                        "revoked, changed and stale permits still publish live coasting, stopped and hand-moved feedback");
+            require_int(
+                fabsf(state.motor_actual_mps[MOTOR_ID_M2] - measured[sample][0]) < 0.00001f
+                    && fabsf(state.motor_actual_mps[MOTOR_ID_M3] - measured[sample][1]) < 0.00001f,
+                "revoked, changed and stale permits still publish live coasting, stopped and hand-moved feedback");
             require_int(fabsf(state.left_actual_mps - measured[sample][0]) < 0.00001f
                             && fabsf(state.right_actual_mps - measured[sample][1]) < 0.00001f,
                         "side observations follow the live wheel measurements while stopped");
             require_int(state.output_enabled == 0U && state.motor_target_mps[MOTOR_ID_M2] == 0.0f
-                            && state.motor_target_mps[MOTOR_ID_M3] == 0.0f
-                            && fake_signed_pwm[MOTOR_ID_M2] == 0 && fake_signed_pwm[MOTOR_ID_M3] == 0,
+                            && state.motor_target_mps[MOTOR_ID_M3] == 0.0f && fake_signed_pwm[MOTOR_ID_M2] == 0
+                            && fake_signed_pwm[MOTOR_ID_M3] == 0,
                         "refreshing observations never grants motor output or restores an old command");
         }
     }
@@ -800,28 +801,36 @@ static void test_straight_reset_paths_clear_observable_state(void)
 static void test_pid_feedforward_model_preserves_speed_cap_and_legacy_outputs(void)
 {
     motion_control_config_t config = {
-        .max_linear_mps = 0.5f, .max_angular_rps = 10.0f, .open_loop_full_mps = 0.5f,
-        .pid_feedforward_full_mps = 0.67f, .pid_correction_limit = 500.0f,
-        .test_mode_lease_ms = 400U, .encoder_feedback_timeout_ms = 150U,
-        .pid_feedback_loss_count = 50U, .pid_enabled = 1U, .wheel_speed_proportional_scale = 1U,
+        .max_linear_mps                 = 0.5f,
+        .max_angular_rps                = 10.0f,
+        .open_loop_full_mps             = 0.5f,
+        .pid_feedforward_full_mps       = 0.67f,
+        .pid_correction_limit           = 500.0f,
+        .test_mode_lease_ms             = 400U,
+        .encoder_feedback_timeout_ms    = 150U,
+        .pid_feedback_loss_count        = 50U,
+        .pid_enabled                    = 1U,
+        .wheel_speed_proportional_scale = 1U,
     };
     wheel_target_planner_t planner;
-    float left = 0.7f;
-    float right = 0.6f;
+    float                  left  = 0.7f;
+    float                  right = 0.6f;
     require_int(MotionControl_ValidateConfig(&config) != 0U, "independent feedforward model validates");
     MotorOutputCoordinator_Init(&config);
     require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 746, "500mm/s no longer implies full PID feedforward");
-    require_int(MotorOutputCoordinator_MpsToPermille(-0.5f) == -746, "reverse feedforward uses the same physical scale");
+    require_int(MotorOutputCoordinator_MpsToPermille(-0.5f) == -746,
+                "reverse feedforward uses the same physical scale");
     WheelTargetPlanner_Init(&planner, &config);
     WheelTargetPlanner_ScaleWheelTargets(&planner, &left, &right);
     require_int(fabsf(left - 0.5f) < 0.0001f && right < 0.5f, "feedforward model does not raise wheel target cap");
     config.pid_enabled = 0U;
     MotorOutputCoordinator_Init(&config);
     require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 1000, "PID-disabled conversion retains legacy scale");
-    config.pid_enabled = 1U;
+    config.pid_enabled              = 1U;
     config.pid_feedforward_full_mps = 0.0f;
     MotorOutputCoordinator_Init(&config);
-    require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 1000, "zero-initialized configurations remain compatible");
+    require_int(MotorOutputCoordinator_MpsToPermille(0.5f) == 1000,
+                "zero-initialized configurations remain compatible");
     config.pid_feedforward_full_mps = NAN;
     require_int(MotionControl_ValidateConfig(&config) == 0U, "nonfinite feedforward model rejected");
     config.pid_feedforward_full_mps = -1.0f;

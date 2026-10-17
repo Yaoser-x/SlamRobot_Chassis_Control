@@ -247,8 +247,7 @@ static void test_stationary_try_rechecks_after_acquisition(void)
     move_after_acquire = 1U;
     require_int(AppMotionMaintenance_TryBeginStationary() == APP_MOTION_MAINTENANCE_NOT_STATIONARY,
                 "background maintenance rejects facts that changed after acquisition");
-    require_int(fake_lock == 0U && fake_mode == CONTROL_MODE_AUTO && end_count == 1UL
-                    && emergency_stop_count == 0UL,
+    require_int(fake_lock == 0U && fake_mode == CONTROL_MODE_AUTO && end_count == 1UL && emergency_stop_count == 0UL,
                 "failed second proof releases ownership before any Flash or output operation");
     reset_fake();
     require_int(AppMotionMaintenance_TryBeginStationary() == APP_MOTION_MAINTENANCE_OK,

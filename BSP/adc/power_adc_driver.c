@@ -550,8 +550,10 @@ void PowerAdcDriver_Update(void)
             right_current_sum += next_state.current_a[i];
         }
         next_state.current_quality_flags[i] = quality_flags;
-        if ((quality_flags & (POWER_ADC_DRIVER_QUALITY_ZERO_UNSTABLE | POWER_ADC_DRIVER_QUALITY_WINDOW_TOO_SMALL
-                              | POWER_ADC_DRIVER_QUALITY_ADC_SATURATED)) != 0UL)
+        if ((quality_flags
+             & (POWER_ADC_DRIVER_QUALITY_ZERO_UNSTABLE | POWER_ADC_DRIVER_QUALITY_WINDOW_TOO_SMALL
+                | POWER_ADC_DRIVER_QUALITY_ADC_SATURATED))
+            != 0UL)
         {
             next_current_control_valid = 0U;
         }

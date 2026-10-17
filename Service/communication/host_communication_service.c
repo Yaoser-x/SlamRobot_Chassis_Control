@@ -236,9 +236,9 @@ static uint8_t HostCommunication_EnqueueTx(const uint8_t      *frame,
 static void HostCommunication_RestartRxDma(uint8_t count_restart)
 {
     HostUartTransport_RestartRx(upper_rx_dma_buffer, UPPER_UART_RX_BUFFER_SIZE);
-    upper_rx_read_pos    = 0U;
-    upper_last_byte_ms   = PlatformTime_TaskNowMs();
-    upper_last_poll_ms   = upper_last_byte_ms;
+    upper_rx_read_pos  = 0U;
+    upper_last_byte_ms = PlatformTime_TaskNowMs();
+    upper_last_poll_ms = upper_last_byte_ms;
     HostCommunication_ResetParser();
     if (count_restart != 0U)
     {

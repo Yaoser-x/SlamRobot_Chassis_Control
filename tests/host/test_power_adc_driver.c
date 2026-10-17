@@ -377,7 +377,9 @@ static void test_load_current_amplitude_is_diagnostic(void)
     require_int(state.invalid_reason_flags == 0UL, "load amplitude is not an acquisition error");
     require_int(state.current_quality_flags[MOTOR_ID_M2] == POWER_ADC_DRIVER_QUALITY_WINDOW_SPIKE,
                 "legacy amplitude diagnostic remains visible");
-    require_close(state.current_peak_a[MOTOR_ID_M3], raw_delta_to_current(860U), 0.001f,
+    require_close(state.current_peak_a[MOTOR_ID_M3],
+                  raw_delta_to_current(860U),
+                  0.001f,
                   "load current peak remains available to diagnostics and protection");
 
     /* A PWM peak above the diagnostic threshold must not revoke a sound window. */
@@ -388,8 +390,7 @@ static void test_load_current_amplitude_is_diagnostic(void)
     PowerAdcDriver_Update();
     PowerAdcDriver_GetState(&state);
     require_int(state.current_control_valid != 0U, "PWM current peak does not invalidate acquisition");
-    require_close(state.current_peak_a[MOTOR_ID_M2], raw_delta_to_current(860U), 0.001f,
-                  "PWM peak is not discarded");
+    require_close(state.current_peak_a[MOTOR_ID_M2], raw_delta_to_current(860U), 0.001f, "PWM peak is not discarded");
 }
 
 static uint8_t current_capability_mask(const power_adc_driver_state_t *adc)
@@ -413,7 +414,7 @@ static uint8_t current_capability_mask(const power_adc_driver_state_t *adc)
 static void test_current_adc_saturation_and_dma_errors_still_block(void)
 {
     power_adc_driver_state_t state;
-    const motor_id_t motors[2] = {MOTOR_ID_M2, MOTOR_ID_M3};
+    const motor_id_t         motors[2] = {MOTOR_ID_M2, MOTOR_ID_M3};
     prepare_calibrated_adc();
     for (uint8_t motor = 0U; motor < 2U; ++motor)
     {
@@ -459,11 +460,11 @@ static void test_current_adc_saturation_and_dma_errors_still_block(void)
 static void test_load_current_preserves_ps2_and_missing_samples_require_rearm(void)
 {
     const command_management_config_t commands = {200U, 500U, 500U, 50U, 2000U, 2000U};
-    const control_mode_config_t mode = {0.15f, 0.10f, 2000U, 3U};
-    teleoperation_status_t stick = {.online = 1U, .sample_valid = 1U, .stick_max_normalized = 0.7f};
-    command_velocity_t command = {.linear_x = 0.35f, .enable = 1U, .source = COMMAND_SOURCE_PS2};
-    power_adc_driver_state_t state;
-    uint32_t generation;
+    const control_mode_config_t       mode     = {0.15f, 0.10f, 2000U, 3U};
+    teleoperation_status_t            stick    = {.online = 1U, .sample_valid = 1U, .stick_max_normalized = 0.7f};
+    command_velocity_t                command  = {.linear_x = 0.35f, .enable = 1U, .source = COMMAND_SOURCE_PS2};
+    power_adc_driver_state_t          state;
+    uint32_t                          generation;
 
     prepare_calibrated_adc();
     require_int(CommandManagement_Init(&commands) != 0U, "command service initializes");
@@ -487,7 +488,7 @@ static void test_load_current_preserves_ps2_and_missing_samples_require_rearm(vo
                     "high current does not clear the active PS2 slot");
         require_int(CommandManagement_GetMotionRevokeGeneration() == generation,
                     "high current does not generate a motion revoke");
-        command.linear_x = -command.linear_x;
+        command.linear_x     = -command.linear_x;
         command.timestamp_ms = fake_tick;
         require_int(CommandManagement_Apply(&command).outcome == COMMAND_OUTCOME_ACTIVE_ACCEPTED,
                     "forward and reverse remain accepted above amplitude diagnostic threshold");

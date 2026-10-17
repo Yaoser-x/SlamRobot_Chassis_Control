@@ -203,9 +203,11 @@ void LineFollowing_Update(void)
     if (enabled == 0U)
     {
         /* Sensor availability is a device fact, including while tracking is disabled. */
-        next_state.sensor_valid = (sensor.valid != 0U
-                                   && (uint32_t)(PlatformTime_TaskNowMs() - sensor.timestamp_ms)
-                                          <= g_line_config.sensor_timeout_ms) ? 1U : 0U;
+        next_state.sensor_valid =
+            (sensor.valid != 0U
+             && (uint32_t)(PlatformTime_TaskNowMs() - sensor.timestamp_ms) <= g_line_config.sensor_timeout_ms)
+                ? 1U
+                : 0U;
         (void)LineFollowing_Publish(&next_state, control_generation);
         return;
     }

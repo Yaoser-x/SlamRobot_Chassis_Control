@@ -76,9 +76,8 @@ uint8_t App_InitWithConfig(const robot_config_t *config)
         uint8_t calibration_valid = ParameterImuCalibration_Validate(&parameter_status.imu_calibration);
         if (calibration_valid != 0U)
         {
-            calibration_applied = (StateEstimation_ApplyImuCalibration(&parameter_status.imu_calibration) != 0U)
-                                      ? 1U
-                                      : 0U;
+            calibration_applied =
+                (StateEstimation_ApplyImuCalibration(&parameter_status.imu_calibration) != 0U) ? 1U : 0U;
         }
         if (params.current_zero_valid != 0U)
         {

@@ -287,8 +287,11 @@ static uint8_t Ps2ControlService_StartMacro(uint8_t                             
     }
     heading_imu_sample_generation = imu_sample_generation;
     /* The starting sample predates the macro; compute the initial command without integrating it. */
-    (void)RelativeHeadingController_Update(&heading_control, imu_state->yaw_deg, 0.0f,
-                                           control_now_ms, &heading_angular_command);
+    (void)RelativeHeadingController_Update(&heading_control,
+                                           imu_state->yaw_deg,
+                                           0.0f,
+                                           control_now_ms,
+                                           &heading_angular_command);
     return 1U;
 }
 
@@ -324,11 +327,11 @@ uint8_t Teleoperation_Init(const teleoperation_config_t *config)
     ps2_neutral_rearm_count   = 0U;
     slow_mode_latched         = 0U;
     RelativeHeadingController_Init(&heading_control);
-    heading_button            = 0U;
-    heading_zero_pending      = 0U;
+    heading_button                = 0U;
+    heading_zero_pending          = 0U;
     heading_imu_sample_generation = 0UL;
-    heading_angular_command   = 0.0f;
-    heading_motion_generation = CommandManagement_GetMotionRevokeGeneration();
+    heading_angular_command       = 0.0f;
+    heading_motion_generation     = CommandManagement_GetMotionRevokeGeneration();
 
     Ps2ControllerDriver_Init();
     ps2_state.cmd_dat_swapped = 0U;
@@ -341,7 +344,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     ps2_controller_driver_sample_t sample;
     ps2_control_service_state_t    next_state;
     state_estimation_imu_status_t  imu_state;
-    uint32_t                      imu_sample_generation;
+    uint32_t                       imu_sample_generation;
     float                          linear_x  = 0.0f;
     float                          angular_z = 0.0f;
     uint8_t                        pressed_btn2;
@@ -374,9 +377,9 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
             return;
         }
 
-        next_state.online        = 0U;
-        next_state.drive_enabled = 0U;
-        slow_mode_latched        = 0U;
+        next_state.online           = 0U;
+        next_state.drive_enabled    = 0U;
+        slow_mode_latched           = 0U;
         next_state.slow_mode_active = 0U;
         if (heading_control.active != 0U)
         {
@@ -400,8 +403,8 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     }
     consecutive_read_failures = 0U;
     input_revoked             = (input_generation != CommandManagement_GetMotionRevokeGeneration()) ? 1U : 0U;
-    uint32_t imu_now_ms = PlatformTime_NowMs();
-    imu_sample_generation = StateEstimation_GetImuSampleSnapshot(&imu_state);
+    uint32_t imu_now_ms       = PlatformTime_NowMs();
+    imu_sample_generation     = StateEstimation_GetImuSampleSnapshot(&imu_state);
 
     linear_x  = -Ps2ControlService_NormalizeAxis(sample.left_y) * teleoperation_config.linear_max_mps;
     angular_z = -Ps2ControlService_NormalizeAxis(sample.right_x) * teleoperation_config.angular_max_rps;
@@ -449,7 +452,8 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
         slow_mode_latched = 1U;
     }
     else if (Ps2ControlService_MaxStickMagnitude(&sample) == 0.0f
-             && (sample.btn1 & (PS2_DPAD_UP_MASK | PS2_DPAD_RIGHT_MASK | PS2_DPAD_DOWN_MASK | PS2_DPAD_LEFT_MASK)) == 0U)
+             && (sample.btn1 & (PS2_DPAD_UP_MASK | PS2_DPAD_RIGHT_MASK | PS2_DPAD_DOWN_MASK | PS2_DPAD_LEFT_MASK))
+                    == 0U)
     {
         /* Releasing SELECT while steering must not restore normal speed. */
         slow_mode_latched = 0U;
@@ -497,9 +501,12 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     {
         if (heading_control.active == 0U && heading_zero_pending == 0U)
         {
-            uint8_t macro_started =
-                Ps2ControlService_StartMacro(pressed_btn2, &imu_state, imu_sample_generation,
-                                              imu_now_ms, now_ms, input_generation);
+            uint8_t macro_started = Ps2ControlService_StartMacro(pressed_btn2,
+                                                                 &imu_state,
+                                                                 imu_sample_generation,
+                                                                 imu_now_ms,
+                                                                 now_ms,
+                                                                 input_generation);
             if (macro_started == 0U && macro_pressed != 0U
                 && Ps2ControlService_ImuGateFlags(&imu_state, imu_now_ms) != 0U)
             {
@@ -519,13 +526,13 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
             }
             else if (imu_sample_generation != heading_imu_sample_generation)
             {
-                uint32_t sample_control_ms = now_ms - (uint32_t)(imu_now_ms - imu_state.last_update_ms);
+                uint32_t sample_control_ms    = now_ms - (uint32_t)(imu_now_ms - imu_state.last_update_ms);
                 heading_imu_sample_generation = imu_sample_generation;
                 (void)RelativeHeadingController_Update(&heading_control,
-                                                        imu_state.yaw_deg,
-                                                        imu_state.body_gyro_dps[2],
-                                                        sample_control_ms,
-                                                        &heading_angular_command);
+                                                       imu_state.yaw_deg,
+                                                       imu_state.body_gyro_dps[2],
+                                                       sample_control_ms,
+                                                       &heading_angular_command);
             }
             if (heading_control.active != 0U)
             {
@@ -552,7 +559,7 @@ void Teleoperation_Update(uint8_t line_tracking_enabled, teleoperation_action_t 
     }
     else if (manual_active != 0U && slow_mode_latched != 0U)
     {
-        linear_x  *= teleoperation_config.slow_speed_scale;
+        linear_x *= teleoperation_config.slow_speed_scale;
         angular_z *= teleoperation_config.slow_speed_scale;
     }
 

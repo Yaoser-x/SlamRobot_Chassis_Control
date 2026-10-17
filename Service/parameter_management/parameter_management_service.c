@@ -570,10 +570,10 @@ uint8_t ParameterManagement_GetInt(const param_model_t *params, const char *name
     switch (binding.kind)
     {
         case PARAM_INT_KIND_U8:
-            *value = (int32_t)*(uint8_t *)binding.field;
+            *value = (int32_t) * (uint8_t *)binding.field;
             return 1U;
         case PARAM_INT_KIND_U16:
-            *value = (int32_t)*(uint16_t *)binding.field;
+            *value = (int32_t) * (uint16_t *)binding.field;
             return 1U;
         default:
             return 0U;

@@ -26,11 +26,11 @@ static uint32_t                        debug_restart_count;
 static uint32_t                        esp_restart_count;
 static uint32_t                        fake_now_ms;
 static uint8_t                         debug_suspended;
-static jmp_buf                        task_exit;
-static unsigned                       task_cycles;
-static unsigned                       normal_updates;
-static unsigned                       operation_polls;
-static uint8_t                        boot_ready;
+static jmp_buf                         task_exit;
+static unsigned                        task_cycles;
+static unsigned                        normal_updates;
+static unsigned                        operation_polls;
+static uint8_t                         boot_ready;
 
 uint32_t PlatformTime_TaskNowMs(void)
 {
@@ -71,7 +71,7 @@ uint8_t WirelessCommunication_TakeOperation(uint32_t now, communication_operatio
     return 0U;
 }
 communication_operation_stage_t RemoteOperationOrchestrator_Dispatch(const communication_operation_request_t *request,
-                                                                   uint32_t *detail)
+                                                                     uint32_t                                *detail)
 {
     (void)request;
     (void)detail;
@@ -79,7 +79,9 @@ communication_operation_stage_t RemoteOperationOrchestrator_Dispatch(const commu
     return (communication_operation_stage_t)0U;
 }
 void WirelessCommunication_CompleteOperation(const communication_operation_request_t *request,
-                                             communication_operation_stage_t stage, uint32_t detail, uint32_t now)
+                                             communication_operation_stage_t          stage,
+                                             uint32_t                                 detail,
+                                             uint32_t                                 now)
 {
     (void)request;
     (void)stage;
@@ -213,7 +215,7 @@ static void TestTaskRespectsBridgeOwnershipAndResumes(void)
     assert(Esp12fFlashBridge_IsActive() != 0U);
     assert(transport_state.active != 0U);
     transport_idle_ms = 30000U;
-    boot_ready = 0U;
+    boot_ready        = 0U;
     RunThreeTaskCycles();
     assert(Esp12fFlashBridge_IsActive() != 0U && transport_state.active == 0U);
     assert(normal_updates == 0U && operation_polls == 0U && maintenance_end_count == 0U);

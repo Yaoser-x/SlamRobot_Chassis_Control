@@ -21,11 +21,11 @@
 static USART_TypeDef      usart3_instance  = {0};
 static DMA_Stream_TypeDef usart3_rx_stream = {0};
 static DMA_HandleTypeDef  hdma_usart3_rx   = {.Instance = &usart3_rx_stream};
-UART_HandleTypeDef huart3 = {
-    .Instance = &usart3_instance,
-    .Init     = {.BaudRate = 115200U},
-    .hdmarx   = &hdma_usart3_rx,
-    .gState   = HAL_UART_STATE_READY,
+UART_HandleTypeDef        huart3           = {
+                     .Instance = &usart3_instance,
+                     .Init     = {.BaudRate = 115200U},
+                     .hdmarx   = &hdma_usart3_rx,
+                     .gState   = HAL_UART_STATE_READY,
 };
 
 static uint8_t                      *rx_buffer;
@@ -388,11 +388,11 @@ static void reset_host_uart_state(void)
     usart3_instance                 = (USART_TypeDef){0};
     usart3_rx_stream                = (DMA_Stream_TypeDef){0};
     hdma_usart3_rx                  = (DMA_HandleTypeDef){.Instance = &usart3_rx_stream};
-    huart3 = (UART_HandleTypeDef){
-        .Instance = &usart3_instance,
-        .Init     = {.BaudRate = 115200U},
-        .hdmarx   = &hdma_usart3_rx,
-        .gState   = HAL_UART_STATE_READY,
+    huart3                          = (UART_HandleTypeDef){
+                                 .Instance = &usart3_instance,
+                                 .Init     = {.BaudRate = 115200U},
+                                 .hdmarx   = &hdma_usart3_rx,
+                                 .gState   = HAL_UART_STATE_READY,
     };
     for (uint16_t i = 0U; i < (uint16_t)sizeof(tx_last_frame); ++i)
     {
@@ -589,7 +589,7 @@ static void test_dma_poll_budget_tracks_baud_and_tick_wrap(void)
 
     reset_host_uart_state();
     huart3.Init.BaudRate = 230400U;
-    fake_tick = 1000U;
+    fake_tick            = 1000U;
     HostCommunication_Init();
     HostCommunication_GetState(&before);
     feed_dma_bytes(frame, build_disabled_velocity_frame(29U, 1U, frame));

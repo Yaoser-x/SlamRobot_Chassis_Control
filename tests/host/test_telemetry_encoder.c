@@ -120,19 +120,19 @@ static int16_t ReadStatusSpeed(const uint8_t *frame, uint8_t motor)
 static void TestStatusUsesEncoderObservationDuringEmergencyStop(void)
 {
     communication_publish_model_t snapshot;
-    uint8_t frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    uint8_t                       frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
 
     SeedSnapshot(&snapshot);
-    snapshot.chassis.motor_enabled_mask = 0x06U;
+    snapshot.chassis.motor_enabled_mask  = 0x06U;
     snapshot.chassis.motor_actual_mps[1] = 0.052f;
     snapshot.chassis.motor_actual_mps[2] = 0.050f;
-    snapshot.encoder.speed_mps[1] = 0.0f;
-    snapshot.encoder.speed_mps[2] = 0.0f;
-    snapshot.encoder.speed_valid[1] = 1U;
-    snapshot.encoder.speed_valid[2] = 1U;
+    snapshot.encoder.speed_mps[1]        = 0.0f;
+    snapshot.encoder.speed_mps[2]        = 0.0f;
+    snapshot.encoder.speed_valid[1]      = 1U;
+    snapshot.encoder.speed_valid[2]      = 1U;
     for (uint8_t motor = 0U; motor < ROBOT_LINK_PROTOCOL_MOTOR_COUNT; ++motor)
     {
-        snapshot.chassis.motor_target_mps[motor] = 0.0f;
+        snapshot.chassis.motor_target_mps[motor]      = 0.0f;
         snapshot.chassis.motor_output_permille[motor] = 0;
     }
     for (uint8_t link = 0U; link < 2U; ++link)
@@ -155,8 +155,8 @@ static void TestStatusUsesEncoderObservationDuringEmergencyStop(void)
         assert(frame[4U + 62U] == 0x04U);
         assert((frame[4U + 1U] & UPPER_STATUS_FLAG_SPEED_VALID_ALL) == 0U);
         snapshot.encoder.speed_valid[1] = 1U;
-        snapshot.encoder.speed_mps[1] = 0.0f;
-        snapshot.encoder.speed_mps[2] = 0.0f;
+        snapshot.encoder.speed_mps[1]   = 0.0f;
+        snapshot.encoder.speed_mps[2]   = 0.0f;
     }
 }
 

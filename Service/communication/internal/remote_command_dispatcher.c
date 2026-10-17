@@ -86,9 +86,10 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
             applied = (status.motion_allowed != 0U && (status.permitted_source_mask & COMMAND_SOURCE_BIT(source)) != 0U
                        && (status.rearm_required_mask & COMMAND_SOURCE_BIT(source)) == 0U
                        && CommunicationSessionTracker_SetDisableQualification(link,
-                                                                                velocity.sequence,
-                                                                                status.motion_revoke_generation,
-                                                                                status.mode_generation) != 0U)
+                                                                              velocity.sequence,
+                                                                              status.motion_revoke_generation,
+                                                                              status.mode_generation)
+                              != 0U)
                           ? 1U
                           : 0U;
         }
@@ -127,9 +128,10 @@ static void RemoteCommandDispatcher_HandleVelocity(communication_link_t    link,
             applied = (status.motion_allowed != 0U && (status.permitted_source_mask & COMMAND_SOURCE_BIT(source)) != 0U
                        && (status.rearm_required_mask & COMMAND_SOURCE_BIT(source)) == 0U
                        && CommunicationSessionTracker_IsDisableQualified(link,
-                                                                           velocity.sequence,
-                                                                           status.motion_revoke_generation,
-                                                                           status.mode_generation) != 0U)
+                                                                         velocity.sequence,
+                                                                         status.motion_revoke_generation,
+                                                                         status.mode_generation)
+                              != 0U)
                           ? 1U
                           : 0U;
         }

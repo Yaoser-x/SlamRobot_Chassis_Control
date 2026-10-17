@@ -23,10 +23,10 @@ typedef enum
 } esp12f_bridge_phase_t;
 
 static volatile esp12f_bridge_phase_t bridge_phase;
-static uint8_t  bridge_download_mode;
-static uint8_t  bridge_maintenance_lock_held;
-static uint32_t bridge_auto_exit_count;
-static uint32_t bridge_last_auto_exit_idle_ms;
+static uint8_t                        bridge_download_mode;
+static uint8_t                        bridge_maintenance_lock_held;
+static uint32_t                       bridge_auto_exit_count;
+static uint32_t                       bridge_last_auto_exit_idle_ms;
 
 static void Esp12fFlashBridge_ReleaseMaintenance(void)
 {

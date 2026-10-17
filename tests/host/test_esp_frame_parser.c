@@ -51,21 +51,21 @@ static void check_stm32_frame(esp_frame_parser_t *parser, const uint8_t *frame, 
 
 static void test_real_stm32_telemetry(void)
 {
-    esp_frame_parser_t parser;
-    communication_publish_model_t snapshot = {0};
+    esp_frame_parser_t                parser;
+    communication_publish_model_t     snapshot = {0};
     communication_firmware_identity_t identity = {0};
-    uint8_t frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
-    uint8_t payload[ROBOT_LINK_PROTOCOL_MAX_PAYLOAD] = {0};
-    uint16_t length;
+    uint8_t                           frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    uint8_t                           payload[ROBOT_LINK_PROTOCOL_MAX_PAYLOAD] = {0};
+    uint16_t                          length;
 
     EspFrameParser_Init(&parser);
     length = TelemetryEncoder_BuildHello(&identity, 0x0D663E2AUL, frame, sizeof(frame));
     check_stm32_frame(&parser, frame, length, "ESP accepts the actual STM32 HELLO header and CRC");
 
-    snapshot.control.emergency_stop = 1U;
-    snapshot.safety.battery_voltage = 12.1f;
+    snapshot.control.emergency_stop     = 1U;
+    snapshot.safety.battery_voltage     = 12.1f;
     snapshot.chassis.motor_enabled_mask = 6U;
-    snapshot.generation = 123U;
+    snapshot.generation                 = 123U;
     length = TelemetryEncoder_BuildStatus(&snapshot, COMMUNICATION_LINK_ESP12F, frame, sizeof(frame));
     check(length == ROBOT_LINK_PROTOCOL_STATUS_PAYLOAD_LEN + 5U, "real STATUS contains the full 92-byte payload");
     check_stm32_frame(&parser, frame, length, "ESP accepts the full STM32 STATUS beyond 64 bytes");

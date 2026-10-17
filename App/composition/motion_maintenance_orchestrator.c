@@ -83,7 +83,7 @@ app_motion_maintenance_result_t AppMotionMaintenance_Begin(void)
 
 app_motion_maintenance_result_t AppMotionMaintenance_TryBeginStationary(void)
 {
-    control_mode_snapshot_t mode;
+    control_mode_snapshot_t   mode;
     platform_critical_state_t critical = PlatformCritical_Enter();
 
     (void)ControlModeCoordinator_GetSnapshot(&mode);

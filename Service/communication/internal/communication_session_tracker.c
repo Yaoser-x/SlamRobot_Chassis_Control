@@ -125,16 +125,16 @@ communication_session_decision_t CommunicationSessionTracker_Evaluate(communicat
                 slot->retired_write_index =
                     (uint8_t)((slot->retired_write_index + 1U) % COMMUNICATION_RETIRED_SESSION_COUNT);
             }
-            slot->active                = 1U;
-            slot->active_session        = target->session_id;
-            slot->received_sequence     = target->sequence;
-            slot->last_target           = *target;
-            slot->target_valid          = 1U;
-            slot->refresh_token_valid   = 0U;
+            slot->active                      = 1U;
+            slot->active_session              = target->session_id;
+            slot->received_sequence           = target->sequence;
+            slot->last_target                 = *target;
+            slot->target_valid                = 1U;
+            slot->refresh_token_valid         = 0U;
             slot->disable_qualification_valid = 0U;
-            slot->last_valid_receive_ms = now_ms;
-            slot->reject_reason         = COMMUNICATION_REJECT_NONE;
-            slot->ack_flags             = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
+            slot->last_valid_receive_ms       = now_ms;
+            slot->reject_reason               = COMMUNICATION_REJECT_NONE;
+            slot->ack_flags                   = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
             slot->generation++;
             decision = COMMUNICATION_SESSION_DISABLE;
         }
@@ -162,14 +162,14 @@ communication_session_decision_t CommunicationSessionTracker_Evaluate(communicat
         }
         else if (delta < 0x80000000UL)
         {
-            slot->received_sequence     = target->sequence;
-            slot->last_target           = *target;
-            slot->target_valid          = 1U;
-            slot->refresh_token_valid   = 0U;
+            slot->received_sequence           = target->sequence;
+            slot->last_target                 = *target;
+            slot->target_valid                = 1U;
+            slot->refresh_token_valid         = 0U;
             slot->disable_qualification_valid = 0U;
-            slot->last_valid_receive_ms = now_ms;
-            slot->reject_reason         = COMMUNICATION_REJECT_NONE;
-            slot->ack_flags             = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
+            slot->last_valid_receive_ms       = now_ms;
+            slot->reject_reason               = COMMUNICATION_REJECT_NONE;
+            slot->ack_flags                   = COMMUNICATION_ACK_SESSION_VALID | COMMUNICATION_ACK_RECEIVED;
             slot->generation++;
             decision = (target->enable != 0U) ? COMMUNICATION_SESSION_NEW_COMMAND : COMMUNICATION_SESSION_DISABLE;
         }
@@ -279,9 +279,9 @@ uint8_t CommunicationSessionTracker_GetRefreshToken(communication_link_t     lin
 }
 
 uint8_t CommunicationSessionTracker_SetDisableQualification(communication_link_t link,
-                                                             uint32_t             sequence,
-                                                             uint32_t             revoke_generation,
-                                                             uint32_t             mode_generation)
+                                                            uint32_t             sequence,
+                                                            uint32_t             revoke_generation,
+                                                            uint32_t             mode_generation)
 {
     communication_session_slot_t *slot;
     platform_critical_state_t     critical;
@@ -305,9 +305,9 @@ uint8_t CommunicationSessionTracker_SetDisableQualification(communication_link_t
 }
 
 uint8_t CommunicationSessionTracker_IsDisableQualified(communication_link_t link,
-                                                        uint32_t             sequence,
-                                                        uint32_t             revoke_generation,
-                                                        uint32_t             mode_generation)
+                                                       uint32_t             sequence,
+                                                       uint32_t             revoke_generation,
+                                                       uint32_t             mode_generation)
 {
     const communication_session_slot_t *slot;
     platform_critical_state_t           critical;
@@ -317,8 +317,8 @@ uint8_t CommunicationSessionTracker_IsDisableQualified(communication_link_t link
     {
         return 0U;
     }
-    critical = PlatformCritical_Enter();
-    slot     = &session_slots[(uint8_t)link];
+    critical  = PlatformCritical_Enter();
+    slot      = &session_slots[(uint8_t)link];
     qualified = (slot->active != 0U && slot->received_sequence == sequence && slot->last_target.enable == 0U
                  && slot->disable_qualification_valid != 0U && slot->disable_revoke_generation == revoke_generation
                  && slot->disable_mode_generation == mode_generation)

@@ -32,19 +32,59 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *uart);
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart);
 void USART1_IRQHandler(void);
 /* Startup/restoration still hold the maintenance lease even with no transport. */
-uint8_t Esp12fFlashBridge_IsActive(void) { return 1U; }
-void Usart1DebugConsole_OnRxCplt(void) { console_rx++; }
-void Usart1DebugConsole_OnUartError(void) { console_error++; }
-void DebugUartTransport_OnTxComplete(void) { console_tx++; }
-void WirelessCommunication_OnRxCplt(void) { wireless_rx++; }
-void WirelessCommunication_OnUartError(void) { wireless_error++; }
-void HostCommunication_OnDmaFull(void) { host_full++; }
-void HostCommunication_OnDmaHalf(void) { host_half++; }
-void HostCommunication_OnTxComplete(void) { host_tx++; }
-void HostCommunication_OnUartError(void) { host_error++; }
-void LineSensorDriver_OnTxCplt(void) { line_tx++; }
-void LineSensorDriver_OnUartError(void) { line_error++; }
-void HAL_UART_IRQHandler(UART_HandleTypeDef *uart) { assert(uart == &huart1); irq_count++; }
+uint8_t Esp12fFlashBridge_IsActive(void)
+{
+    return 1U;
+}
+void Usart1DebugConsole_OnRxCplt(void)
+{
+    console_rx++;
+}
+void Usart1DebugConsole_OnUartError(void)
+{
+    console_error++;
+}
+void DebugUartTransport_OnTxComplete(void)
+{
+    console_tx++;
+}
+void WirelessCommunication_OnRxCplt(void)
+{
+    wireless_rx++;
+}
+void WirelessCommunication_OnUartError(void)
+{
+    wireless_error++;
+}
+void HostCommunication_OnDmaFull(void)
+{
+    host_full++;
+}
+void HostCommunication_OnDmaHalf(void)
+{
+    host_half++;
+}
+void HostCommunication_OnTxComplete(void)
+{
+    host_tx++;
+}
+void HostCommunication_OnUartError(void)
+{
+    host_error++;
+}
+void LineSensorDriver_OnTxCplt(void)
+{
+    line_tx++;
+}
+void LineSensorDriver_OnUartError(void)
+{
+    line_error++;
+}
+void HAL_UART_IRQHandler(UART_HandleTypeDef *uart)
+{
+    assert(uart == &huart1);
+    irq_count++;
+}
 
 uint32_t HAL_GetTick(void)
 {
@@ -166,7 +206,7 @@ static void TestCallbacksFollowTheActualTransportOwner(void)
     assert(console_rx == 1U && wireless_rx == 1U && console_tx == 1U);
     assert(console_error == 1U && wireless_error == 1U);
     assert(UartBridgeTransport_Start(100U) != 0U);
-    *pc_rx_byte = 0x44U;
+    *pc_rx_byte  = 0x44U;
     *esp_rx_byte = 0x55U;
     HAL_UART_RxCpltCallback(&huart1);
     HAL_UART_RxCpltCallback(&huart2);

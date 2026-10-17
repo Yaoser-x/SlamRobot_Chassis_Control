@@ -88,7 +88,7 @@ uint8_t ControlModeCoordinator_ApplyCapabilityMask(uint8_t capability_mask)
     if (capability_source_mask != capability_mask)
     {
         uint8_t previous_mask = (uint8_t)(ControlModeCoordinator_ModeMask(mode_snapshot.mode) & capability_source_mask);
-        effective_mask = (uint8_t)(ControlModeCoordinator_ModeMask(mode_snapshot.mode) & capability_mask);
+        effective_mask        = (uint8_t)(ControlModeCoordinator_ModeMask(mode_snapshot.mode) & capability_mask);
         if (effective_mask != previous_mask)
         {
             result = CommandManagement_ApplySourcePolicy(effective_mask,

@@ -157,11 +157,11 @@ static void test_validation_accepts_legal_config_and_rejects_illegal(void)
         const float invalid_scales[] = {NAN, INFINITY, -0.1f, 0.0f, 1.1f};
         for (uint8_t index = 0U; index < sizeof(invalid_scales) / sizeof(invalid_scales[0]); ++index)
         {
-            copy = *RobotConfig_GetDefault();
+            copy                                = *RobotConfig_GetDefault();
             copy.teleoperation.slow_speed_scale = invalid_scales[index];
             require_int(RobotConfig_Validate(&copy) == 0U, "invalid enabled slow gear is rejected by App");
         }
-        copy = *RobotConfig_GetDefault();
+        copy                                = *RobotConfig_GetDefault();
         copy.teleoperation.slow_button_mask = 0U;
         copy.teleoperation.slow_speed_scale = 0.0f;
         require_int(RobotConfig_Validate(&copy) == 1U, "slow gear can be explicitly disabled");

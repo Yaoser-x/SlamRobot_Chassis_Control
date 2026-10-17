@@ -6,9 +6,9 @@
 /** @brief Product configuration consumed by Motion Control. */
 typedef struct
 {
-    float    max_linear_mps;
-    float    max_angular_rps;
-    float    open_loop_full_mps;
+    float max_linear_mps;
+    float max_angular_rps;
+    float open_loop_full_mps;
     /** PID feedforward model scale; zero retains the legacy open-loop scale. */
     float    pid_feedforward_full_mps;
     float    angular_epsilon_rps;
