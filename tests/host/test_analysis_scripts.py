@@ -458,7 +458,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", hil)
         self.assertNotRegex(hil, r"(?m)^  (push|pull_request|schedule):")
         build = (ROOT / ".github/workflows/firmware-build.yml").read_text(encoding="utf-8")
-        self.assertIn("clang-format-18 --dry-run --Werror", build)
+        self.assertIn("install clang-format==18.1.8", build)
+        self.assertIn('clang-format/bin/clang-format" --dry-run --Werror', build)
         self.assertIn('tools/build_firmware.py --output "${{ runner.temp }}/esp8266"', build)
         self.assertIn("${{ runner.temp }}/esp8266/manifest.json", build)
 

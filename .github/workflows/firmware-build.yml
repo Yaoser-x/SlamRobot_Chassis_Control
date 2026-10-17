@@ -151,14 +151,14 @@ jobs:
 
       - name: Install clang-format
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-format-18
+          python3 -m venv "${{ runner.temp }}/clang-format"
+          "${{ runner.temp }}/clang-format/bin/pip" install clang-format==18.1.8
 
       - name: clang-format dry run
         run: |
           files=$(git ls-files 'Algorithm/*.c' 'Algorithm/*.h' 'App/*.c' 'App/*.h' 'BSP/*.c' 'BSP/*.h' 'Domain/*.c' 'Domain/*.h' 'Platform/*.c' 'Platform/*.h' 'Service/*.c' 'Service/*.h' 'tests/host/*.c' 'tests/host/*.h')
           if [ -n "$files" ]; then
-            echo "$files" | xargs clang-format-18 --dry-run --Werror
+            echo "$files" | xargs "${{ runner.temp }}/clang-format/bin/clang-format" --dry-run --Werror
           else
             echo "No five-layer/tests C/H files."
           fi
