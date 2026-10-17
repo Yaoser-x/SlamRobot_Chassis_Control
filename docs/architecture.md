@@ -79,3 +79,18 @@ CI 与本地发布验收统一运行 Final 门禁，要求 `Domain/`、混杂配
 `.ioc`、引脚、外设、NVIC、十个任务的数量/周期/优先级均不在 RC2 文档同步范围。CubeMX 重新生成时只接受 USER CODE 区业务入口差异；硬件或调度差异必须回退并单独评审。
 
 本地软件验收不替代 RC2 后续 HIL、标定和实车验收。
+
+## 上下位机边界
+
+上位机只仲裁 Host 子来源、完成状态估计及导航；下位机独占物理来源仲裁、安全许可和
+闭环执行。PS2、ESP 不依赖上位机存活，但仍经过 CommandManagement、安全许可和 MotionControl。
+Communication 独占 wire/session/ACK；App 通过固定操作 mailbox 编排维护与业务操作，
+不能由传输层直接修改安全或巡线状态。硬件 Break／复位只能独立撤权，不生成运动意图。
+
+ParameterManagement 独占下位机参数模型及 Flash 写入；几何须先测量、经公开参数入口
+应用并读回 CRC，再同步上位机标定副本。上位机修改预期 CRC 不能证明下位机参数已生效。
+源码 HEAD、板上 STM32／ESP 身份和已验证上位机提交分别记录，不为对齐文档重新烧录。
+
+跨端职责矩阵与后续验收以
+[上位机运行职责契约](https://github.com/Yaoser-x/Ros2_Slam/blob/integration/suspended-20261015/docs/contracts/runtime-ownership.md)
+和其验收路线为准；下位机内部分层继续以本文及静态门禁为准。

@@ -233,10 +233,10 @@ git restore --worktree -- Drivers   # 清除第三方库行尾噪声
 | 巡线传感器 | ✅ 完成 | DMA 帧解析 + P 控制 |
 | 调试台 | ✅ 完成 | 命令台/CSV 日志字段过滤 |
 | POST/参数持久化 | ✅ 基础完成 | 上电 POST、Parameter Management、Flash 镜像、`get/set/set save/set reset` |
-| ESP12F 网页固件 | 🟡 代码完成 / HIL 待验 | 首配 EEPROM+CRC、owner/heartbeat 租约、只读遥测广播、远程 ESTOP set-only；待 Arduino IDE 编译与多客户板测 |
+| ESP12F 网页固件 | 🟡 编译／静止链路通过，操控 HIL 待验 | 已完成实际编译、应用读回及保留区核对；网页身份、HELLO 和静止遥测已观察，多客户及故障控制试验未完成 |
 | OLED SSD1306 | ✅ 完成 | I2C 驱动 + 三阶段 UI + 真实链路自检/模块在线状态 |
 | HIL 冒烟 | ✅ 基础完成 | USART1 只读 smoke 脚本，不自动驱动电机 |
-| 上位机 (RPI) 对接 | 🟡 fixture 通过 / HIL 待验 | ARM@c472bc6 的 Upper v3 联合 fixture 40/40；真实 UART/车辆未验 |
+| 上位机 (RPI) 对接 | 🟡 真实 UART／ROS 静止链路通过 | 2026-10-17 上位机 `8fea7d4` 与板上 STM32 `cf6cbde` 静止观察 30.55s；完整运动、正式 odom、建图／导航及车辆验收待完成 |
 
 ---
 
