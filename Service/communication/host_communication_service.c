@@ -408,10 +408,14 @@ static void HostCommunication_SendHello(const communication_publish_model_t *sna
                                             snapshot->parameter_identity_crc32,
                                             upper_hello_tx_frame,
                                             sizeof(upper_hello_tx_frame));
-    if (frame_len > 0U
-        && HostCommunication_EnqueueTx(upper_hello_tx_frame, frame_len, UPPER_TX_PRIORITY_HELLO, 0UL) != 0U)
+    if (frame_len > 0U)
     {
+        /* A failed start or UART error may re-arm HELLO during enqueue. */
         upper_hello_pending = 0U;
+        if (HostCommunication_EnqueueTx(upper_hello_tx_frame, frame_len, UPPER_TX_PRIORITY_HELLO, 0UL) == 0U)
+        {
+            upper_hello_pending = 1U;
+        }
     }
 }
 

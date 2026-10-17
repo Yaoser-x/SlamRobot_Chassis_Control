@@ -34,6 +34,7 @@ static uint32_t                      rx_start_count;
 static uint32_t                      dma_stop_count;
 static uint32_t                      tx_dma_count;
 static uint32_t                      tx_it_count;
+static uint8_t                       fail_next_hello_tx;
 static uint8_t                       tx_last_frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
 static uint16_t                      tx_last_size;
 static UART_HandleTypeDef           *tx_last_uart;
@@ -123,6 +124,11 @@ HAL_StatusTypeDef HAL_UART_Transmit_IT(UART_HandleTypeDef *huart, const uint8_t 
     if (huart->gState != HAL_UART_STATE_READY)
     {
         return HAL_BUSY;
+    }
+    if (fail_next_hello_tx != 0U && Size > 3U && pData[3] == UPPER_CMD_HELLO)
+    {
+        fail_next_hello_tx = 0U;
+        return HAL_ERROR;
     }
     tx_it_count++;
     tx_last_uart = huart;
@@ -373,6 +379,7 @@ static void reset_host_uart_state(void)
     dma_stop_count                  = 0U;
     tx_dma_count                    = 0U;
     tx_it_count                     = 0U;
+    fail_next_hello_tx              = 0U;
     tx_last_size                    = 0U;
     tx_last_uart                    = 0;
     fake_tick                       = 0U;
@@ -792,6 +799,33 @@ static void test_uart_error_releases_active_tx_and_continues_queue(void)
     require_int(tx_last_frame[3] == UPPER_CMD_DIAGNOSTIC, "UART error recovery advances to diagnostic frame");
 }
 
+static void test_get_info_retries_hello_after_immediate_transport_error(void)
+{
+    uint8_t                    frame[ROBOT_LINK_PROTOCOL_MAX_FRAME];
+    uint8_t                    payload[] = {ROBOT_LINK_PROTOCOL_VERSION};
+    host_communication_state_t state;
+
+    reset_host_uart_state();
+    HostCommunication_Init();
+    uint16_t length = UpperProtocol_BuildFrame(UPPER_CMD_GET_INFO, payload, sizeof(payload), frame, sizeof(frame));
+    feed_dma_bytes(frame, length);
+    fail_next_hello_tx = 1U;
+    HostCommunication_Update();
+    HostCommunication_GetState(&state);
+    require_int(state.tx_busy_drops == 1U, "failed HELLO start is recorded");
+    require_int(tx_it_count == 0U, "failed HELLO is not a successful transmission");
+
+    fake_tick += 5U;
+    HostCommunication_Update();
+    require_int(tx_it_count == 1U && tx_last_frame[3] == UPPER_CMD_HELLO,
+                "GET_INFO response is retried without another request after transport error");
+    huart3.gState = HAL_UART_STATE_READY;
+    HostCommunication_OnTxComplete();
+    fake_tick += 5U;
+    HostCommunication_Update();
+    require_int(tx_it_count == 1U, "successful HELLO retry is not repeated indefinitely");
+}
+
 static void test_full_queue_drops_imu_for_status_priority(void)
 {
     host_communication_state_t state;
@@ -828,6 +862,7 @@ int main(void)
     test_anomaly_delivery_requires_physical_status_completion();
     test_status_and_imu_share_async_priority_queue();
     test_uart_error_releases_active_tx_and_continues_queue();
+    test_get_info_retries_hello_after_immediate_transport_error();
     test_full_queue_drops_imu_for_status_priority();
     test_dma_callbacks_and_valid_frame_timestamp();
     test_parser_timeout_and_uart_error_restart_dma();
