@@ -447,6 +447,25 @@ class AnalysisTests(unittest.TestCase):
                 errors,
             )
 
+    def test_local_inputs_and_wireless_cannot_write_motor_outputs(self):
+        for path in (
+            "Service/teleoperation/teleoperation_service.c",
+            "Service/communication/wireless_communication_service.c",
+            "App/tasks/task_ps2.c",
+            "App/tasks/task_esp12f.c",
+        ):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.write_fixture(
+                    root, path,
+                    "void bypass(void) { MotorDriver_SetPermille(1, 100); }\n",
+                )
+                errors = ownership.analyze(root)
+                self.assertTrue(
+                    any("owned only by Motion Control" in error for error in errors),
+                    errors,
+                )
+
     def test_straight_hil_excludes_caster_transition_and_emits_ram_only_commands(self):
         telemetry = [
             {
