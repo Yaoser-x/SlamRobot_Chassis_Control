@@ -447,6 +447,17 @@ class AnalysisTests(unittest.TestCase):
                 errors,
             )
 
+    def test_integration_ci_does_not_automatically_run_hardware_hil(self):
+        for name in ("firmware-build.yml", "codeql.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertRegex(
+                workflow,
+                r'push:\s*\n\s*branches:\s*\n\s*- main\s*\n\s*- "integration/\*\*"',
+            )
+        hil = (ROOT / ".github/workflows/hil-smoke.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", hil)
+        self.assertNotRegex(hil, r"(?m)^  (push|pull_request|schedule):")
+
     def test_local_inputs_and_wireless_cannot_write_motor_outputs(self):
         for path in (
             "Service/teleoperation/teleoperation_service.c",
